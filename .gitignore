@@ -1,0 +1,46 @@
+# Local Apps Script targets and clasp authentication. Keep the safe example public.
+.clasp.json
+.clasp.*.json
+!.clasp.example.json
+.clasprc*.json
+
+# Credentials and local environment settings.
+.env
+.env.*
+!.env.example
+credentials*.json
+client_secret*.json
+service-account*.json
+service_account*.json
+token*.json
+*.credentials.json
+*.pem
+*.key
+secrets/
+.secrets/
+
+# Private financial data, workbook exports, and local backups.
+private/
+private-data/
+exports/
+backups/
+*.xlsx
+*.xls
+*.xlsm
+*.ods
+*.csv
+*.tsv
+*.bak
+*.backup
+
+# Dependencies, generated output, and machine-specific files.
+node_modules/
+coverage/
+.cache/
+tmp/
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+*.swo

@@ -1,0 +1,4399 @@
+<!-- Kashlo browser interface: Apps Script serves this file, while Code.gs reads and writes the workbook. -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <!-- Use UTF-8 for rupee symbols and a responsive viewport for small-screen layouts. -->
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Kashlo — Your money. Your flow.</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --ink: #f2f3ee;
+        --muted: #9ca5a9;
+        --green: #c1f77b;
+        --mint: #263223;
+        --canvas: #101213;
+        --line: #2b3031;
+        --paper: #191d1e;
+        --gold: #dfc48e;
+        --red: #f18380;
+        --radius: 22px;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        color: var(--ink);
+        background: var(--canvas);
+        font:
+          14px -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      button,
+      input,
+      select,
+      textarea {
+        font: inherit;
+      }
+      button,
+      a,
+      input,
+      select,
+      textarea {
+        outline-offset: 5px;
+      }
+      :focus-visible {
+        outline: 2px solid var(--green);
+      }
+      button,
+      a {
+        touch-action: manipulation;
+      }
+      button {
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.45;
+        cursor: wait;
+      }
+      a {
+        color: var(--green);
+      }
+      button {
+        transition:
+          background 0.18s,
+          border-color 0.18s,
+          transform 0.18s;
+      }
+      button:not(:disabled):active {
+        transform: translateY(1px);
+      }
+      .app {
+        display: grid;
+        grid-template-columns: 224px minmax(0, 1fr);
+        min-height: 100vh;
+      }
+      .sidebar {
+        position: sticky;
+        top: 0;
+        height: 100vh;
+        padding: 34px 18px 24px;
+        background: #151819;
+        border-right: 1px solid var(--line);
+        display: flex;
+        flex-direction: column;
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 11px;
+        padding: 0 10px;
+        font-size: 31px;
+        font-weight: 760;
+        letter-spacing: -1.7px;
+      }
+      .brandmark {
+        display: grid;
+        place-items: center;
+        width: 36px;
+        height: 40px;
+        color: var(--green);
+      }
+      .brandmark svg {
+        width: 34px;
+        height: 34px;
+      }
+      .brand-dot {
+        color: var(--green);
+      }
+      .brand-tagline {
+        margin: 10px 0 45px;
+        padding-left: 12px;
+        font-size: 11px;
+        color: var(--muted);
+        letter-spacing: 0.2px;
+      }
+      .navlabel {
+        padding: 0 14px 14px;
+        color: #788185;
+        font-size: 9px;
+        letter-spacing: 2px;
+        font-weight: 650;
+      }
+      .nav {
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+      }
+      .nav button {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 13px;
+        border-radius: 12px;
+        border: 1px solid transparent;
+        background: transparent;
+        color: #a6afb0;
+        text-align: left;
+        font-size: 12px;
+        font-weight: 550;
+      }
+      .nav button:hover {
+        background: #202627;
+        color: var(--ink);
+      }
+      .nav button.active {
+        background: #273024;
+        color: var(--green);
+        border-color: #3a4831;
+      }
+      .nav svg {
+        width: 19px;
+        height: 19px;
+        stroke: currentColor;
+        fill: none;
+        stroke-width: 1.6;
+      }
+      .nav .badge {
+        margin-left: auto;
+        padding: 2px 6px;
+        background: #323a31;
+        border-radius: 5px;
+        font-size: 10px;
+      }
+      .source {
+        margin-top: auto;
+        padding: 17px 13px;
+        border: 1px solid var(--line);
+        background: #191e1d;
+        border-radius: 14px;
+        font-size: 10px;
+      }
+      .source strong {
+        font-weight: 550;
+      }
+      .source .dot {
+        display: inline-block;
+        width: 6px;
+        height: 6px;
+        background: var(--gold);
+        border-radius: 50%;
+        margin-right: 5px;
+      }
+      .source .dot.live {
+        background: var(--green);
+        box-shadow: 0 0 10px #c1f77b33;
+      }
+      .source p {
+        color: var(--muted);
+        line-height: 1.7;
+        font-size: 10px;
+        margin: 10px 0;
+      }
+      .source a {
+        text-decoration: none;
+        font-size: 10px;
+        font-weight: 600;
+      }
+      .profile {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 22px;
+        padding-left: 10px;
+        font-size: 12px;
+      }
+      .avatar {
+        width: 33px;
+        height: 33px;
+        border-radius: 50%;
+        background: #343b31;
+        color: #dbedc8;
+        display: grid;
+        place-items: center;
+        font-size: 10px;
+      }
+      .profile {
+        border: 0;
+        background: transparent;
+        color: var(--ink);
+        font: inherit;
+        width: 100%;
+        text-align: left;
+        border-radius: 12px;
+      }
+      .profile > span:last-child {
+        min-width: 0;
+        overflow: hidden;
+      }
+      .profile #ownerName {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .profile .avatar {
+        flex-shrink: 0;
+      }
+      .profile small {
+        overflow-wrap: anywhere;
+      }
+      .profile:hover {
+        background: #ffffff08;
+      }
+      .mobile-profile {
+        display: none;
+      }
+      .settings-grid {
+        display: grid;
+        grid-template-columns: 1fr 1.2fr;
+        gap: 20px;
+        align-items: start;
+      }
+      .settings-grid h2 {
+        margin-top: 0;
+      }
+      .settings-grid .field {
+        margin-top: 18px;
+      }
+      .profile small {
+        display: block;
+        font-size: 9px;
+        margin-top: 5px;
+        color: var(--muted);
+      }
+      .main {
+        min-width: 0;
+        width: 100%;
+        max-width: 1650px;
+        margin: 0 auto;
+        padding: 28px 38px 42px;
+      }
+      .topbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 16px;
+        padding-bottom: 27px;
+        margin-bottom: 30px;
+        border-bottom: 1px solid var(--line);
+      }
+      .crumb {
+        font-size: 10px;
+        color: #828b8e;
+        letter-spacing: 0.5px;
+      }
+      .crumb span {
+        margin-left: 9px;
+        color: #c8ceca;
+      }
+      .top-actions {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .iconbtn {
+        border: 1px solid #343b3b;
+        border-radius: 10px;
+        padding: 11px 13px;
+        background: transparent;
+        color: #d1d6d0;
+        font-size: 11px;
+      }
+      .iconbtn:hover {
+        background: #242a2a;
+      }
+      .button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        border: 1px solid transparent;
+        border-radius: 10px;
+        padding: 12px 17px;
+        background: var(--green);
+        color: #18210e;
+        text-decoration: none;
+        font-weight: 700;
+        font-size: 12px;
+      }
+      .button:hover {
+        background: #d1ff98;
+      }
+      .button.light {
+        color: #d2e5b9;
+        background: #293322;
+      }
+      .button.outline {
+        color: #e1e7dc;
+        background: transparent;
+        border-color: #3a4240;
+      }
+      .button.outline:hover {
+        background: #2a3130;
+      }
+      .button.danger {
+        color: #ffb7ae;
+        background: #3d2726;
+        border-color: #56332f;
+      }
+      .button.danger:hover {
+        background: #54302c;
+      }
+      .edit-transaction,
+      .delete-transaction {
+        padding: 7px 10px;
+        font-size: 10px;
+        border-radius: 7px;
+      }
+      .transaction-actions {
+        display: flex;
+        gap: 7px;
+      }
+      .intro {
+        display: flex;
+        justify-content: space-between;
+        align-items: end;
+        gap: 24px;
+        margin-bottom: 27px;
+      }
+      .eyebrow {
+        font-size: 9px;
+        font-weight: 650;
+        letter-spacing: 2.1px;
+        color: var(--green);
+        margin-bottom: 12px;
+      }
+      .intro h1 {
+        font-size: clamp(29px, 3vw, 43px);
+        font-weight: 650;
+        line-height: 1.14;
+        letter-spacing: -1.7px;
+        margin: 0 0 11px;
+      }
+      .intro p {
+        color: var(--muted);
+        margin: 0;
+        line-height: 1.6;
+        font-size: 12px;
+      }
+      .period {
+        background: #1d2221;
+        border: 1px solid #39413b;
+        color: var(--ink);
+        border-radius: 10px;
+        min-width: 150px;
+        padding: 12px 14px;
+        font-size: 12px;
+      }
+      .cards {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 15px;
+        margin-bottom: 23px;
+      }
+      .overview-metrics {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+      .investment-metrics {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .card {
+        background: var(--paper);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        padding: 23px;
+        min-width: 0;
+      }
+      .metric {
+        padding: 20px 23px;
+        position: relative;
+        overflow: hidden;
+      }
+      .metrichead {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 21px;
+        font-size: 11px;
+        color: #b6bfba;
+      }
+      .metrichead .mini {
+        width: 29px;
+        height: 29px;
+        display: grid;
+        place-items: center;
+        border-radius: 9px;
+        background: #2b322d;
+        color: var(--green);
+        font-size: 15px;
+      }
+      .metric strong {
+        display: block;
+        font-size: clamp(20px, 2.1vw, 30px);
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: -1px;
+        overflow-wrap: anywhere;
+      }
+      .metric small {
+        display: block;
+        font-size: 10px;
+        color: var(--muted);
+        margin-top: 13px;
+        line-height: 1.5;
+      }
+      .metric.balance {
+        background: #223320;
+        border-color: #48613a;
+        color: #d3f8aa;
+      }
+      .metric.balance.shortfall {
+        background: #3c2324;
+        border-color: #75413d;
+        color: #ffb1a3;
+      }
+      .dashboard-hero {
+        display: grid;
+        grid-template-columns: 1.55fr 1fr;
+        gap: 19px;
+        margin-bottom: 18px;
+      }
+      .flow-vault {
+        min-height: 268px;
+        position: relative;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        padding: 30px;
+        border: 1px solid #404c37;
+        border-radius: 24px;
+        background: #202b1d;
+      }
+      .flow-vault::before {
+        content: "";
+        position: absolute;
+        width: 300px;
+        height: 300px;
+        right: -30px;
+        top: -50px;
+        background: radial-gradient(circle, #b7f17619, transparent 66%);
+        pointer-events: none;
+      }
+      .flow-copy {
+        position: relative;
+        z-index: 1;
+        max-width: 74%;
+      }
+      .flow-label {
+        color: #bdc7b7;
+        font-size: 11px;
+        margin: 0 0 13px;
+        font-weight: 500;
+      }
+      .flow-amount {
+        display: block;
+        font-size: clamp(29px, 3.5vw, 51px);
+        font-weight: 620;
+        letter-spacing: -2px;
+        line-height: 1.15;
+        color: #d7ffa5;
+        overflow-wrap: anywhere;
+      }
+      .flow-vault p {
+        color: #aebfa5;
+        font-size: 10px;
+        line-height: 1.7;
+        margin: 13px 0 0;
+      }
+      .flow-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 7px 9px;
+        background: #c1f77b12;
+        border: 1px solid #c1f77b33;
+        color: #d1fba5;
+        border-radius: 6px;
+        margin-top: 18px;
+        font-size: 9px;
+        font-weight: 600;
+        letter-spacing: 0.4px;
+      }
+      .flow-vault.shortfall {
+        background: #302020;
+        border-color: #69433b;
+      }
+      .shortfall .flow-amount {
+        color: #ffaba0;
+      }
+      .shortfall .flow-pill {
+        color: #ffb3a7;
+        border-color: #95574b;
+        background: #7f403220;
+      }
+      .shortfall p,
+      .shortfall .flow-label {
+        color: #d1b1ac;
+      }
+      .flow-art {
+        position: absolute;
+        right: 17px;
+        top: 50%;
+        width: 160px;
+        height: 160px;
+        transform: translateY(-50%);
+        opacity: 0.82;
+        pointer-events: none;
+      }
+      .flow-coin {
+        position: absolute;
+        inset: 43px;
+        display: grid;
+        place-items: center;
+        border-radius: 50%;
+        border: 1px solid #d5f9aa88;
+        color: #d9ffab;
+        font-size: 35px;
+        background: radial-gradient(circle at 30% 20%, #708c4b, #293a24 65%);
+        box-shadow:
+          0 0 0 7px #d4fca609,
+          0 15px 25px #0003;
+        transform: rotate(-15deg);
+      }
+      .flow-orbit {
+        position: absolute;
+        inset: 10px;
+        border-radius: 50%;
+        border: 1px solid #c5f29330;
+        transform: rotate(-20deg) scaleY(0.7);
+      }
+      .flow-orbit::after {
+        content: "";
+        position: absolute;
+        top: 12px;
+        right: 13px;
+        width: 8px;
+        height: 8px;
+        background: #d2ff8d;
+        box-shadow: 0 0 16px #bdf77baa;
+        border-radius: 50%;
+      }
+      .flow-orbit.outer {
+        inset: -8px;
+        opacity: 0.5;
+        transform: rotate(35deg) scaleY(0.8);
+      }
+      .positive .flow-orbit {
+        animation: orbit-flow 22s linear infinite;
+      }
+      .positive::before {
+        animation: glow-flow 5s ease-in-out infinite;
+      }
+      .shortfall .flow-art {
+        opacity: 0.23;
+        filter: grayscale(1);
+      }
+      @keyframes orbit-flow {
+        to {
+          transform: rotate(340deg) scaleY(0.7);
+        }
+      }
+      @keyframes glow-flow {
+        50% {
+          opacity: 0.4;
+          transform: scale(1.12);
+        }
+      }
+      .momentum-card {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        gap: 17px;
+        padding: 25px;
+      }
+      .momentum-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 13px;
+      }
+      .momentum-top h2 {
+        font-size: 17px;
+        font-weight: 600;
+        letter-spacing: -0.4px;
+        margin: 6px 0 0;
+      }
+      .momentum-top .eyebrow {
+        font-size: 8px;
+        color: #b3a0df;
+        margin: 0;
+      }
+      .checkpoint-ring {
+        width: 58px;
+        height: 58px;
+        padding: 4px;
+        border-radius: 50%;
+        background: conic-gradient(#b6a0f4 var(--progress), #303036 0);
+        flex-shrink: 0;
+      }
+      .checkpoint-ring span {
+        display: grid;
+        place-items: center;
+        width: 100%;
+        height: 100%;
+        border-radius: 50%;
+        background: var(--paper);
+        color: #d4c8f5;
+        font-size: 13px;
+        font-weight: 600;
+      }
+      .checkpoint-list {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .checkpoint {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 11px;
+        color: #8f9994;
+      }
+      .checkpoint i {
+        width: 21px;
+        height: 21px;
+        border: 1px solid #444a45;
+        display: grid;
+        place-items: center;
+        border-radius: 50%;
+        font-style: normal;
+        font-size: 10px;
+      }
+      .checkpoint.done {
+        color: #e0e8da;
+      }
+      .checkpoint.done i {
+        color: #c8f499;
+        background: #303d26;
+        border-color: #50663a;
+      }
+      .momentum-foot {
+        border-top: 1px solid var(--line);
+        padding-top: 12px;
+        color: #8c9791;
+        font-size: 9px;
+        line-height: 1.5;
+      }
+      .investment-banner {
+        position: relative;
+        overflow: hidden;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 25px;
+        border: 1px solid #4d425f;
+        background: #25212e;
+        border-radius: 22px;
+        padding: 25px 28px;
+        margin-bottom: 18px;
+      }
+      .investment-banner .eyebrow {
+        color: #c8b5f1;
+        margin-bottom: 8px;
+      }
+      .investment-banner h2 {
+        margin: 0 0 8px;
+        font-size: 25px;
+        font-weight: 550;
+        letter-spacing: -0.7px;
+      }
+      .investment-banner p {
+        margin: 0;
+        color: #b1a5bd;
+        font-size: 11px;
+        line-height: 1.7;
+      }
+      .investment-medallion {
+        flex-shrink: 0;
+        display: grid;
+        place-items: center;
+        width: 78px;
+        height: 78px;
+        border: 1px solid #b9a3e15c;
+        border-radius: 50%;
+        box-shadow: inset 0 0 0 7px #bfa9ee0b;
+        color: #d2bef8;
+        font-size: 30px;
+        transform: rotate(-10deg);
+      }
+      .investment-badges {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 15px;
+      }
+      .investment-badges span {
+        background: #b5a0d411;
+        border: 1px solid #8973a844;
+        color: #d7c7ef;
+        font-size: 9px;
+        border-radius: 6px;
+        padding: 6px 8px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 1.6fr 1fr;
+        gap: 19px;
+        margin-bottom: 23px;
+      }
+      .cardhead {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 22px;
+      }
+      .cardhead h2 {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 600;
+        letter-spacing: -0.3px;
+      }
+      .cardhead p {
+        margin: 8px 0 0;
+        color: var(--muted);
+        font-size: 10px;
+        line-height: 1.6;
+      }
+      .legend {
+        display: flex;
+        gap: 13px;
+        flex-wrap: wrap;
+        font-size: 9px;
+        margin-top: 15px;
+        color: #9da89d;
+      }
+      .legend i {
+        display: inline-block;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        margin-right: 5px;
+      }
+      .chartwrap {
+        overflow-x: auto;
+        scrollbar-color: #495044 #1b201d;
+      }
+      .chart {
+        min-width: 540px;
+        width: 100%;
+        height: 225px;
+        display: block;
+      }
+      .category-row {
+        margin-bottom: 19px;
+      }
+      .category-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        font-size: 11px;
+        margin-bottom: 10px;
+      }
+      .category-head strong {
+        font-weight: 550;
+      }
+      .track {
+        height: 5px;
+        background: #303630;
+        border-radius: 4px;
+        overflow: hidden;
+      }
+      .track > div {
+        height: 100%;
+        background: var(--green);
+        border-radius: 4px;
+      }
+      .empty {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        text-align: center;
+        min-height: 155px;
+        gap: 12px;
+        padding: 25px;
+        color: var(--muted);
+      }
+      .emptyicon {
+        font-size: 30px;
+        color: #91a37f;
+      }
+      .empty p {
+        font-size: 11px;
+        line-height: 1.8;
+        max-width: 310px;
+        margin: 0;
+      }
+      .empty strong {
+        font-size: 13px;
+        color: #d7ded2;
+      }
+      .textlink {
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: var(--green);
+        font-size: 11px;
+        font-weight: 600;
+      }
+      .tablewrap {
+        overflow: auto;
+        scrollbar-color: #495044 #1b201d;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        text-align: left;
+        white-space: nowrap;
+        font-size: 11px;
+      }
+      th {
+        padding: 12px 11px;
+        border-bottom: 1px solid #333a34;
+        background: #1d2220;
+        color: #9aa594;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        font-size: 8px;
+        font-weight: 600;
+      }
+      th:first-child {
+        border-radius: 7px 0 0 0;
+      }
+      td {
+        padding: 16px 11px;
+        border-bottom: 1px solid #2a302b;
+        color: #c6d0c1;
+      }
+      tbody tr:last-child td {
+        border-bottom: 0;
+      }
+      tbody tr:hover {
+        background: #ffffff03;
+      }
+      .desc {
+        font-weight: 550;
+        max-width: 230px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        color: var(--ink);
+      }
+      .sub {
+        display: block;
+        margin-top: 5px;
+        font-size: 9px;
+        font-weight: 400;
+        color: #909d89;
+      }
+      .pill {
+        display: inline-flex;
+        padding: 5px 8px;
+        border-radius: 5px;
+        background: #2b3327;
+        color: #b2c6a0;
+        font-size: 9px;
+      }
+      .pill.warn {
+        background: #3a3222;
+        color: #e8c783;
+      }
+      .pill.red {
+        background: #3a2424;
+        color: #f5a296;
+      }
+      .pill.green {
+        background: #293925;
+        color: #c0e99c;
+      }
+      .amount {
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+        color: #e5eddf;
+      }
+      .negative {
+        color: var(--red);
+      }
+      .filters {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-bottom: 20px;
+      }
+      .filters input,
+      .filters select {
+        border: 1px solid #343c35;
+        color: var(--ink);
+        background: #1b201d;
+        border-radius: 10px;
+        padding: 12px 14px;
+      }
+      .filters input {
+        flex: 1;
+        min-width: 180px;
+      }
+      input::placeholder,
+      textarea::placeholder {
+        color: #7d8977;
+      }
+      .dashboard-tabs {
+        overflow-x: auto;
+      }
+      .dashboard-tabs button {
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+      .tabs {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 22px;
+      }
+      .tabs button {
+        background: var(--paper);
+        border: 1px solid var(--line);
+        color: var(--muted);
+        border-radius: 9px;
+        padding: 10px 15px;
+      }
+      .tabs button.active {
+        background: var(--green);
+        color: #1a2210;
+      }
+      .notice {
+        border: 1px solid #384333;
+        background: #20281e;
+        border-radius: 11px;
+        color: #b5c6a6;
+        font-size: 11px;
+        padding: 13px 16px;
+        line-height: 1.8;
+        margin-bottom: 22px;
+      }
+      .notice.warning {
+        background: #2c261c;
+        border-color: #50412b;
+        color: #d2bd95;
+      }
+      .tripgrid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 18px;
+      }
+      .tripcard {
+        cursor: pointer;
+        transition:
+          border-color 0.2s,
+          transform 0.2s;
+      }
+      .tripcard:hover {
+        border-color: #72835e;
+        transform: translateY(-3px);
+      }
+      .triphero {
+        height: 105px;
+        border-radius: 12px;
+        margin-bottom: 22px;
+        position: relative;
+        overflow: hidden;
+        display: flex;
+        align-items: center;
+        padding: 20px;
+        color: #d9edbd;
+        background: linear-gradient(120deg, #2e3928, #202d28);
+      }
+      .triphero::after {
+        content: "";
+        width: 100px;
+        height: 100px;
+        border-radius: 26px;
+        border: 1px solid #bbd78a44;
+        transform: rotate(35deg);
+        position: absolute;
+        right: -7px;
+        top: 26px;
+        box-shadow:
+          0 0 0 16px #bbd78a08,
+          0 0 0 32px #bbd78a06;
+      }
+      .triphero span {
+        position: relative;
+        z-index: 1;
+        font-size: 21px;
+        letter-spacing: -0.8px;
+        font-weight: 550;
+      }
+      .tripcard h2 {
+        font-size: 20px;
+        font-weight: 550;
+        letter-spacing: -0.5px;
+        margin: 0 0 9px;
+      }
+      .tripcard p {
+        color: var(--muted);
+        font-size: 11px;
+        line-height: 1.6;
+      }
+      .tripcard strong {
+        font-size: 26px;
+        letter-spacing: -0.6px;
+        font-weight: 600;
+      }
+      .reviewitem {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: center;
+        gap: 20px;
+        padding: 20px 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .reviewitem:last-child {
+        border: none;
+      }
+      .reviewitem h3 {
+        font-size: 14px;
+        margin: 10px 0;
+        font-weight: 550;
+      }
+      .reviewitem p {
+        color: var(--muted);
+        font-size: 10px;
+        margin: 0;
+        line-height: 1.8;
+      }
+      .reviewactions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .reviewitem input {
+        width: min(350px, 100%);
+        background: #111612;
+        color: var(--ink);
+        border: 1px solid #394334;
+        border-radius: 8px;
+        padding: 10px 12px;
+        margin-top: 12px;
+      }
+      .section-title {
+        font-size: 25px;
+        margin: 0 0 18px;
+        font-weight: 550;
+      }
+      .setup-card {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 20px;
+        border: 1px dashed #657d47;
+        border-radius: 15px;
+        background: #222d1e;
+        margin-bottom: 25px;
+        padding: 19px 23px;
+      }
+      .setup-card h3 {
+        font-size: 13px;
+        margin: 0 0 7px;
+      }
+      .setup-card p {
+        color: #b1c09e;
+        font-size: 11px;
+        line-height: 1.7;
+        margin: 0;
+      }
+      .notifications {
+        position: fixed;
+        right: 25px;
+        bottom: 25px;
+        max-width: calc(100vw - 32px);
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 10px;
+        pointer-events: none;
+        z-index: 40;
+      }
+      .activity,
+      .toast {
+        background: #d4f3ac;
+        color: #1b2811;
+        box-shadow: 0 12px 35px #0005;
+        border: 1px solid #dcf9ba;
+        border-radius: 12px;
+        padding: 14px 18px;
+        font-size: 12px;
+        max-width: 400px;
+        line-height: 1.6;
+      }
+      .activity {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .activity.failed,
+      .toast.error {
+        color: #ffddd4;
+        background: #5c302c;
+        border-color: #975246;
+      }
+      .activity-spinner {
+        width: 16px;
+        height: 16px;
+        border: 2px solid #1b281133;
+        border-top-color: #1b2811;
+        border-radius: 50%;
+        animation: activity-spin 0.8s linear infinite;
+      }
+      @keyframes activity-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .celebration {
+        position: fixed;
+        z-index: 45;
+        right: 28px;
+        top: 100px;
+        pointer-events: none;
+        display: flex;
+        align-items: center;
+        gap: 15px;
+        padding: 21px 24px;
+        border: 1px solid #9d86bb;
+        border-radius: 18px;
+        background: #30253e;
+        color: #f0e4ff;
+        box-shadow: 0 16px 70px #0005;
+        animation: achievement-in 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+        max-width: calc(100vw - 32px);
+      }
+      .celebration-coin {
+        display: grid;
+        place-items: center;
+        width: 48px;
+        height: 48px;
+        border: 1px solid #c3a9f0;
+        border-radius: 50%;
+        color: #e1cfff;
+        background: #49355e;
+        font-size: 25px;
+        animation: coin-arrive 0.9s ease-out;
+      }
+      .celebration strong {
+        display: block;
+        font-size: 15px;
+        margin-bottom: 5px;
+      }
+      .celebration small {
+        color: #ccb7df;
+        font-size: 11px;
+      }
+      @keyframes achievement-in {
+        from {
+          opacity: 0;
+          transform: translateY(-16px) scale(0.95);
+        }
+        to {
+          opacity: 1;
+          transform: none;
+        }
+      }
+      @keyframes coin-arrive {
+        from {
+          transform: rotateY(180deg) scale(0.6);
+        }
+        to {
+          transform: none;
+        }
+      }
+      .modal-backdrop {
+        position: fixed;
+        inset: 0;
+        background: #030705b8;
+        backdrop-filter: blur(9px);
+        z-index: 30;
+        display: grid;
+        place-items: center;
+        grid-template-columns: minmax(0, 1fr);
+        padding: 20px;
+      }
+      .modal {
+        min-width: 0;
+        width: 540px;
+        max-width: 100%;
+        max-height: 92vh;
+        overflow: auto;
+        background: #1a201b;
+        border: 1px solid #3f4939;
+        border-radius: 23px;
+        padding: 29px;
+        box-shadow: 0 25px 100px #0008;
+      }
+      .modal-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 15px;
+        margin-bottom: 26px;
+      }
+      .modal h2 {
+        font-size: 27px;
+        letter-spacing: -1px;
+        font-weight: 600;
+        margin: 0;
+      }
+      .close {
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        border: 1px solid #414a3b;
+        background: #293125;
+        color: #c3d1b8;
+      }
+      .formgrid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+      }
+      .field {
+        min-width: 0;
+      }
+      .field.full {
+        grid-column: 1/-1;
+      }
+      .field label {
+        display: block;
+        margin-bottom: 8px;
+        font-size: 10px;
+        color: #c0cdb6;
+        font-weight: 550;
+      }
+      .field input,
+      .field select,
+      .field textarea {
+        width: 100%;
+        padding: 12px;
+        border: 1px solid #3b4635;
+        background: #121811;
+        color: #e6eede;
+        border-radius: 9px;
+        min-width: 0;
+      }
+      .field input:focus,
+      .field select:focus,
+      .field textarea:focus {
+        border-color: var(--green);
+      }
+      .field textarea {
+        min-height: 75px;
+        resize: vertical;
+      }
+      .field small {
+        display: block;
+        color: #91a184;
+        font-size: 9px;
+        line-height: 1.7;
+        margin-top: 7px;
+      }
+      .modal-footer {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+        margin-top: 24px;
+      }
+      .formerror {
+        color: var(--red);
+        font-size: 11px;
+        line-height: 1.7;
+        margin-top: 14px;
+      }
+      .footer {
+        display: flex;
+        justify-content: space-between;
+        gap: 15px;
+        color: #7d8975;
+        font-size: 9px;
+        margin-top: 30px;
+        line-height: 1.7;
+      }
+      .annual {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 20px;
+        padding: 9px 0;
+      }
+      .annual div {
+        color: var(--muted);
+        font-size: 10px;
+      }
+      .annual strong {
+        display: block;
+        color: #e0ebd7;
+        font-size: 23px;
+        margin-top: 12px;
+        font-weight: 550;
+        letter-spacing: -0.6px;
+        overflow-wrap: anywhere;
+      }
+      .statline {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .statline select {
+        border: 1px solid var(--line);
+        background: var(--paper);
+        color: var(--ink);
+        padding: 6px;
+        border-radius: 7px;
+        font-size: 11px;
+      }
+      .view {
+        animation: enter 0.3s ease;
+      }
+      @keyframes enter {
+        from {
+          opacity: 0.4;
+          transform: translateY(7px);
+        }
+        to {
+          opacity: 1;
+          transform: none;
+        }
+      }
+      @media (min-width: 1600px) {
+        .main {
+          padding: 35px 55px;
+        }
+      }
+      @media (max-width: 1150px) {
+        .app {
+          grid-template-columns: 190px minmax(0, 1fr);
+        }
+        .sidebar {
+          padding: 30px 12px;
+        }
+        .main {
+          padding: 26px;
+        }
+        .dashboard-hero {
+          grid-template-columns: 1.35fr 1fr;
+        }
+        .flow-vault {
+          padding: 24px;
+        }
+        .flow-art {
+          right: -32px;
+          opacity: 0.45;
+        }
+        .flow-copy {
+          max-width: 89%;
+        }
+        .grid {
+          grid-template-columns: 1fr;
+        }
+        .tripgrid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .reviewitem {
+          grid-template-columns: 1fr;
+          gap: 15px;
+        }
+      }
+      @media (max-width: 760px) {
+        .dashboard-tabs {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 6px;
+        }
+        .dashboard-tabs button {
+          white-space: normal;
+          font-size: 11px;
+          padding: 10px 7px;
+        }
+        .app {
+          display: block;
+        }
+        .sidebar {
+          position: static;
+          height: auto;
+          padding: 20px 17px 0;
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+        }
+        .brand {
+          font-size: 27px;
+          padding: 0;
+        }
+        .brandmark,
+        .brandmark svg {
+          width: 29px;
+          height: 29px;
+        }
+        .brand-tagline {
+          position: absolute;
+          right: 18px;
+          top: 29px;
+          padding: 0;
+          margin: 0;
+          font-size: 9px;
+        }
+        .navlabel,
+        .source,
+        .profile {
+          display: none;
+        }
+        .nav {
+          flex-direction: row;
+          overflow: auto;
+          margin-top: 20px;
+          gap: 4px;
+          padding-bottom: 13px;
+          scrollbar-width: none;
+        }
+        .nav button {
+          flex-shrink: 0;
+          padding: 10px;
+          gap: 7px;
+          font-size: 10px;
+        }
+        .nav svg {
+          width: 15px;
+          height: 15px;
+        }
+        .main {
+          padding: 21px 17px 30px;
+        }
+        .topbar {
+          padding-bottom: 19px;
+          margin-bottom: 25px;
+          gap: 10px;
+        }
+        .crumb {
+          font-size: 9px;
+        }
+        .top-actions {
+          gap: 6px;
+        }
+        .top-actions .button {
+          font-size: 10px;
+          padding: 9px 10px;
+        }
+        .iconbtn {
+          padding: 9px 10px;
+          font-size: 10px;
+        }
+        .intro {
+          align-items: start;
+          gap: 13px;
+          margin-bottom: 23px;
+        }
+        .intro h1 {
+          font-size: 31px;
+          letter-spacing: -1.2px;
+        }
+        .intro p {
+          font-size: 10px;
+        }
+        .eyebrow {
+          font-size: 8px;
+          letter-spacing: 1.6px;
+        }
+        .period {
+          min-width: 113px;
+          max-width: 132px;
+          padding: 10px 8px;
+          font-size: 11px;
+        }
+        .dashboard-hero {
+          grid-template-columns: 1fr;
+          gap: 13px;
+        }
+        .flow-vault {
+          min-height: 240px;
+          padding: 25px;
+        }
+        .flow-amount {
+          font-size: 40px;
+        }
+        .flow-copy {
+          max-width: 88%;
+        }
+        .flow-art {
+          right: 0;
+          width: 145px;
+          height: 145px;
+          opacity: 0.5;
+        }
+        .momentum-card {
+          padding: 21px;
+          gap: 18px;
+        }
+        .checkpoint-list {
+          flex-direction: row;
+          flex-wrap: wrap;
+          gap: 12px 17px;
+        }
+        .checkpoint {
+          font-size: 10px;
+        }
+        .checkpoint-ring {
+          width: 48px;
+          height: 48px;
+        }
+        .cards {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 11px;
+        }
+        .overview-metrics {
+          grid-template-columns: 1fr;
+          gap: 8px;
+        }
+        .overview-metrics .metric {
+          display: grid;
+          grid-template-columns: 1fr auto;
+          align-items: center;
+          gap: 5px 14px;
+          padding: 16px 18px;
+        }
+        .overview-metrics .metrichead {
+          margin: 0;
+          font-size: 11px;
+        }
+        .overview-metrics .mini {
+          display: none;
+        }
+        .overview-metrics .metric strong {
+          grid-column: 2;
+          grid-row: 1 / 3;
+          font-size: 22px;
+        }
+        .overview-metrics .metric small {
+          grid-column: 1;
+          margin: 0;
+        }
+        .chart {
+          height: 210px;
+        }
+        .metric {
+          padding: 16px 12px;
+        }
+        .metrichead {
+          font-size: 9px;
+          margin-bottom: 15px;
+          gap: 4px;
+        }
+        .metrichead .mini {
+          width: 21px;
+          height: 23px;
+          font-size: 12px;
+        }
+        .metric strong {
+          font-size: 20px;
+          letter-spacing: -0.7px;
+        }
+        .metric small {
+          font-size: 8px;
+          margin-top: 10px;
+        }
+        .card {
+          padding: 20px 16px;
+        }
+        .investment-banner {
+          padding: 23px 20px;
+          gap: 16px;
+        }
+        .investment-banner h2 {
+          font-size: 23px;
+        }
+        .investment-medallion {
+          width: 60px;
+          height: 60px;
+          font-size: 24px;
+        }
+        .tripgrid,
+        .annual {
+          grid-template-columns: 1fr;
+        }
+        .annual {
+          gap: 20px;
+        }
+        .setup-card {
+          flex-direction: column;
+          align-items: start;
+          padding: 19px;
+          gap: 15px;
+        }
+        .footer {
+          flex-direction: column;
+          gap: 6px;
+        }
+        .modal {
+          padding: 23px;
+        }
+        .formgrid {
+          gap: 15px 12px;
+        }
+        .notifications {
+          bottom: 17px;
+          right: 16px;
+        }
+        .celebration {
+          right: 16px;
+          top: 150px;
+          padding: 17px;
+        }
+        .statline {
+          align-items: start;
+          flex-direction: column;
+        }
+      }
+      @media (max-width: 380px) {
+        .brand-tagline {
+          display: none;
+        }
+        .intro {
+          flex-wrap: wrap;
+        }
+        .overview-metrics {
+          grid-template-columns: 1fr;
+        }
+        .metrichead .mini {
+          display: none;
+        }
+        .topbar {
+          flex-wrap: wrap;
+        }
+      }
+      @media (max-width: 900px) {
+        .settings-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      @media (max-width: 760px) {
+        .sidebar {
+          position: relative;
+        }
+        .mobile-profile {
+          display: grid;
+          place-items: center;
+          position: absolute;
+          right: 17px;
+          top: 18px;
+          padding: 9px;
+        }
+        .brand-tagline {
+          right: 72px;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation: none !important;
+          transition: none !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <!-- Persistent sidebar: navigation switches the client view without navigating to a different URL. -->
+      <aside class="sidebar">
+        <div class="brand" aria-label="Kashlo">
+          <span class="brandmark" aria-hidden="true"
+            ><svg viewBox="0 0 40 40" fill="none">
+              <path
+                d="M9 6v28M12 21 30 6M19 17l13 17"
+                stroke="currentColor"
+                stroke-width="6"
+                stroke-linecap="square"
+              /></svg
+          ></span>
+          kashlo<span class="brand-dot">.</span>
+        </div>
+        <p class="brand-tagline">Your money. Your flow.</p>
+        <div class="navlabel">YOUR WORKSPACE</div>
+        <!-- data-view values match state.view and the render functions in the script below. -->
+        <nav class="nav" aria-label="Main navigation">
+          <button data-view="overview" class="active">
+            <svg viewBox="0 0 24 24">
+              <rect x="3" y="3" width="7" height="7" rx="1.5" />
+              <rect x="14" y="3" width="7" height="7" rx="1.5" />
+              <rect x="3" y="14" width="7" height="7" rx="1.5" />
+              <rect x="14" y="14" width="7" height="7" rx="1.5" /></svg
+            >Overview
+          </button>
+          <button data-view="transactions">
+            <svg viewBox="0 0 24 24">
+              <path d="M4 7h16M4 12h16M4 17h16" />
+              <path d="m16 4 4 3-4 3M8 14l-4 3 4 3" /></svg
+            >Transactions
+          </button>
+          <button data-view="investments">
+            <svg viewBox="0 0 24 24">
+              <path d="M4 20V10m6 10V6m6 14V3m5 17H2" /></svg
+            >Investments
+          </button>
+          <button data-view="dashboards">
+            <svg viewBox="0 0 24 24">
+              <path d="M3 7V5h7l2 2h9v13H3Z" /></svg
+            >Dashboards
+          </button>
+          <button data-view="review">
+            <svg viewBox="0 0 24 24">
+              <rect x="5" y="4" width="14" height="17" rx="2" />
+              <path d="M9 3h6v3H9zM9 12l2 2 4-4M9 18h6" /></svg
+            >Review<span class="badge" id="reviewBadge">—</span>
+          </button>
+          <button data-view="payments">
+            <svg viewBox="0 0 24 24">
+              <rect x="3" y="5" width="18" height="14" rx="2" />
+              <path d="M3 10h18M7 15h4" /></svg
+            >Manage
+          </button>
+        </nav>
+        <!-- Connection indicators and the workbook link are updated only after a successful server response. -->
+        <div class="source">
+          <strong
+            ><span class="dot" id="connectionDot"></span
+            ><span id="connectionLabel">Connection pending</span></strong
+          >
+          <p>
+            Your Google Sheet is the source of truth. Refresh to bring in its
+            latest changes.
+          </p>
+          <a id="sheetLink" href="#" hidden target="_blank" rel="noopener"
+            >Open Google Sheet ↗</a
+          >
+        </div>
+        <button
+          type="button"
+          class="profile"
+          id="profileButton"
+          aria-label="Profile & settings"
+        >
+          <span class="avatar" id="ownerInitials">—</span>
+          <span
+            ><span id="ownerName">Your workspace</span
+            ><small id="workspaceLabel">Profile & settings</small></span
+          >
+        </button>
+        <button
+          type="button"
+          class="iconbtn mobile-profile"
+          id="mobileProfileButton"
+          aria-label="Profile & settings"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            width="20"
+            height="20"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.7"
+            aria-hidden="true"
+          >
+            <circle cx="12" cy="8" r="4" />
+            <path d="M4 22v-3a8 8 0 0 1 16 0v3" />
+          </svg>
+        </button>
+      </aside>
+      <!-- Main workspace contains the page controls and the dynamically replaced view. -->
+      <main class="main">
+        <!-- Refresh reads the sheet; Add transaction opens the entry form. -->
+        <header class="topbar">
+          <div class="crumb">
+            KASHLO <span>/ <b id="breadcrumb">Overview</b></span>
+          </div>
+          <div class="top-actions">
+            <button
+              class="iconbtn"
+              id="refreshButton"
+              aria-label="Refresh from Google Sheet"
+            >
+              ↻ Refresh</button
+            ><button class="button" id="newButton">
+              <span style="font-size: 19px">+</span> Add transaction
+            </button>
+          </div>
+        </header>
+        <!-- Shown when no live data is available; the deployment instructions are opened by setupHelp. -->
+        <div id="setupBanner" class="setup-card" hidden>
+          <div>
+            <h3>
+              Your interface is ready. Connect it to bring your finances to
+              life.
+            </h3>
+            <p>
+              This local preview has no live sheet connection. Deploy the
+              included Apps Script project to activate live data and saving.
+            </p>
+          </div>
+          <button class="button outline" id="setupHelp">
+            Setup instructions ↗
+          </button>
+        </div>
+        <!-- Headings follow the selected view; monthSelect is populated by JavaScript. -->
+        <div class="intro">
+          <div>
+            <div class="eyebrow" id="eyebrow">YOUR MONEY, IN MOTION</div>
+            <h1 id="pageTitle">Find your flow.</h1>
+            <p id="pageSubtitle">Every move, in perspective.</p>
+          </div>
+          <select
+            class="period"
+            id="monthSelect"
+            aria-label="Select month"
+          ></select>
+        </div>
+        <!-- Render target for all five views; aria-live announces changing content politely. -->
+        <section id="content" class="view" aria-live="polite"></section>
+        <footer class="footer">
+          <span id="syncTime">Waiting for connection to Google Sheets</span
+          ><span>Recorded cash flow, not your bank balance.</span>
+        </footer>
+      </main>
+    </div>
+    <!-- Dedicated containers for temporary dialogs and status/error notifications. -->
+    <div id="modalContainer"></div>
+    <div
+      id="celebrationContainer"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+    ></div>
+    <div class="notifications">
+      <div
+        id="activityContainer"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      ></div>
+      <div id="toastContainer" aria-live="polite"></div>
+    </div>
+    <script>
+      // Month labels use zero-based indexes throughout the browser: January = 0, December = 11.
+      const MONTHS = [
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+      ];
+      // Shared interface state. The server supplies the configured year and initial month after loading.
+      // loading prevents overlapping refreshes; saveBusy prevents concurrent entry/review actions in this page.
+      let state = {
+        view: "overview",
+        dashboard: "groups",
+        month: new Date().getMonth(),
+        type: "all",
+        paymentOptionType: "Bank transfer",
+        manageSection: "descriptions",
+        lookupType: "expense",
+        search: "",
+        trip: "",
+        data: null,
+        profile: null,
+        profileLoading: false,
+        setupRequired: false,
+        loading: false,
+        saveBusy: false,
+      };
+      // Select a DOM element with $. Escape text/attribute characters with esc before inserting sheet text into HTML.
+      const $ = (s) => document.querySelector(s),
+        esc = (s) =>
+          String(s ?? "").replace(
+            /[&<>"']/g,
+            (c) =>
+              ({
+                "&": "&amp;",
+                "<": "&lt;",
+                ">": "&gt;",
+                '"': "&quot;",
+                "'": "&#39;",
+              })[c],
+          );
+      // Config.gs is the only source of workbook-specific browser settings.
+      // A local preview has no configuration and displays placeholders until connected.
+      const settings = () => state.data?.config;
+      const money = (n) =>
+        settings()
+          ? new Intl.NumberFormat(settings().locale, {
+              style: "currency",
+              currency: settings().currency,
+              maximumFractionDigits: 2,
+            }).format(Number(n) || 0)
+          : "—";
+      const currencySymbol = () =>
+        settings()
+          ? new Intl.NumberFormat(settings().locale, {
+              style: "currency",
+              currency: settings().currency,
+              currencyDisplay: "narrowSymbol",
+            })
+              .formatToParts(0)
+              .find((part) => part.type === "currency")?.value ||
+            settings().currency
+          : "¤";
+      // Intl selects appropriate compact units for the configured locale and currency.
+      const short = (n) =>
+        new Intl.NumberFormat(settings().locale, {
+          style: "currency",
+          currency: settings().currency,
+          notation: "compact",
+          maximumFractionDigits: 1,
+        }).format(Number(n) || 0);
+      const dateLabel = (s) =>
+        s
+          ? new Intl.DateTimeFormat(settings().locale, {
+              day: "numeric",
+              month: "short",
+              year: "numeric",
+            }).format(new Date(s + "T12:00:00"))
+          : "Missing date";
+      const monthPrefix = (month = state.month) =>
+        settings()?.year + "-" + String(month + 1).padStart(2, "0");
+      // Sum transaction amounts with nonnumeric values treated as zero; return an empty row list before loading.
+      const sum = (a) => a.reduce((s, t) => s + (Number(t.amount) || 0), 0),
+        rows = () => state.data?.transactions || [];
+      // Filter by the selected zero-based month in the configured year.
+      const monthly = (type, month = state.month) =>
+        rows().filter(
+          (t) => t.type === type && t.date.startsWith(monthPrefix(month)),
+        );
+      // Aggregate amounts by a chosen property, grouping blank labels under Uncategorized.
+      const group = (arr, key) =>
+        arr.reduce((o, t) => {
+          const k = t[key] || "Uncategorized";
+          o[k] = (o[k] || 0) + (Number(t.amount) || 0);
+          return o;
+        }, {});
+      // Removed payment names are blank throughout the UI; source history stays in the sheet.
+      const visiblePaymentDetail = (transaction) =>
+        state.data?.paymentOptions?.[transaction?.paymentMethod]?.includes(
+          transaction?.paymentDetail,
+        )
+          ? transaction.paymentDetail
+          : "";
+      // Create a submission ID using a UUID when available, otherwise a timestamp plus a random suffix.
+      const id = () =>
+        crypto.randomUUID?.() ||
+        "req_" + Date.now() + "_" + Math.random().toString(36).slice(2);
+      // One shared status covers every server action, including the initial load.
+      // Count overlapping calls and bridge save-then-refresh chains without flashing Completed.
+      let pendingActivities = 0,
+        activityVersion = 0,
+        activityFailed = false;
+      function beginActivity() {
+        if (!pendingActivities) activityFailed = false;
+        pendingActivities++;
+        activityVersion++;
+        $("#activityContainer").innerHTML =
+          '<div class="activity"><span class="activity-spinner" aria-hidden="true"></span>In progress…</div>';
+      }
+      function finishActivity(success) {
+        activityFailed ||= !success;
+        pendingActivities--;
+        if (pendingActivities) return;
+        const version = activityVersion;
+        setTimeout(() => {
+          if (version !== activityVersion || pendingActivities) return;
+          $("#activityContainer").innerHTML = activityFailed
+            ? '<div class="activity failed">Couldn’t complete</div>'
+            : '<div class="activity"><span aria-hidden="true">✓</span>Completed</div>';
+          setTimeout(() => {
+            if (version === activityVersion && !pendingActivities)
+              $("#activityContainer").innerHTML = "";
+          }, 3000);
+        }, 150);
+      }
+      // Wrap Apps Script callback calls in a Promise for async/await.
+      // Only the listed server functions are dispatched. A local HTML preview has no
+      //  google.script.run bridge, so it rejects live operations with a deployment message.
+      async function rpc(name, args) {
+        if (!window.google?.script?.run)
+          throw new Error(
+            "Live connection is available after deploying the Apps Script app.",
+          );
+        if (args && !["saveWorkspaceSettings"].includes(name))
+          args = { ...args, workspaceRevision: state.data?.workspaceRevision };
+        beginActivity();
+        let success = false;
+        try {
+          const result = await new Promise((resolve, reject) => {
+            const runner = google.script.run
+              .withSuccessHandler(resolve)
+              .withFailureHandler((e) =>
+                reject(new Error(e.message || String(e))),
+              );
+            if (name === "getData") runner.getData();
+            else if (name === "getWorkspaceSettings")
+              runner.getWorkspaceSettings();
+            else if (name === "saveWorkspaceSettings")
+              runner.saveWorkspaceSettings(args);
+            else if (name === "addLookupOption") runner.addLookupOption(args);
+            else if (name === "addPaymentType") runner.addPaymentType(args);
+            else if (name === "managePaymentOption")
+              runner.managePaymentOption(args);
+            else if (name === "addTransaction") runner.addTransaction(args);
+            else if (name === "updateTransaction")
+              runner.updateTransaction(args);
+            else if (name === "deleteTransaction")
+              runner.deleteTransaction(args);
+            else if (name === "createExpenseGroup")
+              runner.createExpenseGroup(args);
+            else if (name === "setReview") runner.setReview(args);
+            else if (name === "setMonthStatus") runner.setMonthStatus(args);
+            else reject(new Error("Unknown action."));
+          });
+          success = true;
+          return result;
+        } finally {
+          finishActivity(success);
+        }
+      }
+      // Display an escaped success/error message for six seconds in the live announcement container.
+      function toast(text, error = false) {
+        $("#toastContainer").innerHTML =
+          '<div class="toast ' +
+          (error ? "error" : "") +
+          '">' +
+          esc(text) +
+          "</div>";
+        setTimeout(() => ($("#toastContainer").innerHTML = ""), 6000);
+      }
+      // Build the reusable empty-state panel with an escaped title and explanation.
+      function empty(title, description) {
+        return (
+          '<div class="empty"><div class="emptyicon">◌</div><strong>' +
+          esc(title) +
+          "</strong><p>" +
+          esc(description) +
+          "</p></div>"
+        );
+      }
+      // Indicate whether a successful data response exists, including an older response retained after refresh failure.
+      function loaded() {
+        return !!state.data;
+      }
+      // Render a summary card; show a dash before loading rather than suggesting that live totals are zero.
+      function metric(label, amount, subtitle, cls, icon) {
+        return (
+          '<div class="card metric ' +
+          (cls || "") +
+          '"><div class="metrichead">' +
+          esc(label) +
+          '<span class="mini">' +
+          icon +
+          "</span></div><strong>" +
+          (loaded() ? money(amount) : "—") +
+          "</strong><small>" +
+          esc(subtitle) +
+          "</small></div>"
+        );
+      }
+      // Build escaped option values/labels and mark an exact match as selected.
+      function selectOptions(values, selected) {
+        return values
+          .map(
+            (s) =>
+              '<option value="' +
+              esc(s) +
+              '"' +
+              (s === selected ? " selected" : "") +
+              ">" +
+              esc(s) +
+              "</option>",
+          )
+          .join("");
+      }
+      // Build an inline SVG with income, expense, and investment bars for all twelve months.
+      // Series use the same vertical scale; negative values have zero bar height.
+      // SVG titles expose the full month, series name, and amount for each bar.
+      function chart() {
+        const income = MONTHS.map((_, i) => sum(monthly("income", i))),
+          expense = MONTHS.map((_, i) => sum(monthly("expense", i))),
+          investment = MONTHS.map((_, i) => sum(monthly("investment", i)));
+        // Keep the scale at least 1 to avoid division by zero; reserve space for axes and month labels.
+        const max = Math.max(...income, ...expense, ...investment, 1),
+          w = 620,
+          h = 230,
+          left = 47,
+          bottom = 198,
+          top = 15,
+          plot = bottom - top,
+          step = 46;
+        let svg =
+          '<svg class="chart" viewBox="0 0 ' +
+          w +
+          " " +
+          h +
+          '" role="img" aria-label="Monthly income, expenses, and investment contributions">';
+        // Draw four horizontal gridlines and their abbreviated currency labels.
+        for (let j = 0; j < 4; j++) {
+          const y = top + (plot * j) / 3;
+          svg +=
+            '<line x1="' +
+            left +
+            '" y1="' +
+            y +
+            '" x2="606" y2="' +
+            y +
+            '" stroke="#303630" stroke-dasharray="3 5"/><text x="0" y="' +
+            (y + 4) +
+            '" fill="#9ca991" font-size="9">' +
+            esc(short(max * (1 - j / 3))) +
+            "</text>";
+        }
+        // Place three bars per month, then draw its abbreviated name below the baseline.
+        MONTHS.forEach((month, i) => {
+          const x = left + i * step;
+          [income[i], expense[i], investment[i]].forEach((v, j) => {
+            const height = (Math.max(0, v) / max) * plot;
+            svg +=
+              '<rect x="' +
+              (x + j * 9 + 3) +
+              '" y="' +
+              (bottom - height) +
+              '" width="7" height="' +
+              height +
+              '" rx="2" fill="' +
+              ["#c1f77b", "#729b98", "#b6a0f4"][j] +
+              '"><title>' +
+              esc(
+                month +
+                  " " +
+                  ["Income", "Expenses", "Investments"][j] +
+                  ": " +
+                  money(v),
+              ) +
+              "</title></rect>";
+          });
+          svg +=
+            '<text x="' +
+            (x + 15) +
+            '" y="221" text-anchor="middle" font-size="9" fill="#9ca991">' +
+            month.slice(0, 3) +
+            "</text>";
+        });
+        return '<div class="chartwrap">' + svg + "</svg></div>";
+      }
+      // Group amounts by category, sort largest first, and show the six largest categories.
+      // Bar widths use the full supplied total; a minimum width of 1 percent keeps small values visible.
+      function categoryBars(arr) {
+        const entries = Object.entries(group(arr, "category")).sort(
+          (a, b) => b[1] - a[1],
+        );
+        if (!entries.length)
+          return empty(
+            "Nothing recorded here yet",
+            "Your spending categories will appear as soon as entries are available.",
+          );
+        const total = sum(arr) || 1;
+        return (
+          entries
+            .slice(0, 6)
+            .map(
+              ([k, v], i) =>
+                '<div class="category-row"><div class="category-head"><span>' +
+                esc(k) +
+                "</span><strong>" +
+                money(v) +
+                '</strong></div><div class="track"><div style="width:' +
+                Math.max(1, (v / total) * 100) +
+                "%;background:" +
+                [
+                  "#c1f77b",
+                  "#9fcb83",
+                  "#7da78b",
+                  "#74979d",
+                  "#b6a0f4",
+                  "#d5bf8c",
+                ][i] +
+                '"></div></div></div>',
+            )
+            .join("") +
+          (entries.length > 6
+            ? '<small style="color:var(--muted)">Showing your six largest categories</small>'
+            : "")
+        );
+      }
+      // Render supplied records as an escaped table, with at most 100 entries by default.
+      // Callers choose filtering and ordering. Overview shows six recent entries.
+      // Enable per-row editing and deletion in Overview, Transactions, and Investments only.
+      function transactionTable(
+        arr,
+        limit = 100,
+        editable = false,
+        showExpenseGroup = true,
+      ) {
+        if (!arr.length)
+          return empty(
+            loaded()
+              ? "No transactions for this view"
+              : "Your entries will appear here",
+            loaded()
+              ? "Try another month or add a transaction."
+              : "Connect the app to read your journals. No sample transactions have been added.",
+          );
+        return (
+          '<div class="tablewrap"><table><thead><tr><th>Description</th><th>Date</th><th>Category</th>' +
+          (showExpenseGroup ? "<th>Expense group</th>" : "") +
+          '<th>Payment method</th><th>Bank / card / UPI app</th><th style="text-align:right">Amount</th>' +
+          (editable ? "<th>Actions</th>" : "") +
+          "</tr></thead><tbody>" +
+          arr
+            .slice(0, limit)
+            .map(
+              (t) =>
+                '<tr><td class="desc">' +
+                esc(t.description) +
+                '<span class="sub">' +
+                esc(
+                  {
+                    expense: "Expense",
+                    income: "Income",
+                    investment: "Investment",
+                  }[t.type],
+                ) +
+                "</span></td><td>" +
+                esc(dateLabel(t.date)) +
+                '</td><td><span class="pill">' +
+                esc(t.category || "Missing category") +
+                "</span></td>" +
+                (showExpenseGroup
+                  ? '<td style="color:var(--muted)">' +
+                    esc(t.trip || "—") +
+                    "</td>"
+                  : "") +
+                "<td>" +
+                esc(t.paymentMethod || "Not recorded") +
+                "</td><td>" +
+                esc(visiblePaymentDetail(t)) +
+                '</td><td class="amount" style="text-align:right">' +
+                money(t.amount) +
+                "</td>" +
+                (editable
+                  ? '<td><div class="transaction-actions"><button type="button" class="button light edit-transaction" data-edit-type="' +
+                    esc(t.type) +
+                    '" data-edit-row="' +
+                    t.row +
+                    '" aria-label="' +
+                    esc(
+                      "Edit " +
+                        t.description +
+                        " (" +
+                        t.type +
+                        ", row " +
+                        t.row +
+                        ")",
+                    ) +
+                    '">Edit</button><button type="button" class="button danger delete-transaction" data-delete-type="' +
+                    esc(t.type) +
+                    '" data-delete-row="' +
+                    t.row +
+                    '" aria-label="' +
+                    esc(
+                      "Delete " +
+                        t.description +
+                        " (" +
+                        t.type +
+                        ", row " +
+                        t.row +
+                        ")",
+                    ) +
+                    '">Delete</button></div></td>'
+                  : "") +
+                "</tr>",
+            )
+            .join("") +
+          "</tbody></table></div>" +
+          (arr.length > limit
+            ? '<p style="font-size:11px;color:var(--muted)">Showing the latest ' +
+              limit +
+              " of " +
+              arr.length +
+              " entries. Use search to narrow the list.</p>"
+            : "")
+        );
+      }
+      function flowHero(income, expenses, investments, status) {
+        const balance = income - expenses - investments;
+        const hasEntries = rows().some((t) => t.date.startsWith(monthPrefix()));
+        const steps = [
+          [hasEntries, "First entry recorded"],
+          [investments > 0, "Future funded"],
+          [status === "Complete", "Month reviewed"],
+        ];
+        const completed = steps.filter(([done]) => done).length;
+        const mood =
+          loaded() && balance < 0
+            ? "shortfall"
+            : loaded() && balance > 0
+              ? "positive"
+              : "neutral";
+        const message = !loaded()
+          ? "Waiting for your sheet"
+          : balance > 0
+            ? "↗ Positive cash flow"
+            : balance < 0
+              ? "↘ Recorded shortfall"
+              : "≈ Balanced cash flow";
+        return (
+          '<div class="dashboard-hero"><section class="flow-vault ' +
+          mood +
+          '" aria-label="Cash surplus / shortfall"><div class="flow-copy"><div class="eyebrow">THIS MONTH’S FLOW</div><h2 class="flow-label">Cash surplus / shortfall</h2><strong class="flow-amount">' +
+          (loaded() ? money(balance) : "—") +
+          '</strong><p>Income − expenses − investment contributions.<br>Based on what you’ve recorded.</p><span class="flow-pill">' +
+          esc(message) +
+          '</span></div><div class="flow-art" aria-hidden="true"><div class="flow-orbit outer"></div><div class="flow-orbit"></div><div class="flow-coin">' +
+          esc(currencySymbol()) +
+          '</div></div></section><section class="card momentum-card" aria-label="Monthly checkpoints"><div class="momentum-top"><div><div class="eyebrow">SMALL STEPS. REAL MOMENTUM.</div><h2>Your monthly checkpoints</h2></div><div class="checkpoint-ring" style="--progress:' +
+          (loaded() ? (completed / 3) * 100 : 0) +
+          '%"><span>' +
+          (loaded() ? completed + " / 3" : "—") +
+          '</span></div></div><div class="checkpoint-list">' +
+          steps
+            .map(
+              ([done, label]) =>
+                '<div class="checkpoint ' +
+                (loaded() && done ? "done" : "") +
+                '"><i aria-hidden="true">' +
+                (loaded() && done ? "✓" : "·") +
+                "</i><span>" +
+                esc(label) +
+                "</span></div>",
+            )
+            .join("") +
+          '</div><div class="momentum-foot">' +
+          (status === "Complete" && loaded()
+            ? "Month marked complete. Every detail adds up."
+            : "Your pace. Your progress. Review the month when you’re ready.") +
+          "</div></section></div>"
+        );
+      }
+      function investmentJourney() {
+        const contributions = rows().filter((t) => t.type === "investment");
+        const months = new Set(
+          contributions.filter((t) => t.date).map((t) => t.date.slice(0, 7)),
+        ).size;
+        return (
+          '<section class="investment-banner"><div><div class="eyebrow">THE FUTURE FUND</div><h2>Small moves. Long view.</h2><p>Every contribution is a step toward what comes next.</p><div class="investment-badges"><span>' +
+          (loaded() ? months : "—") +
+          (months === 1 && loaded()
+            ? " month with contributions</span><span>"
+            : " months with contributions</span><span>") +
+          (loaded() ? contributions.length : "—") +
+          (contributions.length === 1 && loaded()
+            ? " recorded contribution"
+            : " recorded contributions") +
+          '</span></div></div><div class="investment-medallion" aria-hidden="true">↗</div></section>'
+        );
+      }
+      let celebrationVersion = 0;
+      function celebrateInvestment(amount) {
+        const version = ++celebrationVersion;
+        $("#celebrationContainer").innerHTML =
+          '<div class="celebration"><span class="celebration-coin" aria-hidden="true">↗</span><div><strong>Future you says thanks.</strong><small>' +
+          esc(money(amount)) +
+          " contribution recorded.</small></div></div>";
+        setTimeout(() => {
+          if (version === celebrationVersion)
+            $("#celebrationContainer").innerHTML = "";
+        }, 4000);
+      }
+      // Compose selected-month metrics, completeness notice, annual chart, category bars, recent entries, and annual totals.
+      function overview() {
+        // Recorded cash surplus/shortfall equals income minus expenses minus investment contributions.
+        const income = sum(monthly("income")),
+          expenses = sum(monthly("expense")),
+          investments = sum(monthly("investment")),
+          balance = income - expenses - investments,
+          status = state.data?.monthStatus?.[state.month] || "Not reviewed";
+        const cards =
+          '<div class="cards overview-metrics">' +
+          metric("Income", income, "Recorded income this month", "", "↙") +
+          metric(
+            "Expenses",
+            expenses,
+            "Excludes investment contributions",
+            "",
+            "↗",
+          ) +
+          metric(
+            "Investments",
+            investments,
+            "Contributions this month",
+            "",
+            "⌁",
+          ) +
+          "</div>";
+        // Warn when a loaded month has not been marked Complete; completeness is a manual status.
+        const note =
+          loaded() && status !== "Complete"
+            ? '<div class="notice warning"><strong>' +
+              esc(MONTHS[state.month]) +
+              " is " +
+              esc(status.toLowerCase()) +
+              ".</strong> Missing transactions can affect this month’s figures.</div>"
+            : "";
+        const trend =
+          '<div class="card"><div class="cardhead"><div><h2>The year in perspective</h2><p>Income, spending & investment contributions</p><div class="legend"><span><i style="background:#c1f77b"></i>Income</span><span><i style="background:#729b98"></i>Expenses</span><span><i style="background:#b6a0f4"></i>Investments</span></div></div><span class="pill">' +
+          esc(settings()?.year || "—") +
+          "</span></div>" +
+          (loaded()
+            ? chart()
+            : empty(
+                "A clearer picture of your year",
+                "Monthly patterns will appear here once the sheet is connected.",
+              )) +
+          "</div>";
+        const categories =
+          '<div class="card"><div class="cardhead"><div><h2>Where it went</h2><p>' +
+          MONTHS[state.month] +
+          ' · expenses by category</p></div><span style="color:#a1af9b">◔</span></div>' +
+          categoryBars(monthly("expense")) +
+          "</div>";
+        // Order the selected month by descending date, breaking ties with descending physical sheet row.
+        const latest = rows()
+          .filter((t) => t.date.startsWith(monthPrefix()))
+          .sort((a, b) => b.date.localeCompare(a.date) || b.row - a.row);
+        const recent =
+          '<div class="card"><div class="cardhead"><div><h2>Recent activity</h2><p>Small details. The complete picture.</p></div><button class="textlink" data-nav="transactions">View all transactions ↗</button></div>' +
+          transactionTable(latest, 6, true) +
+          "</div>";
+        // The annual totals use all loaded entries for each journal, independent of the selected month.
+        return (
+          flowHero(income, expenses, investments, status) +
+          cards +
+          note +
+          '<div class="grid">' +
+          trend +
+          categories +
+          "</div>" +
+          recent +
+          '<div class="card" style="margin-top:23px"><div class="cardhead"><h2>Year-to-date totals</h2><span class="pill">All recorded entries</span></div><div class="annual"><div>Income<strong>' +
+          (loaded()
+            ? money(sum(rows().filter((t) => t.type === "income")))
+            : "—") +
+          "</strong></div><div>Expenses<strong>" +
+          (loaded()
+            ? money(sum(rows().filter((t) => t.type === "expense")))
+            : "—") +
+          "</strong></div><div>Investment contributions<strong>" +
+          (loaded()
+            ? money(sum(rows().filter((t) => t.type === "investment")))
+            : "—") +
+          "</strong></div></div></div>"
+        );
+      }
+      // Render the monthly transaction journal, or an investment-only version with contribution summaries.
+      function transactions(investments = false) {
+        // Apply journal, configured month, and case-insensitive description/category/trip search filters, then sort newest first.
+        const filtered = rows()
+          .filter(
+            (t) =>
+              (investments
+                ? t.type === "investment"
+                : state.type === "all" || t.type === state.type) &&
+              t.date.startsWith(monthPrefix()) &&
+              (!state.search ||
+                (t.description + " " + t.category + " " + t.trip)
+                  .toLowerCase()
+                  .includes(state.search.toLowerCase())),
+          )
+          .sort((a, b) => b.date.localeCompare(a.date) || b.row - a.row);
+        const filter =
+          '<div class="filters"><input id="search" aria-label="Search transactions" placeholder="Search description, category or group…" value="' +
+          esc(state.search) +
+          '">' +
+          (investments
+            ? ""
+            : '<select id="typeFilter" aria-label="Transaction type">' +
+              selectOptions(
+                ["all", "expense", "income", "investment"],
+                state.type,
+              ) +
+              "</select>") +
+          "</div>";
+        // Investment monthly contributions use the filtered list; annual contributions use all investment entries.
+        const head = investments
+          ? investmentJourney() +
+            '<div class="cards investment-metrics">' +
+            metric(
+              "Monthly contributions",
+              sum(filtered),
+              "Money allocated to investments",
+              "",
+              "⌁",
+            ) +
+            metric(
+              "Annual contributions",
+              sum(rows().filter((t) => t.type === "investment")),
+              "Not portfolio value or investment returns",
+              "",
+              "↗",
+            ) +
+            '</div><div class="notice">These figures track contributions. They do not calculate current portfolio value, profit, or return.</div>'
+          : "";
+        return (
+          head +
+          filter +
+          '<div class="card"><div class="cardhead"><h2>' +
+          (investments ? "Investment journal" : "Transaction journal") +
+          '</h2><span class="pill">' +
+          filtered.length +
+          " entries</span></div>" +
+          transactionTable(filtered, 100, true, !investments) +
+          "</div>"
+        );
+      }
+      function isGroupDashboard() {
+        return (
+          state.view === "trips" ||
+          (state.view === "dashboards" && state.dashboard === "groups")
+        );
+      }
+      function dashboards() {
+        const tabs = [
+          ["groups", "Expense groups"],
+          ["spending", "Spending insights"],
+          ["cashflow", "Cash flow"],
+        ];
+        return (
+          '<nav class="tabs dashboard-tabs" aria-label="Choose dashboard">' +
+          tabs
+            .map(
+              ([key, label]) =>
+                '<button type="button" data-dashboard="' +
+                key +
+                '" class="' +
+                (state.dashboard === key ? "active" : "") +
+                '" aria-pressed="' +
+                (state.dashboard === key) +
+                '">' +
+                label +
+                "</button>",
+            )
+            .join("") +
+          "</nav>" +
+          (state.dashboard === "spending"
+            ? spendingInsights()
+            : state.dashboard === "cashflow"
+              ? cashFlowDashboard()
+              : trips())
+        );
+      }
+      function spendingInsights() {
+        const expenses = monthly("expense"),
+          total = sum(expenses);
+        const previous =
+          state.month > 0 ? sum(monthly("expense", state.month - 1)) : null;
+        const comparison =
+          previous === null
+            ? "January has no previous month in this workbook."
+            : previous === 0
+              ? "No spending is recorded for the previous month."
+              : (total > previous
+                  ? "Up "
+                  : total < previous
+                    ? "Down "
+                    : "Unchanged: ") +
+                Math.abs(((total - previous) / previous) * 100).toFixed(1) +
+                "% compared with " +
+                MONTHS[state.month - 1] +
+                ".";
+        const repeated = new Map();
+        expenses.forEach((entry) => {
+          const name = entry.description.trim(),
+            key = name.toLowerCase();
+          if (!key) return;
+          const item = repeated.get(key) || { name, count: 0, amount: 0 };
+          item.count++;
+          item.amount += Number(entry.amount) || 0;
+          repeated.set(key, item);
+        });
+        const recurring = [...repeated.values()]
+          .filter((item) => item.count > 1)
+          .sort((a, b) => b.count - a.count || b.amount - a.amount);
+        const previousMetric =
+          state.month > 0
+            ? metric(
+                "Previous month",
+                previous,
+                MONTHS[state.month - 1] + " · recorded expenses",
+                "",
+                "←",
+              )
+            : '<div class="card metric"><div class="metrichead">Previous month<span class="mini">←</span></div><strong>—</strong><small>Previous-year data is not loaded</small></div>';
+        return (
+          '<div class="cards overview-metrics">' +
+          metric(
+            "Monthly spending",
+            total,
+            MONTHS[state.month] + " · expenses only",
+            "",
+            "↗",
+          ) +
+          previousMetric +
+          metric(
+            "Average expense",
+            expenses.length ? total / expenses.length : 0,
+            expenses.length + " recorded expenses this month",
+            "",
+            "≈",
+          ) +
+          "</div>" +
+          (loaded()
+            ? '<div class="notice">' +
+              esc(comparison) +
+              " These comparisons use recorded entries; incomplete months can affect the figures.</div>"
+            : "") +
+          '<div class="grid"><section class="card"><div class="cardhead"><div><h2>Where your money went</h2><p>Six largest expense categories · selected month</p></div></div>' +
+          categoryBars(expenses) +
+          '</section><section class="card"><div class="cardhead"><div><h2>Repeated descriptions</h2><p>Descriptions appearing more than once this month. These are not confirmed subscriptions.</p></div></div>' +
+          (recurring.length
+            ? '<div class="tablewrap"><table><thead><tr><th>Description</th><th>Entries</th><th>Total</th></tr></thead><tbody>' +
+              recurring
+                .map(
+                  (item) =>
+                    '<tr><td class="desc">' +
+                    esc(item.name) +
+                    "</td><td>" +
+                    item.count +
+                    '</td><td class="amount">' +
+                    money(item.amount) +
+                    "</td></tr>",
+                )
+                .join("") +
+              "</tbody></table></div>"
+            : empty(
+                "No repeated descriptions",
+                loaded()
+                  ? "Descriptions recorded twice or more this month will appear here."
+                  : "Connect your sheet to explore spending patterns.",
+              )) +
+          "</section></div>"
+        );
+      }
+      function cashFlowDashboard() {
+        const income = sum(monthly("income")),
+          expenses = sum(monthly("expense")),
+          investments = sum(monthly("investment"));
+        const balance = income - expenses - investments;
+        return (
+          '<div class="cards">' +
+          metric("Income", income, "Recorded this month", "", "↙") +
+          metric("Expenses", expenses, "Recorded this month", "", "↗") +
+          metric(
+            "Investments",
+            investments,
+            "Contributions this month",
+            "",
+            "⌁",
+          ) +
+          metric(
+            "Cash surplus / shortfall",
+            balance,
+            "Income − expenses − contributions",
+            balance < 0 ? "balance shortfall" : "balance",
+            "≈",
+          ) +
+          '</div><div class="notice">Recorded cash flow is not your bank balance. Missing entries can affect the monthly comparison.</div><section class="card" style="margin-bottom:23px"><div class="cardhead"><div><h2>Your annual cash flow</h2><p>Income, expenses, and investment contributions</p><div class="legend"><span><i style="background:#c1f77b"></i>Income</span><span><i style="background:#729b98"></i>Expenses</span><span><i style="background:#b6a0f4"></i>Investments</span></div></div><span class="pill">' +
+          esc(settings()?.year || "—") +
+          "</span></div>" +
+          (loaded()
+            ? chart()
+            : empty(
+                "Your year in view",
+                "Connect your sheet to see annual cash flow.",
+              )) +
+          '</section><section class="card"><div class="cardhead"><h2>Month by month</h2></div>' +
+          (loaded()
+            ? '<div class="tablewrap"><table><thead><tr><th>Month</th><th>Income</th><th>Expenses</th><th>Investments</th><th>Surplus / shortfall</th><th>Record status</th></tr></thead><tbody>' +
+              MONTHS.map((month, index) => {
+                const earned = sum(monthly("income", index)),
+                  spent = sum(monthly("expense", index)),
+                  invested = sum(monthly("investment", index)),
+                  net = earned - spent - invested;
+                return (
+                  "<tr><td>" +
+                  month +
+                  "</td><td>" +
+                  money(earned) +
+                  "</td><td>" +
+                  money(spent) +
+                  "</td><td>" +
+                  money(invested) +
+                  '</td><td class="amount" style="color:var(' +
+                  (net < 0 ? "--red" : "--green") +
+                  ')">' +
+                  money(net) +
+                  "</td><td>" +
+                  esc(state.data.monthStatus?.[index] || "Not reviewed") +
+                  "</td></tr>"
+                );
+              }).join("") +
+              "</tbody></table></div>"
+            : empty(
+                "Monthly cash flow",
+                "Your recorded monthly totals will appear after connecting.",
+              )) +
+          "</section>"
+        );
+      }
+      // The legacy trip field now represents any expense group. Existing trip tags
+      // continue to work without migrating financial records or changing sheet columns.
+      function trips() {
+        const groups = state.data?.trips || [];
+        const expenses = rows().filter((entry) => entry.type === "expense");
+        const grouped = expenses.filter((entry) => entry.trip);
+        if (state.trip) {
+          const selected = grouped.filter((entry) => entry.trip === state.trip);
+          return (
+            '<div class="cardhead"><button class="textlink" id="backTrips">← All expense groups</button><button class="button" id="addGroupExpense">+ Add expense</button></div>' +
+            '<div class="notice">This group brings expenses from different categories together. Each recorded payment is counted once; avoid recording both an aggregate payment and its itemized costs.</div>' +
+            '<div class="grid"><div class="card"><div class="cardhead"><h2>' +
+            esc(state.trip) +
+            '</h2><span class="pill">' +
+            selected.length +
+            ' entries</span></div><strong style="font-size:36px;font-weight:600;letter-spacing:-1px">' +
+            money(sum(selected)) +
+            '</strong><p style="color:var(--muted)">Total recorded for this group · all months</p>' +
+            categoryBars(selected) +
+            '</div><div class="card"><div class="cardhead"><h2>Group expenses</h2></div>' +
+            transactionTable(selected) +
+            "</div></div>"
+          );
+        }
+        return (
+          '<div class="cardhead"><div class="notice" style="margin:0;flex:1">A category describes what you bought. An expense group connects payments for a wedding, home construction, a trip, or any other purpose.</div><button class="button" id="newGroupButton" ' +
+          (!loaded() ? "disabled" : "") +
+          ">+ New group</button></div>" +
+          (groups.length
+            ? '<div class="tripgrid">' +
+              groups
+                .map((name) => {
+                  const entries = grouped.filter(
+                    (entry) => entry.trip === name,
+                  );
+                  return (
+                    '<article class="card tripcard" tabindex="0" role="button" data-trip="' +
+                    esc(name) +
+                    '"><div class="triphero"><span>' +
+                    esc(name) +
+                    "</span></div><h2>" +
+                    esc(name) +
+                    "</h2><p>" +
+                    entries.length +
+                    " expenses · all categories</p><strong>" +
+                    money(sum(entries)) +
+                    '</strong><p class="textlink">View expenses →</p></article>'
+                  );
+                })
+                .join("") +
+              "</div>"
+            : empty(
+                "Bring related expenses together",
+                loaded()
+                  ? "Create your first group, such as Wedding, House construction, or Vietnam 2026."
+                  : "Connect your sheet to load and create expense groups.",
+              )) +
+          '<div class="card" style="margin-top:23px"><div class="annual"><div>Grouped expenses<strong>' +
+          (loaded() ? money(sum(grouped)) : "—") +
+          "</strong></div><div>Expenses without a group<strong>" +
+          (loaded()
+            ? money(sum(expenses.filter((entry) => !entry.trip)))
+            : "—") +
+          "</strong></div><div>Expense groups<strong>" +
+          groups.length +
+          "</strong></div></div></div>"
+        );
+      }
+
+      // Update the cached master list without re-rendering an unfinished entry form.
+      async function createGroup(name, requestId) {
+        const result = await rpc("createExpenseGroup", { name, requestId });
+        if (!result || !Array.isArray(result.groups) || !result.name)
+          throw new Error(
+            "Unexpected expense group response. Refresh and check the sheet.",
+          );
+        state.data.trips = result.groups;
+        return result;
+      }
+
+      function openGroupDialog() {
+        if (!loaded() || state.saveBusy) return;
+        const requestId = id();
+        $("#modalContainer").innerHTML =
+          '<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="groupTitle"><div class="modal-head"><h2 id="groupTitle">New expense group</h2><button class="close" aria-label="Close dialog">×</button></div><form id="groupForm"><div class="field"><label for="groupName">Group name</label><input id="groupName" required placeholder="Wedding, House construction, Vietnam 2026…"><small>Use this group across any expense categories. It is saved in your sheet too.</small></div><div class="formerror" id="groupError"></div><div class="modal-footer"><button type="button" class="button outline" id="cancelGroup">Cancel</button><button class="button" id="saveGroup">Create group</button></div></form></section></div>';
+        $("#groupName").maxLength = settings().limits.groupNameLength;
+        const close = () => {
+          if (!state.saveBusy) $("#modalContainer").innerHTML = "";
+        };
+        $(".close").onclick = close;
+        $("#cancelGroup").onclick = close;
+        $("#groupForm").onsubmit = async (event) => {
+          event.preventDefault();
+          if (state.saveBusy) return;
+          state.saveBusy = true;
+          $("#saveGroup").disabled = true;
+          $("#groupError").textContent = "";
+          try {
+            const result = await createGroup($("#groupName").value, requestId);
+            state.trip = result.name;
+            $("#modalContainer").innerHTML = "";
+            toast(
+              result.created
+                ? "Expense group created in your sheet."
+                : "This expense group already exists.",
+            );
+            await refresh();
+          } catch (error) {
+            $("#groupError").textContent =
+              error.message +
+              " If the result is uncertain, refresh and check the group list before trying again.";
+            $("#saveGroup").disabled = false;
+          } finally {
+            state.saveBusy = false;
+          }
+        };
+        $("#groupName").focus();
+      }
+      // Keep reusable lists together, with the selected section and journal preserved on refresh.
+      function manage() {
+        const tabs =
+          '<div class="tabs" style="flex-wrap:wrap" role="group" aria-label="Manage section">' +
+          [
+            ["descriptions", "Descriptions"],
+            ["categories", "Categories"],
+            ["payments", "Payment methods"],
+          ]
+            .map(
+              ([key, label]) =>
+                '<button data-manage="' +
+                key +
+                '" aria-pressed="' +
+                (state.manageSection === key) +
+                '" class="' +
+                (state.manageSection === key ? "active" : "") +
+                '">' +
+                label +
+                "</button>",
+            )
+            .join("") +
+          "</div>";
+        return (
+          tabs +
+          (state.manageSection === "payments" ? payments() : lookupManager())
+        );
+      }
+      function lookupManager() {
+        const type = state.lookupType,
+          descriptions = state.manageSection === "descriptions",
+          categories = state.data?.categories?.[type] || [],
+          mappings = state.data?.mappings?.[type] || [],
+          fixed = type === "investment";
+        const journal =
+          '<div class="field"><label for="lookupType">Journal</label><select id="lookupType">' +
+          selectOptions(["expense", "income", "investment"], type) +
+          "</select></div>";
+        const categoryField = descriptions
+          ? '<div class="field"><label for="lookupCategory">Category</label><select id="lookupCategory" ' +
+            (fixed ? "disabled" : "required") +
+            ">" +
+            (fixed
+              ? selectOptions(categories, settings()?.categories.investment)
+              : '<option value="">Choose a category</option>' +
+                selectOptions(categories, "") +
+                '<option value="__new__">+ Add a category</option>') +
+            "</select>" +
+            (fixed
+              ? ""
+              : '<button type="button" class="textlink" id="addLookupCategory" aria-controls="newLookupCategoryField" aria-expanded="false" style="margin-top:10px">+ Add new category</button>') +
+            '</div><div class="field full" id="newLookupCategoryField" hidden><label for="newLookupCategory">New category</label><input id="newLookupCategory" maxlength="180"><small>The category and description will be saved together.</small></div>'
+          : "";
+        const form =
+          '<div class="card"><form id="lookupForm"><div class="formgrid">' +
+          journal +
+          (!descriptions && fixed
+            ? '<div class="notice">Investment entries use the Investments category. Add investment descriptions in Descriptions.</div>'
+            : '<div class="field"><label for="lookupName">' +
+              (descriptions ? "Description" : "Category name") +
+              '</label><input id="lookupName" required maxlength="180" placeholder="' +
+              (descriptions
+                ? "For example, Freelance work"
+                : "For example, Education") +
+              '"></div>' +
+              categoryField) +
+          "</div>" +
+          (!descriptions && fixed
+            ? ""
+            : '<div class="modal-footer"><button class="button" id="saveLookup" ' +
+              (!loaded() ? "disabled" : "") +
+              ">Add " +
+              (descriptions ? "description" : "category") +
+              "</button></div>") +
+          '<p class="formerror" id="lookupError" role="alert"></p></form></div>';
+        const entries = descriptions
+          ? mappings
+          : categories.map((category) => ({ category }));
+        return (
+          '<div class="notice">Save reusable choices for each journal. Existing transaction records and mappings are kept. Investments use a fixed category.</div>' +
+          form +
+          '<div class="card" style="margin-top:23px"><div class="cardhead"><h2>' +
+          (descriptions ? "Descriptions" : "Categories") +
+          '</h2><span class="pill">' +
+          entries.length +
+          ' saved</span></div><div class="tablewrap" style="max-height:420px"><table><thead><tr>' +
+          (descriptions ? "<th>Description</th>" : "") +
+          "<th>Category</th></tr></thead><tbody>" +
+          entries
+            .map(
+              (entry) =>
+                "<tr>" +
+                (descriptions
+                  ? "<td>" + esc(entry.description) + "</td>"
+                  : "") +
+                "<td>" +
+                esc(entry.category) +
+                "</td></tr>",
+            )
+            .join("") +
+          "</tbody></table></div>" +
+          (!entries.length ? "<p>No choices added yet.</p>" : "") +
+          "</div>"
+        );
+      }
+      async function openProfile() {
+        if (state.saveBusy) return;
+        state.view = "profile";
+        state.profileLoading = true;
+        render();
+        try {
+          state.profile = await rpc("getWorkspaceSettings");
+          state.setupRequired = state.profile.setupRequired;
+        } catch (error) {
+          toast(error.message, true);
+        } finally {
+          state.profileLoading = false;
+          if (state.view === "profile") render();
+        }
+      }
+      function profileView() {
+        if (state.profileLoading)
+          return '<div class="card"><p>Loading your settings…</p></div>';
+        if (!state.profile)
+          return '<div class="card"><p>Connect to the deployed app to load your profile.</p><button class="button" id="loadProfileSettings">Load profile & settings</button></div>';
+        const p = state.profile,
+          defaults = Intl.DateTimeFormat().resolvedOptions();
+        const field = (id, label, value, attributes = "", help = "") =>
+          '<div class="field"><label for="' +
+          id +
+          '">' +
+          label +
+          '</label><input id="' +
+          id +
+          '" value="' +
+          esc(value) +
+          '" ' +
+          attributes +
+          ">" +
+          (help ? "<small>" + help + "</small>" : "") +
+          "</div>";
+        return (
+          (p.setupRequired
+            ? '<div class="notice">Welcome to Kashlo. Connect your own compatible Kashlo workbook to get started. Your existing transactions stay in that workbook.</div>'
+            : "") +
+          '<form id="profileForm"><div class="settings-grid"><section class="card"><h2>Profile</h2>' +
+          field(
+            "profileOwnerName",
+            "Your name",
+            p.ownerName,
+            'required maxlength="80" autocomplete="name"',
+          ) +
+          field(
+            "profileWorkspaceLabel",
+            "Workspace name",
+            p.workspaceLabel,
+            'required maxlength="80"',
+          ) +
+          field(
+            "profileEmail",
+            "Google account",
+            p.ownerEmail,
+            "readonly",
+            "Access follows the Google account that owns this private deployment.",
+          ) +
+          '</section><section class="card"><h2>Workbook settings</h2>' +
+          field(
+            "profileWorkbook",
+            "Google Sheet URL or ID",
+            p.workbook,
+            'required spellcheck="false"',
+            "Use a Kashlo workbook containing the required journal, lookup, and dashboard sheets.",
+          ) +
+          '<div class="formgrid">' +
+          field(
+            "profileCurrency",
+            "Currency code",
+            p.currency,
+            'required maxlength="3" pattern="[A-Za-z]{3}" list="profileCurrencies" placeholder="INR or USD"',
+            "Controls app formatting; existing amounts are not converted.",
+          ) +
+          field(
+            "profileLocale",
+            "Locale",
+            p.locale || defaults.locale,
+            'required list="profileLocales" placeholder="en-IN"',
+          ) +
+          field(
+            "profileTimeZone",
+            "Time zone",
+            p.timeZone || defaults.timeZone,
+            'required list="profileTimeZones"',
+            "Applies to the workbook and transaction date grouping.",
+          ) +
+          field(
+            "profileYear",
+            "Year",
+            p.year,
+            'type="number" required min="1900" max="9999" step="1"',
+            "January–December. Must match the workbook's journal and dashboard sheets.",
+          ) +
+          '</div></section></div><datalist id="profileCurrencies">' +
+          [
+            "INR",
+            "USD",
+            "EUR",
+            "GBP",
+            "AUD",
+            "CAD",
+            "JPY",
+            "SGD",
+            "AED",
+            "CHF",
+            "NZD",
+            "ZAR",
+            "CNY",
+            "HKD",
+            "SAR",
+            "MYR",
+            "IDR",
+            "THB",
+            "BRL",
+            "MXN",
+          ]
+            .map((code) => '<option value="' + code + '"></option>')
+            .join("") +
+          '</datalist><datalist id="profileLocales">' +
+          ["en-IN", "en-US", "en-GB", "de-DE", "fr-FR", "ja-JP", "ar-AE"]
+            .map((code) => '<option value="' + code + '"></option>')
+            .join("") +
+          '</datalist><datalist id="profileTimeZones">' +
+          [
+            ...new Set([
+              defaults.timeZone,
+              "UTC",
+              "Asia/Kolkata",
+              "Asia/Singapore",
+              "Asia/Dubai",
+              "Europe/London",
+              "Europe/Paris",
+              "America/New_York",
+              "America/Los_Angeles",
+              "Australia/Sydney",
+            ]),
+          ]
+            .map((zone) => '<option value="' + esc(zone) + '"></option>')
+            .join("") +
+          '</datalist><p class="formerror" id="profileError" role="alert"></p><div class="modal-footer"><button class="button" id="saveProfile">' +
+          (p.setupRequired
+            ? "Validate & connect workbook"
+            : "Validate & save settings") +
+          "</button></div></form>"
+        );
+      }
+      function bindProfile() {
+        $("#loadProfileSettings")?.addEventListener("click", openProfile);
+        const form = $("#profileForm");
+        if (!state.profile || !form) return;
+        form.onsubmit = async (event) => {
+          event.preventDefault();
+          if (state.saveBusy || state.loading) return;
+          const firstSetup = state.profile.setupRequired;
+          const payload = {
+            requestId: id(),
+            revision: state.profile.revision,
+            ownerName: $("#profileOwnerName").value,
+            workspaceLabel: $("#profileWorkspaceLabel").value,
+            workbook: $("#profileWorkbook").value,
+            currency: $("#profileCurrency").value,
+            locale: $("#profileLocale").value,
+            timeZone: $("#profileTimeZone").value,
+            year: $("#profileYear").value,
+          };
+          state.saveBusy = true;
+          $("#saveProfile").disabled = true;
+          $("#profileError").textContent = "";
+          try {
+            const result = await rpc("saveWorkspaceSettings", payload);
+            state.profile = result.profile;
+            state.setupRequired = false;
+            state.data = null;
+            state.search = "";
+            state.type = "all";
+            state.trip = "";
+            $("#connectionDot").classList.remove("live");
+            $("#connectionLabel").textContent = "Connecting to your workbook…";
+            $("#sheetLink").hidden = true;
+            state.view = firstSetup ? "overview" : "profile";
+            render();
+            const refreshed = await refresh();
+            toast(
+              refreshed
+                ? "Settings saved. Your workbook is connected."
+                : "Settings saved. Refresh to load the workbook.",
+              !refreshed,
+            );
+          } catch (error) {
+            const message =
+              error.message +
+              " If the result is uncertain, reload settings before trying again.";
+            if (state.view === "profile" && $("#profileError"))
+              $("#profileError").textContent = message;
+            else toast(message, true);
+          } finally {
+            state.saveBusy = false;
+            if (state.view === "profile" && $("#saveProfile"))
+              $("#saveProfile").disabled = false;
+          }
+        };
+      }
+      const paymentMethods = () =>
+        settings()?.paymentMethods || ["Bank transfer", "Card", "UPI", "Cash"];
+      const namedPaymentMethods = () =>
+        paymentMethods().filter((method) => method !== "Cash");
+      // The same type creator is used in Manage and inside an unsaved transaction.
+      function paymentTypeFields(prefix) {
+        return (
+          '<label for="' +
+          prefix +
+          'PaymentTypeName">New payment type</label><input id="' +
+          prefix +
+          'PaymentTypeName" maxlength="60" placeholder="For example, Wallet or Cheque"><small>Custom types can be used on their own, or with an optional payment name.</small><button type="button" class="button light" id="' +
+          prefix +
+          'SavePaymentType" style="margin-top:10px">Add payment type</button><p class="formerror" id="' +
+          prefix +
+          'PaymentTypeError" role="alert"></p>'
+        );
+      }
+      async function savePaymentType(name) {
+        const result = await rpc("addPaymentType", { name, requestId: id() });
+        state.data.config.paymentMethods = result.paymentMethods;
+        state.data.paymentOptions = result.paymentOptions;
+        return result;
+      }
+      function bindPaymentTypeCreator(prefix, onSaved) {
+        const button = $("#" + prefix + "SavePaymentType");
+        button.onclick = async () => {
+          if (state.saveBusy || !loaded()) return;
+          const input = $("#" + prefix + "PaymentTypeName"),
+            error = $("#" + prefix + "PaymentTypeError");
+          if (!input.value.trim()) {
+            error.textContent = "Enter a payment type name.";
+            return;
+          }
+          state.saveBusy = true;
+          button.disabled = true;
+          input.disabled = true;
+          error.textContent = "";
+          try {
+            const result = await savePaymentType(input.value);
+            onSaved(result);
+            toast(
+              result.created
+                ? "Payment type created."
+                : "This payment type already exists.",
+            );
+          } catch (failure) {
+            error.textContent = failure.message;
+          } finally {
+            state.saveBusy = false;
+            button.disabled = false;
+            input.disabled = false;
+          }
+        };
+        $("#" + prefix + "PaymentTypeName").onkeydown = (event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            button.click();
+          }
+        };
+      }
+      function payments() {
+        return (
+          '<div class="notice">Create payment types such as Wallet or Cheque, or add names under any type. Cash needs no name. Removing a name leaves its details blank across the app.</div><div class="card" style="margin-bottom:23px"><h2>Add payment type</h2><div class="field">' +
+          paymentTypeFields("manage") +
+          '</div></div><div class="card"><form id="paymentOptionForm"><div class="formgrid"><div class="field"><label for="paymentOptionType">Type</label><select id="paymentOptionType">' +
+          selectOptions(namedPaymentMethods(), state.paymentOptionType) +
+          '</select></div><div class="field"><label for="paymentOptionName">Name</label><input id="paymentOptionName" required maxlength="100" placeholder="For example, SBI Savings"></div></div><div class="modal-footer"><button class="button" id="addPaymentOption" ' +
+          (!loaded() ? "disabled" : "") +
+          '>Add name</button></div><p class="formerror" id="paymentOptionError"></p></form></div><div class="tripgrid" style="margin-top:23px">' +
+          namedPaymentMethods()
+            .map(
+              (method) =>
+                '<div class="card"><h2>' +
+                esc(
+                  method === "Bank transfer"
+                    ? "Bank accounts"
+                    : method === "Card"
+                      ? "Cards"
+                      : method === "UPI"
+                        ? "UPI apps"
+                        : method,
+                ) +
+                "</h2>" +
+                ((state.data?.paymentOptions?.[method] || [])
+                  .map(
+                    (name) =>
+                      '<div class="reviewitem"><span>' +
+                      esc(name) +
+                      '</span><button class="button outline" data-remove-payment-method="' +
+                      esc(method) +
+                      '" data-remove-payment-name="' +
+                      esc(name) +
+                      '">Remove</button></div>',
+                  )
+                  .join("") || "<p>No names added yet.</p>") +
+                "</div>",
+            )
+            .join("") +
+          "</div>"
+        );
+      }
+      async function savePaymentOption(action, method, name, requestId) {
+        const result = await rpc("managePaymentOption", {
+          action,
+          method,
+          name,
+          requestId,
+        });
+        state.data.paymentOptions = result.paymentOptions;
+        return result;
+      }
+      // Keep the same review ordering for both display and action-button indexes.
+      // Group by journal and normalized description, then month/date and amount.
+      // This keeps matching descriptions and exact duplicate groups adjacent
+      // without changing the transaction order in Google Sheets or other views.
+      function reviewRows() {
+        const normalize = (text) =>
+          String(text || "")
+            .replace(/[ \t\n\f\r]+/g, " ")
+            .replace(/^ +| +$/g, "")
+            .toLowerCase();
+        const compare = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+        return rows()
+          .filter((entry) => entry.issues.length)
+          .sort(
+            (a, b) =>
+              compare(a.type, b.type) ||
+              compare(normalize(a.description), normalize(b.description)) ||
+              compare(a.date, b.date) ||
+              (Number(a.amount) || 0) - (Number(b.amount) || 0) ||
+              compare(normalize(a.paymentMethod), normalize(b.paymentMethod)) ||
+              compare(normalize(a.paymentDetail), normalize(b.paymentDetail)) ||
+              a.row - b.row,
+          );
+      }
+      // Render records with nonempty server-supplied issues and the twelve month-completeness controls.
+      // Duplicate/check rules are evaluated by the source sheet and getData, not recalculated here.
+      function review() {
+        // Use the shared grouped order so button indexes match the rendered entries and notes.
+        const flagged = reviewRows();
+        let output =
+          '<div class="notice">' +
+          esc(
+            settings()?.reviewHelp ||
+              "Connect to load the workbook review guidance.",
+          ) +
+          '</div><div class="card"><div class="cardhead"><div><h2>Entries to look over</h2><p>The exact date and amount, with a decision you control.</p></div><span class="pill warn">' +
+          flagged.length +
+          " entries</span></div>";
+        // Each review button stores its index into flagged; notes preserve the last saved review text.
+        output += flagged.length
+          ? flagged
+              .map(
+                (t, i) =>
+                  '<article class="reviewitem"><div><span class="pill warn">' +
+                  esc(t.issues.join(" · ")) +
+                  "</span><h3>" +
+                  esc(t.description || "Missing description") +
+                  ' <span style="float:right;margin-right:15px">' +
+                  money(t.amount) +
+                  "</span></h3><p>" +
+                  esc(dateLabel(t.date)) +
+                  " · " +
+                  esc(t.type) +
+                  " · " +
+                  esc(t.category || "Missing category") +
+                  (t.paymentMethod
+                    ? " · " +
+                      esc(t.paymentMethod) +
+                      (visiblePaymentDetail(t)
+                        ? " · " + esc(visiblePaymentDetail(t))
+                        : "")
+                    : "") +
+                  " · row " +
+                  t.row +
+                  '</p><input aria-label="Review note for ' +
+                  esc(t.description) +
+                  '" id="note_' +
+                  i +
+                  '" placeholder="Optional note" value="' +
+                  esc(t.reviewNote) +
+                  '"></div><div class="reviewactions"><button class="button light" data-okay="' +
+                  i +
+                  '" ' +
+                  (!loaded() ? "disabled" : "") +
+                  '>✓ Okay</button><button class="button outline" data-correct="' +
+                  i +
+                  '">Correct transaction</button><button class="button outline" data-delete="' +
+                  i +
+                  '">Delete duplicate</button></div></article>',
+              )
+              .join("")
+          : empty(
+              loaded()
+                ? "Nothing pending here"
+                : "Your review queue will appear here",
+              loaded()
+                ? "No entries currently need review. Acknowledged duplicates remain in the original journals."
+                : "Connect the app to see dates, amounts, and unresolved checks.",
+            );
+        // Month controls use zero-based data-month indexes locally; handlers convert them before calling the server.
+        output +=
+          '</div><div class="card" style="margin-top:23px"><div class="cardhead"><div><h2>Monthly completeness</h2><p>Only you can confirm that every transaction has been entered.</p></div></div><div class="tablewrap"><table><thead><tr><th>Month</th><th>Record status</th></tr></thead><tbody>' +
+          MONTHS.map(
+            (m, i) =>
+              "<tr><td>" +
+              m +
+              '</td><td><select class="period month-status" data-month="' +
+              i +
+              '" ' +
+              (!loaded() ? "disabled" : "") +
+              ">" +
+              selectOptions(
+                settings()?.monthStatuses || [],
+                state.data?.monthStatus?.[i] || "Not reviewed",
+              ) +
+              "</select></td></tr>",
+          ).join("") +
+          "</tbody></table></div></div>";
+        return output;
+      }
+      // Rebuild the current view from state, update navigation and headings, then attach handlers.
+      // Replacing content removes old elements and their listeners, so bindContent must run after each render.
+      function render() {
+        renderSettings();
+        // Mark the active navigation button visually and through aria-current for assistive technology.
+        document.querySelectorAll("[data-view]").forEach((b) => {
+          b.classList.toggle(
+            "active",
+            b.dataset.view ===
+              (state.view === "trips" ? "dashboards" : state.view),
+          );
+          b.setAttribute(
+            "aria-current",
+            b.dataset.view ===
+              (state.view === "trips" ? "dashboards" : state.view)
+              ? "page"
+              : "false",
+          );
+        });
+        const titles = {
+          profile: [
+            "YOUR WORKSPACE",
+            state.setupRequired ? "Welcome to Kashlo." : "Profile & settings.",
+            "Your profile, workbook, and regional preferences.",
+          ],
+          payments: [
+            "YOUR EVERYDAY ESSENTIALS",
+            "Make it yours.",
+            "Manage descriptions, categories, and the ways you pay.",
+          ],
+          overview: [
+            "YOUR MONEY, IN MOTION",
+            "Find your flow.",
+            "Every move, in perspective.",
+          ],
+          transactions: [
+            "EVERY ENTRY COUNTS",
+            "Every move matters.",
+            "Your expenses, income and contributions, neatly in one place.",
+          ],
+          investments: [
+            "BUILDING FOR TOMORROW",
+            "Build your next chapter.",
+            "Track the money you set aside, separately from what you spend.",
+          ],
+          dashboards: [
+            "THE BIGGER PICTURE",
+            "Your money, in perspective.",
+            "Expense groups, spending insights, and cash flow in one place.",
+          ],
+          trips: [
+            "THE BIGGER PICTURE",
+            "Your money, in perspective.",
+            "Expense groups, spending insights, and cash flow in one place.",
+          ],
+          review: [
+            "A MOMENT OF CLARITY",
+            "A little money maintenance.",
+            "Review the details. Keep what is right. Correct what is not.",
+          ],
+        };
+        // Trip and review pages span months, so hide their month selector.
+        const [eye, title, subtitle] = titles[state.view];
+        $("#eyebrow").textContent = eye;
+        $("#pageTitle").textContent = title;
+        $("#pageSubtitle").textContent = subtitle;
+        $("#breadcrumb").textContent =
+          state.view === "payments"
+            ? "Manage"
+            : state.view === "trips"
+              ? "Dashboards"
+              : state.view[0].toUpperCase() + state.view.slice(1);
+        $("#monthSelect").hidden =
+          ["review", "payments", "profile"].includes(state.view) ||
+          isGroupDashboard();
+        // The badge counts records with issues rather than individual issues.
+        $("#reviewBadge").textContent = loaded()
+          ? rows().filter((t) => t.issues.length).length
+          : "—";
+        $("#newButton").disabled = state.setupRequired;
+        document
+          .querySelectorAll("[data-view]")
+          .forEach((button) => (button.disabled = state.setupRequired));
+        $("#content").innerHTML =
+          state.view === "profile"
+            ? profileView()
+            : state.view === "overview"
+              ? overview()
+              : state.view === "transactions"
+                ? transactions()
+                : state.view === "investments"
+                  ? transactions(true)
+                  : ["dashboards", "trips"].includes(state.view)
+                    ? dashboards()
+                    : state.view === "payments"
+                      ? manage()
+                      : review();
+        // Force a layout read between class changes to restart the view entrance animation.
+        $("#content").classList.remove("view");
+        void $("#content").offsetWidth;
+        $("#content").classList.add("view");
+        bindContent();
+      }
+      // Attach navigation, filtering, trip, review, and status handlers to the freshly rendered content.
+      function bindContent() {
+        if (state.view === "profile") bindProfile();
+        document.querySelectorAll("[data-dashboard]").forEach((button) => {
+          button.onclick = () => {
+            state.dashboard = button.dataset.dashboard;
+            state.trip = "";
+            render();
+          };
+        });
+        const chartViewport = $(".chartwrap");
+        if (
+          chartViewport &&
+          chartViewport.scrollWidth > chartViewport.clientWidth
+        )
+          chartViewport.scrollLeft = Math.max(
+            0,
+            (state.month * chartViewport.scrollWidth) / 12 -
+              chartViewport.clientWidth / 2,
+          );
+        document
+          .querySelectorAll("[data-nav]")
+          .forEach((b) => (b.onclick = () => navigate(b.dataset.nav)));
+        document.querySelectorAll("[data-manage]").forEach((button) => {
+          button.onclick = () => {
+            if (state.saveBusy) return;
+            state.manageSection = button.dataset.manage;
+            render();
+          };
+        });
+        if (state.view === "payments" && state.manageSection !== "payments") {
+          $("#lookupType").value = state.lookupType;
+          $("#lookupType").onchange = (event) => {
+            if (state.saveBusy) {
+              event.target.value = state.lookupType;
+              return;
+            }
+            state.lookupType = event.target.value;
+            render();
+          };
+          if (state.manageSection === "descriptions") {
+            $("#lookupCategory").onchange = () => {
+              const creating = $("#lookupCategory").value === "__new__";
+              $("#newLookupCategoryField").hidden = !creating;
+              $("#newLookupCategory").required = creating;
+              $("#addLookupCategory")?.setAttribute(
+                "aria-expanded",
+                String(creating),
+              );
+            };
+            if (state.lookupType !== "investment") {
+              $("#addLookupCategory").onclick = () => {
+                if (state.saveBusy) return;
+                $("#lookupCategory").value = "__new__";
+                $("#lookupCategory").onchange();
+                $("#newLookupCategory").focus();
+              };
+            }
+          }
+          $("#lookupForm").onsubmit = async (event) => {
+            event.preventDefault();
+            if (
+              state.saveBusy ||
+              !loaded() ||
+              (state.lookupType === "investment" &&
+                state.manageSection === "categories")
+            )
+              return;
+            const descriptions = state.manageSection === "descriptions";
+            const payload = {
+              kind: descriptions ? "description" : "category",
+              type: state.lookupType,
+              name: $("#lookupName").value,
+              requestId: id(),
+            };
+            if (descriptions) {
+              payload.category = $("#lookupCategory").value;
+              payload.newCategory =
+                payload.category === "__new__"
+                  ? $("#newLookupCategory").value
+                  : "";
+            }
+            if (
+              !payload.name.trim() ||
+              (payload.category === "__new__" && !payload.newCategory.trim())
+            ) {
+              $("#lookupError").textContent =
+                "Enter a name for each required field.";
+              return;
+            }
+            state.saveBusy = true;
+            $("#saveLookup").disabled = true;
+            $("#lookupType").disabled = true;
+            $("#lookupError").textContent = "";
+            try {
+              const result = await rpc("addLookupOption", payload);
+              await refresh();
+              toast(
+                result.created
+                  ? "Saved to your sheet. Ready for new transactions."
+                  : "This choice already exists.",
+              );
+            } catch (error) {
+              if (state.view === "payments")
+                $("#lookupError").textContent = error.message;
+              else toast(error.message, true);
+            } finally {
+              state.saveBusy = false;
+              if (
+                state.view === "payments" &&
+                state.manageSection !== "payments"
+              ) {
+                if ($("#saveLookup")) $("#saveLookup").disabled = false;
+                $("#lookupType").disabled = false;
+              }
+            }
+          };
+        }
+        const paymentForm = $("#paymentOptionForm");
+        if (
+          state.view === "payments" &&
+          state.manageSection === "payments" &&
+          paymentForm
+        ) {
+          bindPaymentTypeCreator("manage", (result) => {
+            if (result.name !== "Cash") state.paymentOptionType = result.name;
+            render();
+          });
+          $("#paymentOptionType").value = state.paymentOptionType;
+          $("#paymentOptionType").onchange = (event) => {
+            state.paymentOptionType = event.target.value;
+          };
+          let requestId = id();
+          paymentForm.onsubmit = async (event) => {
+            event.preventDefault();
+            if (state.saveBusy || !loaded()) return;
+            state.saveBusy = true;
+            $("#addPaymentOption").disabled = true;
+            try {
+              await savePaymentOption(
+                "add",
+                $("#paymentOptionType").value,
+                $("#paymentOptionName").value,
+                requestId,
+              );
+              requestId = id();
+              render();
+              toast("Payment name added.");
+            } catch (error) {
+              $("#paymentOptionError").textContent = error.message;
+            } finally {
+              state.saveBusy = false;
+              $("#addPaymentOption").disabled = false;
+            }
+          };
+        }
+        document
+          .querySelectorAll("[data-remove-payment-name]")
+          .forEach((button) => {
+            const requestId = id();
+            button.onclick = async () => {
+              if (state.saveBusy) return;
+              state.saveBusy = true;
+              button.disabled = true;
+              try {
+                await savePaymentOption(
+                  "remove",
+                  button.dataset.removePaymentMethod,
+                  button.dataset.removePaymentName,
+                  requestId,
+                );
+                render();
+                toast(
+                  "Name removed. Its details now display as blank across the app.",
+                );
+              } catch (error) {
+                toast(error.message, true);
+              } finally {
+                state.saveBusy = false;
+                button.disabled = false;
+              }
+            };
+          });
+        // Identify records by journal and physical row rather than display index,
+        // so sorting, searching, and the Overview limit cannot target a different entry.
+        document.querySelectorAll("[data-edit-row]").forEach((button) => {
+          button.onclick = () => {
+            if (state.saveBusy) return;
+            const transaction = rows().find(
+              (entry) =>
+                entry.type === button.dataset.editType &&
+                entry.row === Number(button.dataset.editRow),
+            );
+            if (!transaction) {
+              toast(
+                "This transaction is no longer available. Refresh the app.",
+                true,
+              );
+              return;
+            }
+            openEntry(transaction);
+          };
+        });
+        document.querySelectorAll("[data-delete-row]").forEach((button) => {
+          button.onclick = () => {
+            if (state.saveBusy) return;
+            const transaction = rows().find(
+              (entry) =>
+                entry.type === button.dataset.deleteType &&
+                entry.row === Number(button.dataset.deleteRow),
+            );
+            if (!transaction) {
+              toast(
+                "This transaction is no longer available. Refresh the app.",
+                true,
+              );
+              return;
+            }
+            openDelete(transaction);
+          };
+        });
+        // Re-render after each search edit, then restore focus and caret position to the replacement input.
+        $("#search")?.addEventListener("input", (e) => {
+          state.search = e.target.value;
+          const start = e.target.selectionStart;
+          render();
+          $("#search").focus();
+          $("#search").setSelectionRange(start, start);
+        });
+        $("#typeFilter")?.addEventListener("change", (e) => {
+          state.type = e.target.value;
+          render();
+        });
+        // Support both pointer activation and Enter/Space on the keyboard-accessible trip cards.
+        document.querySelectorAll("[data-trip]").forEach((b) => {
+          b.onclick = () => {
+            state.trip = b.dataset.trip;
+            render();
+          };
+          b.onkeydown = (e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              b.click();
+            }
+          };
+        });
+        $("#newGroupButton")?.addEventListener("click", openGroupDialog);
+        $("#addGroupExpense")?.addEventListener("click", () => openEntry());
+        $("#backTrips")?.addEventListener("click", () => {
+          state.trip = "";
+          render();
+        });
+        // Use the shared grouped order so button indexes match the rendered entries and notes.
+        const flagged = reviewRows();
+        // Handle review actions using the matching issue record, physical row, and loaded fingerprint.
+        document.querySelectorAll("[data-okay]").forEach(
+          (b) =>
+            (b.onclick = async () => {
+              if (state.saveBusy) return;
+              const i = Number(b.dataset.okay),
+                t = flagged[i],
+                decision = "Okay";
+              // Block another review/entry save while this review request is in flight.
+              state.saveBusy = true;
+              b.disabled = true;
+              const payload = {
+                type: t.type,
+                row: t.row,
+                fingerprint: t.fingerprint,
+                decision,
+                // Use server-defined groups so monthly investment checks use the
+                // same membership as the worksheet; include fingerprints for every row.
+                entries: (t.duplicateGroup
+                  ? rows().filter(
+                      (entry) => entry.duplicateGroup === t.duplicateGroup,
+                    )
+                  : [t]
+                ).map((entry) => ({
+                  row: entry.row,
+                  fingerprint: entry.fingerprint,
+                })),
+                note: $("#note_" + i).value,
+                requestId: id(),
+              };
+              // After saving, fetch fresh issues and totals so the server response is reflected in the page.
+              try {
+                await rpc("setReview", payload);
+                toast(
+                  t.duplicateGroup
+                    ? "Duplicate group marked Okay. All amounts are unchanged."
+                    : "Entry marked Okay. Its amount is unchanged.",
+                );
+                await refresh();
+              } catch (e) {
+                toast(e.message, true);
+                b.disabled = false;
+              } finally {
+                state.saveBusy = false;
+              }
+            }),
+        );
+        document.querySelectorAll("[data-correct]").forEach((button) => {
+          button.onclick = () => {
+            if (!state.saveBusy)
+              openEntry(flagged[Number(button.dataset.correct)]);
+          };
+        });
+        document.querySelectorAll("[data-delete]").forEach((button) => {
+          button.onclick = () => {
+            if (!state.saveBusy)
+              openDelete(flagged[Number(button.dataset.delete)]);
+          };
+        });
+        // Send month index + 1 to the server; restore the previous displayed status if saving fails.
+        document.querySelectorAll(".month-status").forEach(
+          (s) =>
+            (s.onchange = async () => {
+              const month = Number(s.dataset.month),
+                previous = state.data.monthStatus[month];
+              s.disabled = true;
+              try {
+                await rpc("setMonthStatus", {
+                  month: month + 1,
+                  status: s.value,
+                  requestId: id(),
+                });
+                state.data.monthStatus[month] = s.value;
+                toast("Month status updated in the sheet.");
+              } catch (e) {
+                s.value = previous;
+                toast(e.message, true);
+              } finally {
+                s.disabled = false;
+              }
+            }),
+        );
+      }
+      // Switch pages and reset search text and selected trip; the selected month and journal filter persist.
+      function navigate(view) {
+        if (state.setupRequired) {
+          state.view = "profile";
+          render();
+          return;
+        }
+        if (view === "trips") {
+          state.dashboard = "groups";
+          view = "dashboards";
+        }
+        state.view = view;
+        state.search = "";
+        state.trip = "";
+        render();
+      }
+      // Fetch the current sheet snapshot and update connection status and last-refresh time.
+      // A failed refresh retains previously loaded data; it is labeled potentially stale.
+      // Local preview displays setup guidance without attempting to fabricate financial records.
+      async function refresh() {
+        // Prevent duplicate refreshes and temporarily disable the refresh button.
+        if (state.loading) return;
+        state.loading = true;
+        $("#refreshButton").disabled = true;
+        $("#refreshButton").textContent = "↻ Refreshing";
+        // Check the response shape before replacing state.data and revealing the live sheet link.
+        try {
+          const data = await rpc("getData");
+          if (data?.setupRequired) {
+            state.setupRequired = true;
+            state.profile = data.profile;
+            state.data = null;
+            state.view = "profile";
+            $("#setupBanner").hidden = true;
+            $("#sheetLink").hidden = true;
+            $("#connectionDot").classList.remove("live");
+            $("#connectionLabel").textContent = "Setup required";
+            $("#syncTime").textContent =
+              "Connect your workbook to start using Kashlo.";
+            render();
+            return false;
+          }
+          if (!data || !Array.isArray(data.transactions))
+            throw new Error("The sheet returned an unexpected response.");
+          if (!data.config || !Number.isInteger(data.config.year))
+            throw new Error(
+              "The app settings are missing. Deploy Config.gs with Code.gs and Index.html.",
+            );
+          const previousYear = settings()?.year;
+          state.data = data;
+          state.setupRequired = false;
+          if (previousYear !== data.config.year) {
+            state.month = Number(data.config.defaultDate.slice(5, 7)) - 1;
+            state.trip = "";
+          }
+          $("#connectionDot").classList.add("live");
+          $("#connectionLabel").textContent = "Connected to Google Sheets";
+          $("#setupBanner").hidden = true;
+          $("#sheetLink").href = data.sheetUrl;
+          $("#sheetLink").hidden = false;
+          $("#syncTime").textContent =
+            "Updated " +
+            new Date(data.updatedAt).toLocaleTimeString(settings().locale, {
+              timeZone: settings().timeZone,
+              hour: "2-digit",
+              minute: "2-digit",
+            }) +
+            " · refresh for the latest sheet changes";
+          render();
+          return true;
+        } catch (e) {
+          // Show a failure toast for hosted Apps Script errors; a local preview instead renders empty states.
+          $("#connectionDot").classList.remove("live");
+          $("#connectionLabel").textContent = state.data
+            ? "Refresh failed · data may be stale"
+            : "Connection pending";
+          if (!state.data)
+            $("#setupBanner").hidden = !!(
+              window.google?.script?.run && state.profile
+            );
+          if (window.google?.script?.run) {
+            activityFailed = true;
+            toast(e.message, true);
+          } else render();
+          return false;
+        } finally {
+          // Restore the refresh control regardless of whether the read succeeded.
+          state.loading = false;
+          $("#refreshButton").disabled = false;
+          $("#refreshButton").textContent = "↻ Refresh";
+        }
+      }
+      // Build the add-transaction dialog using current lookup data.
+      // New entries start with a blank required date; corrections retain their recorded date.
+      // Saving is disabled before data has loaded. The server performs the final input validation.
+      function openEntry(transaction = null) {
+        if (state.saveBusy) return;
+        const isConnected = loaded();
+        $("#modalContainer").innerHTML =
+          '<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="entryTitle"><div class="modal-head"><h2 id="entryTitle">A new entry.</h2><button class="close" aria-label="Close dialog">×</button></div>' +
+          (!isConnected
+            ? '<div class="notice warning">Preview only. Connect the deployed app before saving transactions.</div>'
+            : "") +
+          '<form id="entryForm"><div class="formgrid"><div class="field"><label for="entryType">Journal</label><select id="entryType">' +
+          selectOptions(
+            ["expense", "income", "investment"],
+            state.view === "investments" ? "investment" : "expense",
+          ) +
+          '</select></div><div class="field"><label for="entryDate">Date</label><input id="entryDate" type="date" required></div><div class="field full"><label for="entryDescription">Description</label><input id="entryDescription" placeholder="For example, groceries or salary" list="knownDescriptions" autocomplete="off" required><datalist id="knownDescriptions"></datalist><small>Known descriptions select their category automatically.</small></div><div class="field"><label for="entryAmount">Amount</label><input id="entryAmount" type="number" step="0.01" placeholder="0.00" required></div><div class="field"><label for="entryCategory">Category</label><select id="entryCategory" required></select></div><div class="field full" id="tripField"><label for="entryTrip">Expense group (optional)</label><select id="entryTrip"></select><button type="button" class="textlink" id="newEntryGroup" style="margin-top:8px">+ Create new group</button><div id="inlineGroup" hidden style="margin-top:12px"><label for="inlineGroupName">New group name</label><input id="inlineGroupName" placeholder="For example, Wedding"><div style="display:flex;gap:10px;margin-top:8px"><button type="button" class="button light" id="saveInlineGroup">Add group</button><button type="button" class="textlink" id="cancelInlineGroup">Cancel</button></div><div class="formerror" id="inlineGroupError"></div></div></div><div class="field" id="paymentMethodField"><label for="entryPaymentMethod">Payment method (optional)</label><select id="entryPaymentMethod"></select><button type="button" class="textlink" id="newEntryPaymentType" aria-expanded="false" aria-controls="entryPaymentTypeCreator" style="margin-top:10px">+ Add payment type</button></div><div class="field full" id="entryPaymentTypeCreator" hidden>' +
+          paymentTypeFields("entry") +
+          '</div><div class="field" id="paymentDetailField" hidden><label for="entryPaymentDetail" id="paymentDetailLabel">Which bank?</label><select id="entryPaymentDetail"></select></div><div class="field full" id="paymentNameControls" hidden><button type="button" class="textlink" id="newPaymentName">+ Add payment name</button><small>Manage or remove names in Manage → Payment methods.</small><div id="inlinePayment" hidden><label for="inlinePaymentType">Payment type</label><select id="inlinePaymentType"></select><label for="inlinePaymentName">Payment name</label><input id="inlinePaymentName" maxlength="100" placeholder="Enter a name"><button type="button" class="button light" id="saveInlinePayment">Add and select</button><button type="button" class="textlink" id="cancelInlinePayment">Cancel</button><div class="formerror" id="inlinePaymentError"></div></div></div><div class="field full"><label for="entryNotes">Notes (optional)</label><textarea id="entryNotes" placeholder="Anything you would like to remember"></textarea></div></div><div class="formerror" id="formError"></div><div class="modal-footer"><button type="button" class="button outline" id="cancelEntry">Cancel</button><button class="button" id="saveEntry" ' +
+          (!isConnected ? "disabled" : "") +
+          ">Save to Google Sheet</button></div></form></section></div>";
+        if (transaction) {
+          $("#entryTitle").textContent = "Edit transaction";
+          $("#entryType").value = transaction.type;
+          $("#entryType").disabled = true;
+          $("#saveEntry").textContent = "Save changes";
+        }
+        // Date bounds, field limits, and currency come from the same server configuration.
+        if (isConnected) {
+          const config = settings();
+          $("#entryDate").min = config.year + "-01-01";
+          $("#entryDate").max = config.year + "-12-31";
+          $("#entryDate").value = "";
+          $("#entryDescription").maxLength = config.limits.descriptionLength;
+          $("#entryNotes").maxLength = config.limits.noteLength;
+          $("#inlineGroupName").maxLength = config.limits.groupNameLength;
+          document.querySelector('label[for="entryAmount"]').textContent =
+            "Amount (" + config.currency + ")";
+        }
+        // Allow closing the dialog only while an entry/review save is not in progress.
+        const close = () => {
+          if (!state.saveBusy) $("#modalContainer").innerHTML = "";
+        };
+        $(".close").onclick = close;
+        $("#cancelEntry").onclick = close;
+        // Suggest partial prefixes only. An exact known description is already selected,
+        // so clear the list rather than reopening it with the same value.
+        function populateDescriptions() {
+          const query = $("#entryDescription").value.trim().toLowerCase();
+          const mappings = state.data?.mappings?.[$("#entryType").value] || [];
+          const exactMatch = mappings.some(
+            (entry) => entry.description.trim().toLowerCase() === query,
+          );
+          $("#knownDescriptions").innerHTML =
+            query && !exactMatch
+              ? mappings
+                  .filter((entry) =>
+                    entry.description.trim().toLowerCase().startsWith(query),
+                  )
+                  .map(
+                    (entry) =>
+                      '<option value="' +
+                      esc(entry.description) +
+                      '"></option>',
+                  )
+                  .join("")
+              : "";
+        }
+        // Refresh categories, known descriptions, and trips when the journal changes; investments use a fixed category.
+        function populate() {
+          const type = $("#entryType").value;
+          $("#entryCategory").innerHTML =
+            '<option value="">Choose a category</option>' +
+            selectOptions(state.data?.categories?.[type] || [], "");
+          populateDescriptions();
+          $("#tripField").hidden = type !== "expense";
+          $("#entryTrip").innerHTML =
+            '<option value="">No expense group</option>' +
+            selectOptions(state.data?.trips || [], "");
+          if (type === "investment")
+            $("#entryCategory").value = settings()?.categories.investment || "";
+        }
+        $("#entryType").onchange = () => {
+          populate();
+          populatePayment();
+        };
+        populate();
+        // New expenses opened from a group detail view start with that group selected.
+        if (!transaction && isGroupDashboard() && state.trip)
+          $("#entryTrip").value = state.trip;
+        if (transaction) {
+          $("#entryDate").value = transaction.date;
+          $("#entryDescription").value = transaction.description;
+          $("#entryAmount").value = transaction.amount ?? "";
+          $("#entryCategory").value = transaction.category;
+          $("#entryTrip").value = transaction.trip;
+          $("#entryNotes").value = transaction.notes;
+          populateDescriptions();
+        }
+        $("#entryPaymentMethod").innerHTML =
+          '<option value="">Not recorded</option>' +
+          selectOptions(paymentMethods(), transaction?.paymentMethod || "");
+        $("#entryPaymentMethod").value = transaction?.paymentMethod || "";
+        function populatePayment() {
+          const income = $("#entryType").value === "income";
+          $("#paymentMethodField").hidden = income;
+          $("#entryPaymentMethod").required = false;
+          if (income) $("#entryPaymentMethod").value = "";
+          const method = $("#entryPaymentMethod").value;
+          const needsDetail = !income && !!method && method !== "Cash";
+          $("#entryPaymentTypeCreator").hidden = true;
+          $("#newEntryPaymentType").setAttribute("aria-expanded", "false");
+          $("#paymentDetailField").hidden = !needsDetail;
+          $("#paymentNameControls").hidden = income;
+          $("#entryPaymentDetail").required =
+            needsDetail && ["Bank transfer", "Card", "UPI"].includes(method);
+          $("#paymentDetailLabel").textContent =
+            method === "Card"
+              ? "Which card?"
+              : method === "UPI"
+                ? "Which UPI app?"
+                : method === "Bank transfer"
+                  ? "Which bank?"
+                  : "Payment name (optional)";
+          const options = [...(state.data?.paymentOptions?.[method] || [])];
+          const retained =
+            transaction?.paymentMethod === method
+              ? visiblePaymentDetail(transaction)
+              : "";
+          $("#entryPaymentDetail").innerHTML =
+            '<option value="">Choose a name</option>' +
+            selectOptions(options, retained);
+          $("#entryPaymentDetail").value = retained || "";
+          $("#inlinePayment").hidden = true;
+          $("#inlinePaymentError").textContent = "";
+        }
+        $("#entryPaymentMethod").onchange = populatePayment;
+        $("#newEntryPaymentType").onclick = () => {
+          if (state.saveBusy || !loaded()) return;
+          $("#entryPaymentTypeCreator").hidden = false;
+          $("#newEntryPaymentType").setAttribute("aria-expanded", "true");
+          $("#entryPaymentTypeError").textContent = "";
+          $("#entryPaymentTypeName").focus();
+        };
+        bindPaymentTypeCreator("entry", (result) => {
+          $("#entryPaymentMethod").innerHTML =
+            '<option value="">Not recorded</option>' +
+            selectOptions(paymentMethods(), result.name);
+          $("#entryPaymentMethod").value = result.name;
+          populatePayment();
+          $("#entryPaymentTypeName").value = "";
+        });
+        populatePayment();
+        let paymentRequestId = id();
+        $("#newPaymentName").onclick = () => {
+          if (state.saveBusy) return;
+          paymentRequestId = id();
+          $("#inlinePaymentType").innerHTML = selectOptions(
+            namedPaymentMethods(),
+            $("#entryPaymentMethod").value,
+          );
+          $("#inlinePaymentType").value = namedPaymentMethods().includes(
+            $("#entryPaymentMethod").value,
+          )
+            ? $("#entryPaymentMethod").value
+            : "Bank transfer";
+          $("#inlinePaymentName").value = "";
+          $("#inlinePaymentError").textContent = "";
+          $("#inlinePayment").hidden = false;
+          $("#inlinePaymentName").focus();
+        };
+        $("#cancelInlinePayment").onclick = () => {
+          if (!state.saveBusy) $("#inlinePayment").hidden = true;
+        };
+        $("#saveInlinePayment").onclick = async () => {
+          if (state.saveBusy || !loaded()) return;
+          if (!$("#inlinePaymentName").value.trim()) {
+            $("#inlinePaymentError").textContent = "Enter a name.";
+            return;
+          }
+          state.saveBusy = true;
+          $("#entryPaymentMethod").disabled = true;
+          $("#inlinePaymentType").disabled = true;
+          $("#inlinePaymentName").disabled = true;
+          $("#saveInlinePayment").disabled = true;
+          try {
+            const method = $("#inlinePaymentType").value;
+            const result = await savePaymentOption(
+              "add",
+              method,
+              $("#inlinePaymentName").value,
+              paymentRequestId,
+            );
+            $("#entryPaymentMethod").value = method;
+            populatePayment();
+            $("#entryPaymentDetail").value = result.name;
+          } catch (error) {
+            $("#inlinePaymentError").textContent = error.message;
+          } finally {
+            state.saveBusy = false;
+            $("#entryPaymentMethod").disabled = false;
+            $("#inlinePaymentType").disabled = false;
+            $("#inlinePaymentName").disabled = false;
+            $("#saveInlinePayment").disabled = false;
+          }
+        };
+        $("#inlinePaymentName").onkeydown = (event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            $("#saveInlinePayment").click();
+          }
+        };
+        // Inline creation preserves the date, description, amount, and other unsaved fields.
+        let groupRequestId = id();
+        $("#newEntryGroup").onclick = () => {
+          if (!loaded() || state.saveBusy) return;
+          groupRequestId = id();
+          $("#inlineGroup").hidden = false;
+          $("#inlineGroupError").textContent = "";
+          $("#inlineGroupName").focus();
+        };
+        $("#cancelInlineGroup").onclick = () => {
+          if (!state.saveBusy) $("#inlineGroup").hidden = true;
+        };
+        $("#saveInlineGroup").onclick = async () => {
+          if (!loaded() || state.saveBusy) return;
+          const name = $("#inlineGroupName").value.trim();
+          if (!name) {
+            $("#inlineGroupError").textContent = "Enter a group name.";
+            return;
+          }
+          state.saveBusy = true;
+          $("#saveInlineGroup").disabled = true;
+          $("#inlineGroupError").textContent = "";
+          try {
+            const result = await createGroup(name, groupRequestId);
+            $("#entryTrip").innerHTML =
+              '<option value="">No expense group</option>' +
+              selectOptions(state.data.trips, result.name);
+            $("#entryTrip").value = result.name;
+            $("#inlineGroup").hidden = true;
+            $("#inlineGroupName").value = "";
+            toast(
+              result.created
+                ? "Expense group created and selected."
+                : "Existing expense group selected.",
+            );
+          } catch (error) {
+            $("#inlineGroupError").textContent = error.message;
+          } finally {
+            state.saveBusy = false;
+            $("#saveInlineGroup").disabled = false;
+          }
+        };
+        $("#inlineGroupName").onkeydown = (event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            $("#saveInlineGroup").click();
+          }
+        };
+        // Auto-select the saved category when a description matches a known mapping after trimming and lowercasing.
+        $("#entryDescription").oninput = () => {
+          populateDescriptions();
+          const type = $("#entryType").value,
+            match = state.data?.mappings?.[type]?.find(
+              (m) =>
+                m.description.trim().toLowerCase() ===
+                $("#entryDescription").value.trim().toLowerCase(),
+            );
+          if (match) $("#entryCategory").value = match.category;
+        };
+        // Allocate one request ID per opened entry dialog and reuse it for retries.
+        // Prevent normal form navigation and disable Save while awaiting the server.
+        let requestId = id();
+        $("#entryForm").onsubmit = async (e) => {
+          e.preventDefault();
+          if (state.saveBusy || !loaded()) return;
+          state.saveBusy = true;
+          $("#saveEntry").disabled = true;
+          $("#saveEntry").textContent = "Saving…";
+          $("#formError").textContent = "";
+          // Collect form values for the server; the amount remains input text until the server converts it to a number.
+          const payload = {
+            requestId,
+            type: $("#entryType").value,
+            description: $("#entryDescription").value,
+            amount: $("#entryAmount").value,
+            date: $("#entryDate").value,
+            category: $("#entryCategory").value,
+            trip: $("#entryTrip").value,
+            notes: $("#entryNotes").value,
+            paymentMethod:
+              $("#entryType").value === "income"
+                ? ""
+                : $("#entryPaymentMethod").value,
+            paymentDetail:
+              $("#entryType").value === "income" ||
+              !$("#entryPaymentMethod").value ||
+              $("#entryPaymentMethod").value === "Cash"
+                ? ""
+                : $("#entryPaymentDetail").value,
+          };
+          // On success, close the dialog and refresh the live snapshot to include the saved transaction.
+          try {
+            if (transaction) {
+              payload.row = transaction.row;
+              payload.fingerprint = transaction.fingerprint;
+            }
+            await rpc(
+              transaction ? "updateTransaction" : "addTransaction",
+              payload,
+            );
+            if (
+              isGroupDashboard() &&
+              !transaction &&
+              payload.type === "expense"
+            )
+              state.trip = payload.trip;
+            $("#modalContainer").innerHTML = "";
+            toast(
+              transaction
+                ? "Transaction updated. Refreshing totals and review checks."
+                : "Saved to your Google Sheet.",
+            );
+            if (!transaction && payload.type === "investment")
+              celebrateInvestment(payload.amount);
+            await refresh();
+          } catch (e) {
+            // Keep the dialog and request ID on failure; the server blocks replay if this ID already started writing.
+            $("#formError").textContent =
+              e.message +
+              " If the save result is uncertain, refresh and check the sheet before trying again.";
+            $("#saveEntry").disabled = false;
+            $("#saveEntry").textContent = "Retry same submission";
+          } finally {
+            // Clear the busy flag even when the server rejects the submission.
+            state.saveBusy = false;
+          }
+        };
+        $("#entryDescription").focus();
+      }
+      // Confirm one specific entry before removing it. Keep the same request ID on retry,
+      // so a lost network response cannot cause a second deletion.
+      function openDelete(transaction) {
+        if (state.saveBusy || !loaded()) return;
+        const requestId = id();
+        $("#modalContainer").innerHTML =
+          '<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="deleteTitle"><div class="modal-head"><h2 id="deleteTitle">Delete this transaction?</h2><button class="close" aria-label="Close dialog">×</button></div><p><strong>' +
+          esc(transaction.description || "Missing description") +
+          "</strong></p><p>" +
+          esc(dateLabel(transaction.date)) +
+          " · " +
+          esc(money(transaction.amount)) +
+          " · " +
+          esc(transaction.type) +
+          " · row " +
+          transaction.row +
+          '</p><div class="notice warning">This permanently removes the selected transaction from your journal and totals. Other entries are kept.</div><div class="formerror" id="deleteError"></div><div class="modal-footer"><button class="button outline" id="cancelDelete">Cancel</button><button class="button danger" id="confirmDelete">Delete transaction</button></div></section></div>';
+        const close = () => {
+          if (!state.saveBusy) $("#modalContainer").innerHTML = "";
+        };
+        $(".close").onclick = close;
+        $("#cancelDelete").onclick = close;
+        $("#cancelDelete").focus();
+        $("#confirmDelete").onclick = async () => {
+          if (state.saveBusy) return;
+          state.saveBusy = true;
+          $("#confirmDelete").disabled = true;
+          $("#deleteError").textContent = "";
+          try {
+            await rpc("deleteTransaction", {
+              type: transaction.type,
+              row: transaction.row,
+              fingerprint: transaction.fingerprint,
+              requestId,
+              confirmed: true,
+            });
+            $("#modalContainer").innerHTML = "";
+            toast("Transaction deleted. Other entries are unchanged.");
+            await refresh();
+          } catch (error) {
+            $("#deleteError").textContent =
+              error.message +
+              " If the result is uncertain, refresh and check the sheet before starting a new deletion.";
+            $("#confirmDelete").disabled = false;
+            $("#confirmDelete").textContent = "Retry same deletion";
+          } finally {
+            state.saveBusy = false;
+          }
+        };
+      }
+      // Rebuild year labels whenever configuration loads or the view changes.
+      function renderSettings() {
+        const config = settings();
+        $("#monthSelect").disabled = !config;
+        $("#monthSelect").innerHTML = config
+          ? MONTHS.map(
+              (month, i) =>
+                '<option value="' +
+                i +
+                '"' +
+                (i === state.month ? " selected" : "") +
+                ">" +
+                month +
+                " " +
+                config.year +
+                "</option>",
+            ).join("")
+          : "<option>Connect to load year</option>";
+        if (!config) return;
+        document.title = config.appTitle;
+        $("#ownerName").textContent = config.ownerName;
+        $("#ownerInitials").textContent = config.ownerInitials;
+        $("#workspaceLabel").textContent =
+          config.workspaceLabel + " · " + config.year + " · Settings";
+      }
+      $("#monthSelect").onchange = (e) => {
+        state.month = Number(e.target.value);
+        render();
+      };
+      // Bind persistent sidebar and top-bar buttons, which live outside the replaceable view content.
+      document
+        .querySelectorAll("[data-view]")
+        .forEach((b) => (b.onclick = () => navigate(b.dataset.view)));
+      $("#profileButton").onclick = openProfile;
+      $("#mobileProfileButton").onclick = openProfile;
+      $("#refreshButton").onclick = refresh;
+      $("#newButton").onclick = () => openEntry();
+      // Show local deployment guidance in a dismissible dialog; opening this help does not connect the sheet.
+      $("#setupHelp").onclick = () => {
+        $("#modalContainer").innerHTML =
+          '<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-label="Setup instructions"><div class="modal-head"><h2>Connect your sheet.</h2><button class="close" aria-label="Close">×</button></div><p style="line-height:1.9;color:var(--muted)">Open your tracker → Extensions → Apps Script.<br>Add the included <strong>Config.gs</strong> and <strong>Code.gs</strong> and an HTML file named <strong>Index</strong>.<br>Set the manifest using <strong>appsscript.json</strong>.<br>Deploy → New deployment → Web app.<br>Execute as <strong>Me</strong>, access <strong>Only myself</strong>.<br>Authorize it and open the deployment URL.</p><div class="notice">The deployed app reads and writes your existing sheet. This preview does not have access to it.</div></section></div>';
+        $(".close").onclick = () => ($("#modalContainer").innerHTML = "");
+      };
+      // Allow Escape to dismiss a dialog unless a save is in progress.
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && !state.saveBusy)
+          $("#modalContainer").innerHTML = "";
+      });
+      // Render the initial empty interface immediately, then attempt the first live sheet read.
+      render();
+      refresh();
+    </script>
+  </body>
+</html>

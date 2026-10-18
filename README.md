@@ -1,0 +1,55 @@
+# Kashlo
+
+**Your money. Your flow.**
+
+A private Google Apps Script web app for recording expenses, income, investment contributions, expense groups (events, projects, and trips), and review decisions in Google Sheets.
+
+Complete the welcome screen to set your name, workbook, currency, locale, time zone, and year. Open **Profile & settings** through the sidebar avatar/name, or the profile icon beside the logo on mobile, to update these later. Personal settings are stored in Apps Script Properties; [Config.gs](Config.gs) contains the shared worksheet layout and product defaults.
+
+Start with the [Kashlo starter workbook](https://docs.google.com/spreadsheets/d/1DUx9pc11orQe0zhirA-l80z3VWRYEyGoILiw7znh77s/edit): **File → Make a copy**, then deploy its included Apps Script project as **Me / Only myself** and complete the welcome screen using your copied workbook URL. No code editing is needed for this template. Template access is managed by its owner.
+
+See [SETUP.md](SETUP.md#recommended-copy-the-ready-to-use-template) for the full browser-only deployment and authorization steps, updates, and the manual installation alternative. The empty template includes the required tabs and formulas for **2026**, general starter choices, and no personal transactions. Automatic workbook creation and guided year rollover are planned for a later phase.
+
+Run the local regression checks with Node.js:
+
+```sh
+node --test tests/config.test.cjs
+```
+
+## Payment tracking
+
+Payment tracking is optional when adding or editing an expense or investment. Leave **Not recorded** selected, or choose Bank transfer, Card, UPI, or Cash. Income entries do not ask for payment details. Bank transfer, Card, and UPI require a bank/card/app name when selected; Cash needs no extra detail. Use **+ Add payment type** in the entry form or **Manage → Payment methods → Add payment type** to create custom types such as Wallet or Cheque. New types can be used alone or with an optional payment name. **+ Add payment name** adds a named choice under an existing type without losing transaction details. You can also manage names in **Manage → Payment methods**. Names only—no card numbers or CVVs. Removing a name deletes its row from the Payment Methods sheet and leaves its detail blank across the app, including past transactions. The payment type remains visible and the original sheet record is preserved.
+
+Payment fields are stored in journal columns V:W, with reusable names in the **Payment Methods** worksheet and custom types in **Payment Types**. Existing transactions show **Not recorded** until updated.
+
+## The Kashlo experience
+
+A charcoal dashboard with lime and lavender accents keeps your recorded cash flow in focus. Monthly checkpoints reflect real entries, contributions, and your manual review status. Positive surplus has a gentle orbit animation; shortfalls stay red. New investment contributions get a brief celebration after saving. All animations respect reduced-motion preferences.
+
+## Dashboards
+
+Open **Dashboards** for **Expense groups**, **Spending insights**, or **Cash flow**. The existing expense-group view and creation flow are kept in this section. Spending insights compares recorded monthly expenses, category totals, and repeated descriptions. Cash flow shows income, expenses, investment contributions, and surplus/shortfall for each month. The month selector applies to Spending insights and Cash flow; expense groups continue to cover all recorded months.
+
+## Organizing descriptions
+
+**Item & Category** contains expense descriptions in A:B, allowed expense categories in D, and expense groups in H. **Investment Items** holds investment descriptions in A:B and their fixed category in D. Both lists are sorted by category and description when Kashlo learns a new name. Category dropdowns, duplicate highlighting, and missing-category highlighting help keep the master lists consistent.
+
+Old spellings and moved investment descriptions are retained in the hidden **Item Aliases** compatibility sheet, so historical journal descriptions and categories remain unchanged. These aliases are excluded from suggestions and are not relearned into the expense master. Use **Manage → Categories** to add expense or income categories, or add a category while creating a description. Investment entries keep the fixed **Investments** category.
+
+## Manage reusable choices
+
+Open **Manage** for **Descriptions**, **Categories**, and **Payment methods**. Select Expense, Income, or Investment to add a description and its category without recording a transaction. New choices are written to the matching master sheet and become available in entry forms immediately. Use **+ Add new category** beneath the category selector to create one alongside an expense or income description, without leaving the Descriptions section. Both are saved together. The selected section and journal stay selected after saving.
+
+Names are trimmed and checked without regard to case within each journal. Existing descriptions cannot be reassigned to another category here, and historical aliases remain protected. Adding choices preserves existing transactions. Editing, merging, and deleting descriptions or categories are outside this release.
+
+## Duplicate review
+
+Expense, income, and investment journals share one policy: possible duplicates match the calendar date, description, amount, and recorded payment type/name within the same journal. Text comparison ignores case and extra whitespace. Repeating a description on another day or for another amount is allowed. No investment names receive special treatment. **Okay** keeps and accepts the exact matching group; correction and confirmed deletion remain user decisions.
+
+## Profile & first-time setup
+
+A fresh installation starts with **Welcome to Kashlo**. Connect an existing compatible Kashlo workbook using its URL or ID; the app validates its journal, lookup, dashboard layout, and prepared duplicate-check formulas before saving. This step does not create a blank workbook template. The Google account comes from the private deployment and cannot be changed through the profile.
+
+Changing currency changes app display formatting without converting existing amounts or changing the sheet’s number formats. Changing time zone updates the selected workbook's time zone and date grouping. Changing the workbook or year requires the matching journal/dashboard sheets. Settings changes invalidate older open tabs, which must refresh before saving to prevent transactions from going to a different workspace. Existing records remain in their original workbook.
+
+The first launch of this settings-enabled release also requires setup for an existing installation; select your existing workbook to continue. Each person must use their own owner-only Apps Script deployment and workbook. The application is not a shared multi-user service.
