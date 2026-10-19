@@ -23,6 +23,7 @@ const FINANCE = Object.freeze({
   paymentTypesSheet: "Payment Types",
   paymentMethods: ["Bank transfer", "Card", "UPI", "Cash"],
   dashboardSheet: "{year} Dashboard",
+  reviewSheet: "{year} Review",
   groupSummarySheet: "{year} Group Summary",
 
   // Shared branding. Personal display preferences are collected in Profile & settings.
@@ -56,6 +57,7 @@ const FINANCE = Object.freeze({
       paymentDetail: 23,
       fingerprintColumns: [1, 2, 3, 4, 5, 6, 7, 8, 9, 22, 23],
       dateFormat: "d-mmm-yyyy",
+      dateDerived: { year: 1, day: 4, month: 5 },
     },
     lookup: {
       firstDataRow: 2,
@@ -68,6 +70,7 @@ const FINANCE = Object.freeze({
     dashboard: { firstMonthRow: 12, statusColumn: 6 },
   },
   limits: {
+    journalGrowthRows: 250,
     descriptionLength: 180,
     noteLength: 1000,
     groupNameLength: 100,

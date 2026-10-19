@@ -501,6 +501,251 @@ function duplicateFormula_(row, lastRow) {
   );
 }
 
+// Sort comparison fields once, compare neighboring records, then restore physical row order.
+// One spilling formula avoids repeating full-journal text normalization for every entry.
+function duplicateArrayFormula_(lastRow) {
+  const c = workspaceConfig_().layout.journal;
+  if (!Number.isInteger(lastRow) || lastRow < c.firstDataRow)
+    throw new Error("Choose a prepared journal row.");
+  const range = (column) => {
+    let label = "";
+    while (column > 0) {
+      column--;
+      label = String.fromCharCode(65 + (column % 26)) + label;
+      column = Math.floor(column / 26);
+    }
+    return "$" + label + "$" + c.firstDataRow + ":$" + label + "$" + lastRow;
+  };
+  const text = (ref) =>
+    "ARRAYFORMULA(LOWER(TRIM(REGEXREPLACE(TO_TEXT(" + ref + '),"\\s+"," "))))';
+  const amount = range(c.amount),
+    date = range(c.date);
+  const size = lastRow - c.firstDataRow + 1;
+  if (size === 1) return '=LET(descriptions,"",IF(TRUE,"",""))';
+  const comparisons = [1, 2, 3, 4, 5].map(
+    (column) =>
+      "(CHOOSECOLS(earlier," + column + ")=CHOOSECOLS(later," + column + "))",
+  );
+  return (
+    "=LET(descriptions," +
+    text(range(c.description)) +
+    ",amounts,ARRAYFORMULA(IF(ISNUMBER(" +
+    amount +
+    ")," +
+    amount +
+    ",0))," +
+    "days,ARRAYFORMULA(IFERROR(INT(" +
+    date +
+    "),0)),methods," +
+    text(range(c.paymentMethod)) +
+    ",details," +
+    text(range(c.paymentDetail)) +
+    ',valid,ARRAYFORMULA((descriptions<>"")*ISNUMBER(' +
+    amount +
+    ")*ISNUMBER(" +
+    date +
+    "))," +
+    "ordered,SORT(HSTACK(descriptions,amounts,days,methods,details,SEQUENCE(ROWS(descriptions)),valid),1,TRUE,2,TRUE,3,TRUE,4,TRUE,5,TRUE)," +
+    "earlier,CHOOSEROWS(ordered,SEQUENCE(" +
+    (size - 1) +
+    "))," +
+    "later,CHOOSEROWS(ordered,SEQUENCE(" +
+    (size - 1) +
+    ",1,2))," +
+    "matches,ARRAYFORMULA(CHOOSECOLS(earlier,7)*CHOOSECOLS(later,7)*" +
+    comparisons.join("*") +
+    ")," +
+    'flags,ARRAYFORMULA(IF(VSTACK(0,matches)+VSTACK(matches,0)>0,"Possible duplicate","")),' +
+    "CHOOSECOLS(SORT(HSTACK(CHOOSECOLS(ordered,6),flags),1,TRUE),2))"
+  );
+}
+
+function installDuplicateArray_(sheet) {
+  const c = workspaceConfig_().layout.journal;
+  const range = sheet.getRange(
+    c.firstDataRow,
+    c.duplicateIssue,
+    sheet.getMaxRows() - c.firstDataRow + 1,
+    1,
+  );
+  // Q is a generated check column; decisions and notes in T:U are never cleared.
+  range.clearContent();
+  sheet
+    .getRange(c.firstDataRow, c.duplicateIssue)
+    .setFormula(duplicateArrayFormula_(sheet.getMaxRows()));
+}
+
+function refreshDateArrays_(sheet, restore = []) {
+  const c = workspaceConfig_().layout.journal;
+  const dates = sheet
+    .getRange(
+      c.firstDataRow,
+      c.date,
+      sheet.getMaxRows() - c.firstDataRow + 1,
+      1,
+    )
+    .getA1Notation();
+  for (const [part, column] of Object.entries(c.dateDerived || {})) {
+    const anchor = sheet.getRange(c.firstDataRow, column);
+    if (restore.includes(column) || /ARRAYFORMULA/i.test(anchor.getFormula()))
+      anchor.setFormula(
+        "=ARRAYFORMULA(IF(" +
+          dates +
+          '="","",' +
+          part.toUpperCase() +
+          "(" +
+          dates +
+          ")))",
+      );
+  }
+}
+
+// copyTo uses the destination's top-left cell; autofill explicitly extends the formula below it.
+function fillJournalFormula_(source, sheet, column, start, count) {
+  const first = sheet.getRange(start, column);
+  source.copyTo(first, SpreadsheetApp.CopyPasteType.PASTE_FORMULA, false);
+  if (count > 1)
+    first.autoFill(
+      sheet.getRange(start, column, count, 1),
+      SpreadsheetApp.AutoFillSeries.DEFAULT_SERIES,
+    );
+}
+
+// Expand only when the next entry needs space. Never copy transaction values or review decisions.
+function ensureJournalCapacity_(sheet, row, book) {
+  const before = sheet.getMaxRows();
+  if (row <= before) return;
+  const c = workspaceConfig_().layout.journal;
+  const batch = workspaceConfig_().limits.journalGrowthRows || 250;
+  const count = Math.max(batch, row - before);
+  sheet.insertRowsAfter(before, count);
+  const target = sheet.getRange(before + 1, 1, count, journalWidth_());
+  const exemplar = sheet.getRange(before, 1, 1, journalWidth_());
+  exemplar.copyFormatToRange(
+    sheet,
+    1,
+    journalWidth_(),
+    before + 1,
+    before + count,
+  );
+  const validation = exemplar.getDataValidations()[0];
+  target.setDataValidations(
+    Array.from({ length: count }, () => validation.slice()),
+  );
+  // Category cells can be manually overridden, so find an actual formula instead of copying a value.
+  for (const column of [c.category, ...c.otherIssues]) {
+    const formulas = sheet
+      .getRange(c.firstDataRow, column, before - c.firstDataRow + 1, 1)
+      .getFormulas();
+    const source = formulas.findIndex(
+      ([formula]) => formula && !/ARRAYFORMULA/i.test(formula),
+    );
+    if (source >= 0)
+      fillJournalFormula_(
+        sheet.getRange(c.firstDataRow + source, column),
+        sheet,
+        column,
+        before + 1,
+        count,
+      );
+    else if (
+      c.otherIssues.indexOf(column) >= 0 &&
+      c.otherIssues.indexOf(column) < 2
+    ) {
+      const ref = (number) =>
+        sheet.getRange(before + 1, number).getA1Notation();
+      const used =
+        "OR(" +
+        [c.description, c.amount, c.date]
+          .map((number) => ref(number) + '<>""')
+          .join(",") +
+        ")";
+      const formula =
+        c.otherIssues.indexOf(column) === 0
+          ? "=IF(AND(" +
+            used +
+            ",IFERROR(LEN(" +
+            ref(c.category) +
+            ')=0,TRUE)),"Missing category","")'
+          : "=IF(AND(" +
+            used +
+            ",OR(" +
+            ref(c.description) +
+            '="",NOT(ISNUMBER(' +
+            ref(c.amount) +
+            ")),NOT(ISNUMBER(" +
+            ref(c.date) +
+            ')))),"Incomplete entry","")';
+      sheet.getRange(before + 1, column).setFormula(formula);
+      if (count > 1)
+        sheet
+          .getRange(before + 1, column)
+          .autoFill(
+            sheet.getRange(before + 1, column, count, 1),
+            SpreadsheetApp.AutoFillSeries.DEFAULT_SERIES,
+          );
+    }
+  }
+  // Support both existing spilling columns and older per-row date formulas.
+  for (const [part, column] of Object.entries(c.dateDerived || {})) {
+    if (
+      /ARRAYFORMULA/i.test(sheet.getRange(c.firstDataRow, column).getFormula())
+    )
+      continue;
+    const date = sheet.getRange(before + 1, c.date).getA1Notation();
+    sheet
+      .getRange(before + 1, column)
+      .setFormula(
+        "=IF(" + date + '="","",' + part.toUpperCase() + "(" + date + "))",
+      );
+    if (count > 1)
+      sheet
+        .getRange(before + 1, column)
+        .autoFill(
+          sheet.getRange(before + 1, column, count, 1),
+          SpreadsheetApp.AutoFillSeries.DEFAULT_SERIES,
+        );
+  }
+  refreshDateArrays_(sheet);
+  installDuplicateArray_(sheet);
+  if (book) ensureReviewCapacity_(book);
+}
+
+// The optional native review sheet must also have room for every possible flagged entry.
+function ensureReviewCapacity_(book) {
+  const config = workspaceConfig_();
+  if (!config.reviewSheet) return;
+  const review = book.getSheetByName(sheetName_(config.reviewSheet));
+  if (!review) return;
+  const needed =
+    4 +
+    Object.keys(config.sheets).reduce(
+      (total, type) =>
+        total +
+        Math.max(
+          0,
+          sheet_(book, type).getMaxRows() -
+            config.layout.journal.firstDataRow +
+            1,
+        ),
+      0,
+    );
+  const before = review.getMaxRows();
+  if (needed <= before) return;
+  review.insertRowsAfter(before, needed - before);
+  review
+    .getRange(before, 1, 1, review.getMaxColumns())
+    .copyFormatToRange(review, 1, review.getMaxColumns(), before + 1, needed);
+  const links = review.getRange(5, 8),
+    formula = links.getFormula();
+  if (/^=MAP\(A5:A\d+,G5:G\d+,/i.test(formula))
+    links.setFormula(
+      formula
+        .replace(/A5:A\d+/g, "A5:A" + needed)
+        .replace(/G5:G\d+/g, "G5:G" + needed),
+    );
+}
+
 // Read-only endpoint used for the initial load and manual refresh.
 // Return transactions, review issues, dropdown options, mappings, month statuses, and the sheet URL.
 // Sheet column numbers are one-based; arrays returned by getValues are zero-based.
@@ -523,6 +768,7 @@ function dataSnapshot_() {
     transactions = [],
     columns = workspaceConfig_().layout.journal;
   ensurePaymentStorage_(book);
+  ensureReviewCapacity_(book);
   // Read through payment details below the header of each journal, including formula-prepared rows.
   Object.keys(workspaceConfig_().sheets).forEach((type) => {
     const sheet = sheet_(book, type),
@@ -836,25 +1082,29 @@ function addTransaction(input) {
     const values = transactionValues_(book, input);
     const { description, category, lookup, lookupColumns, mappings, match } =
       values;
-    // Choose the row after the last nonblank description in column B.
-    // This does not fill earlier gaps or append after formula-only rows.
-    const descriptions = sheet
+    // Append after the last recorded input, including incomplete native-sheet entries.
+    // Formula-only rows and earlier gaps do not determine the append location.
+    const inputColumns = [columns.description, columns.amount, columns.date];
+    const firstColumn = Math.min(...inputColumns);
+    const inputs = sheet
       .getRange(
         columns.firstDataRow,
-        columns.description,
+        firstColumn,
         sheet.getMaxRows() - columns.firstDataRow + 1,
-        1,
+        Math.max(...inputColumns) - firstColumn + 1,
       )
-      .getDisplayValues()
-      .flat();
+      .getValues();
     let last = columns.firstDataRow - 1;
-    descriptions.forEach((v, i) => {
-      if (v.trim()) last = i + columns.firstDataRow;
+    inputs.forEach((values, i) => {
+      if (
+        inputColumns.some((column) =>
+          String(values[column - firstColumn] ?? "").trim(),
+        )
+      )
+        last = i + columns.firstDataRow;
     });
     const row = Math.max(last + 1, columns.firstDataRow);
-    // Journal capacity must already exist so the app can keep using prepared formula rows.
-    if (row > sheet.getMaxRows())
-      throw new Error("Journal is full. Add more prepared rows in the sheet.");
+    ensureJournalCapacity_(sheet, row, book);
     writeTransaction_(sheet, row, values, input.type);
     // Remember a genuinely new description once for subsequent automatic categorization.
     // Append a new description/category pair to lookup A:B, extending the lookup sheet if necessary.
@@ -1065,7 +1315,27 @@ function deleteTransaction(input) {
     throw new Error("Confirm the transaction deletion first.");
   return withWorkspaceWrite_(input, () => {
     const current = checkedTransaction_(book_(), input);
+    const c = workspaceConfig_().layout.journal;
+    const arrayCheck = /LET\(descriptions,/i.test(
+      current.sheet.getRange(c.firstDataRow, c.duplicateIssue).getFormula(),
+    );
+    const restoreDates =
+      current.row === c.firstDataRow
+        ? Object.values(c.dateDerived || {}).filter((column) =>
+            /ARRAYFORMULA/i.test(
+              current.sheet.getRange(c.firstDataRow, column).getFormula(),
+            ),
+          )
+        : [];
     current.sheet.deleteRow(current.row);
+    if (current.sheet.getMaxRows() < c.firstDataRow)
+      current.sheet.insertRowsAfter(
+        current.sheet.getMaxRows(),
+        c.firstDataRow - current.sheet.getMaxRows(),
+      );
+    // Deleting the first entry also deletes spill anchors; restore only generated columns.
+    if (arrayCheck) installDuplicateArray_(current.sheet);
+    refreshDateArrays_(current.sheet, restoreDates);
     return { ok: true, type: input.type, row: current.row };
   });
 }

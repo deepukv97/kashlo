@@ -10,6 +10,8 @@ Start with the [Kashlo — Personal Finances](https://docs.google.com/spreadshee
 
 See [SETUP.md](SETUP.md#recommended-copy-the-ready-to-use-template) for the full browser-only deployment and authorization steps, updates, and the manual installation alternative. The empty template includes the required tabs and formulas for **2026**, general starter choices, and no personal transactions. Automatic workbook creation and guided year rollover are planned for a later phase.
 
+Journals add space automatically as you record transactions through Kashlo, including the necessary formatting, dropdowns, and checks. Existing installations need the latest app files and a redeployment to receive this behavior.
+
 Run the local regression checks with Node.js:
 
 ```sh

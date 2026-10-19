@@ -14,6 +14,8 @@ const browserSource = fs
 class Sheet {
   constructor() {
     this.cells = Array.from({ length: 30 }, () => Array(30).fill(""));
+    this.copies = [];
+    this.validations = new Map();
   }
   getMaxRows() {
     return this.cells.length;
@@ -27,7 +29,50 @@ class Sheet {
         ),
       );
     const range = {
+      row,
+      col,
+      height,
+      width,
       getValues: values,
+      getDataValidations: () =>
+        Array.from({ length: height }, (_, r) =>
+          Array.from(
+            { length: width },
+            (_, c) => this.validations.get(`${row + r}:${col + c}`) || null,
+          ),
+        ),
+      setDataValidations: (rules) => {
+        rules.forEach((line, r) =>
+          line.forEach((rule, c) =>
+            this.validations.set(`${row + r}:${col + c}`, rule),
+          ),
+        );
+        this.copies.push({ type: "PASTE_DATA_VALIDATION" });
+        return range;
+      },
+      copyFormatToRange: () => this.copies.push({ type: "PASTE_FORMAT" }),
+      autoFill: (destination) =>
+        range.copyTo({ ...destination, repeat: true }, "PASTE_FORMULA"),
+      getA1Notation: () => {
+        const column = (n) => {
+          let text = "";
+          while (n) {
+            n--;
+            text = String.fromCharCode(65 + (n % 26)) + text;
+            n = Math.floor(n / 26);
+          }
+          return text;
+        };
+        return (
+          column(col) +
+          row +
+          (height === 1 && width === 1
+            ? ""
+            : ":" + column(col + width - 1) + (row + height - 1))
+        );
+      },
+      getFormula: () => range.getFormulas()[0][0],
+      setFormula: (formula) => range.setValue(formula),
       getFormulas: () =>
         values().map((row) =>
           row.map((value) =>
@@ -64,7 +109,56 @@ class Sheet {
       setBackground: () => range,
       setFontColor: () => range,
       setFontWeight: () => range,
-      clearContent: () => range.setValue(""),
+      clearContent: () => {
+        for (let r = 0; r < height; r++)
+          for (let c = 0; c < width; c++)
+            this.cells[row - 1 + r][col - 1 + c] = "";
+        return range;
+      },
+      copyTo: (destination, type) => {
+        this.copies.push({ row, col, height, width, destination, type });
+        if (type !== "PASTE_FORMULA") return;
+        const source = values();
+        for (
+          let r = 0;
+          r < (destination.repeat ? destination.height : height);
+          r++
+        )
+          for (
+            let c = 0;
+            c < (destination.repeat ? destination.width : width);
+            c++
+          ) {
+            const formula = source[r % height][c % width];
+            if (typeof formula !== "string" || !formula.startsWith("="))
+              continue;
+            const dr = destination.row + r - (row + (r % height)),
+              dc = destination.col + c - (col + (c % width));
+            this.cells[destination.row - 1 + r][destination.col - 1 + c] =
+              formula.replace(
+                /(\$?)([A-Z]+)(\$?)(\d+)/g,
+                (_, absCol, letters, absRow, number) => {
+                  let n =
+                      [...letters].reduce(
+                        (v, x) => v * 26 + x.charCodeAt(0) - 64,
+                        0,
+                      ) + (absCol ? 0 : dc),
+                    label = "";
+                  while (n > 0) {
+                    n--;
+                    label = String.fromCharCode(65 + (n % 26)) + label;
+                    n = Math.floor(n / 26);
+                  }
+                  return (
+                    absCol +
+                    label +
+                    absRow +
+                    (Number(number) + (absRow ? 0 : dr))
+                  );
+                },
+              );
+          }
+      },
     };
     return range;
   }
@@ -179,6 +273,12 @@ function fixture(overrides = {}) {
       getActiveUser: () => ({ getEmail: () => activeEmail }),
     },
     SpreadsheetApp: {
+      AutoFillSeries: { DEFAULT_SERIES: "DEFAULT_SERIES" },
+      CopyPasteType: {
+        PASTE_FORMAT: "PASTE_FORMAT",
+        PASTE_DATA_VALIDATION: "PASTE_DATA_VALIDATION",
+        PASTE_FORMULA: "PASTE_FORMULA",
+      },
       openById: (id) => {
         if (!books.has(id)) throw new Error("Workbook unavailable");
         return books.get(id);
@@ -3027,4 +3127,216 @@ test("profile validation rejects a read-only workbook even when its time zone al
     api.getWorkspaceSettings().workbook.includes(f.config.spreadsheetId),
     true,
   );
+});
+
+for (const type of ["expense", "income", "investment"]) {
+  test(`${type}: adding beyond prepared rows grows safely and remains retry-safe`, () => {
+    const f = fixture(),
+      api = f.context,
+      c = f.config.layout.journal;
+    const sheet = f.sheets[f.resolve(f.config.sheets[type])];
+    sheet.getRange(30, c.description).setValue("Existing final entry");
+    sheet.getRange(30, c.amount).setValue(77);
+    sheet.getRange(30, c.date).setValue(46023);
+    sheet.getRange(30, c.decision).setValue("Okay");
+    sheet.getRange(30, c.reviewNote).setValue("Keep this note");
+    const dateRule = { condition: "DATE_IS_VALID" };
+    sheet.getRange(30, c.date).setDataValidations([[dateRule]]);
+    sheet.getRange(2, 10).setValue("Unrelated summary");
+    sheet.getRange(2, c.category).setValue("Manual category");
+    sheet.getRange(3, c.category).setFormula('=IF(B3="","","Food")');
+    sheet
+      .getRange(2, c.otherIssues[0])
+      .setFormula('=IF(B2="","","Missing category")');
+    sheet
+      .getRange(2, c.otherIssues[1])
+      .setFormula('=IF(F2="","Incomplete entry","")');
+    sheet
+      .getRange(2, c.dateDerived.year)
+      .setFormula('=ARRAYFORMULA(IF(F2:F30="","",YEAR(F2:F30)))');
+    const before = sheet.cells.map((row) => [...row]);
+    const input = {
+      requestId: `journal_growth_${type}`,
+      type,
+      description: "New entry",
+      amount: 25,
+      date: "2026-02-01",
+      category: type === "investment" ? "Investments" : "Food",
+    };
+    const saved = api.addTransaction(input);
+    assert.equal(saved.row, 31);
+    assert.equal(sheet.getMaxRows(), 280);
+    assert.equal(sheet.getRange(32, c.description).getValues()[0][0], "");
+    assert.equal(sheet.getRange(31, c.decision).getValues()[0][0], "");
+    assert.equal(sheet.getRange(31, c.reviewNote).getValues()[0][0], "");
+    assert.match(sheet.getRange(32, c.category).getFormula(), /B32/);
+    assert.match(sheet.getRange(280, c.otherIssues[0]).getFormula(), /B280/);
+    assert.match(sheet.getRange(2, c.dateDerived.year).getFormula(), /F2:F280/);
+    assert.equal(
+      sheet.getRange(2, c.duplicateIssue).getFormula(),
+      api.duplicateArrayFormula_(280),
+    );
+    assert.ok(sheet.copies.some((copy) => copy.type === "PASTE_FORMAT"));
+    assert.deepEqual(sheet.getRange(280, c.date).getDataValidations(), [
+      [dateRule],
+    ]);
+    assert.ok(
+      sheet.copies.some((copy) => copy.type === "PASTE_DATA_VALIDATION"),
+    );
+    const editable = [
+      c.description,
+      c.amount,
+      c.date,
+      c.category,
+      c.notes,
+      c.trip,
+      c.paymentMethod,
+      c.paymentDetail,
+      c.decision,
+      c.reviewNote,
+      10,
+    ];
+    before.forEach((row, i) =>
+      editable.forEach((column) =>
+        assert.equal(sheet.cells[i][column - 1], row[column - 1]),
+      ),
+    );
+    assert.equal(api.addTransaction(input).row, 31);
+    assert.equal(sheet.getMaxRows(), 280);
+    sheet.getRange(280, c.description).setValue("Another final entry");
+    assert.equal(
+      api.addTransaction({ ...input, requestId: `grow_again_${type}` }).row,
+      281,
+    );
+    assert.equal(sheet.getMaxRows(), 530);
+  });
+}
+
+test("capacity growth preserves incomplete rows and works beyond 20,000 entries", () => {
+  const f = fixture(),
+    api = f.context,
+    c = f.config.layout.journal,
+    sheet = f.expense;
+  sheet.insertRowsAfter(30, 19970);
+  sheet.getRange(20000, c.amount).setValue(42);
+  const result = api.addTransaction({
+    requestId: "large_journal_growth",
+    type: "expense",
+    description: "New entry",
+    amount: 10,
+    date: "2026-02-01",
+    category: "Food",
+  });
+  assert.equal(result.row, 20001);
+  assert.equal(sheet.getMaxRows(), 20250);
+  assert.equal(sheet.getRange(20000, c.amount).getValues()[0][0], 42);
+  assert.match(
+    sheet.getRange(20001, c.otherIssues[0]).getFormula(),
+    /Missing category/,
+  );
+  assert.match(
+    sheet.getRange(20250, c.otherIssues[1]).getFormula(),
+    /Incomplete entry/,
+  );
+});
+
+test("invalid submissions cannot expand a journal", () => {
+  const f = fixture(),
+    c = f.config.layout.journal;
+  f.expense.getRange(30, c.description).setValue("Final entry");
+  assert.throws(
+    () =>
+      f.context.addTransaction({
+        requestId: "invalid_grow",
+        type: "expense",
+        description: "New",
+        amount: 10,
+        date: "",
+        category: "Food",
+      }),
+    /date/i,
+  );
+  assert.equal(f.expense.getMaxRows(), 30);
+});
+
+test("deleting the first entry restores generated spill anchors and preserves remaining values", () => {
+  const f = fixture(),
+    api = f.context,
+    c = f.config.layout.journal,
+    sheet = f.expense;
+  sheet.getRange(3, c.description).setValue("Remaining entry");
+  sheet.getRange(3, c.amount).setValue(17);
+  sheet.getRange(3, c.date).setValue(46024);
+  sheet.getRange(3, c.reviewNote).setValue("Preserve note");
+  api.installDuplicateArray_(sheet);
+  sheet
+    .getRange(2, c.dateDerived.year)
+    .setFormula('=ARRAYFORMULA(IF(F2:F30="","",YEAR(F2:F30)))');
+  const entry = api
+    .getData()
+    .transactions.find((t) => t.type === "expense" && t.row === 2);
+  api.deleteTransaction({
+    requestId: "delete_array_anchor",
+    type: "expense",
+    row: 2,
+    fingerprint: entry.fingerprint,
+    confirmed: true,
+  });
+  assert.equal(sheet.getMaxRows(), 29);
+  assert.equal(
+    sheet.getRange(2, c.description).getValues()[0][0],
+    "Remaining entry",
+  );
+  assert.equal(
+    sheet.getRange(2, c.reviewNote).getValues()[0][0],
+    "Preserve note",
+  );
+  assert.equal(
+    sheet.getRange(2, c.duplicateIssue).getFormula(),
+    api.duplicateArrayFormula_(29),
+  );
+  assert.match(sheet.getRange(2, c.dateDerived.year).getFormula(), /F2:F29/);
+});
+
+test("large-journal checks preserve configured columns without per-row full scans", () => {
+  const f = fixture({
+    apply(config) {
+      config.layout.journal.paymentMethod = 25;
+      config.layout.journal.paymentDetail = 26;
+    },
+  });
+  const formula = f.context.duplicateArrayFormula_(20001);
+  assert.match(formula, /\$Y\$2:\$Y\$20001/);
+  assert.match(formula, /\$Z\$2:\$Z\$20001/);
+  assert.match(formula, /SORT\(HSTACK/);
+  assert.doesNotMatch(formula, /SUMPRODUCT|COUNTIF|MAP\(/);
+  assert.equal(
+    f.context.duplicateArrayFormula_(2),
+    '=LET(descriptions,"",IF(TRUE,"",""))',
+  );
+});
+
+test("journal growth expands the optional native review sheet and its entry links", () => {
+  const f = fixture(),
+    api = f.context,
+    c = f.config.layout.journal;
+  const review = f.book.insertSheet(f.resolve(f.config.reviewSheet));
+  review
+    .getRange(5, 8)
+    .setFormula(
+      '=MAP(A5:A30,G5:G30,LAMBDA(journal,sourceRow,IF(journal="","",sourceRow)))',
+    );
+  review.getRange(1, 1).setValue("Review heading");
+  f.expense.getRange(30, c.description).setValue("Final entry");
+  api.addTransaction({
+    requestId: "review_capacity_growth",
+    type: "expense",
+    description: "New entry",
+    amount: 10,
+    date: "2026-02-01",
+    category: "Food",
+  });
+  assert.equal(review.getMaxRows(), 341);
+  assert.match(review.getRange(5, 8).getFormula(), /A5:A341,G5:G341/);
+  assert.equal(review.getRange(1, 1).getValues()[0][0], "Review heading");
 });
