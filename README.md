@@ -6,7 +6,7 @@ A private Google Apps Script web app for recording expenses, income, investment 
 
 Complete the welcome screen to set your name, workbook, currency, locale, time zone, and year. Open **Profile & settings** through the sidebar avatar/name, or the profile icon beside the logo on mobile, to update these later. Personal settings are stored in Apps Script Properties; [Config.gs](Config.gs) contains the shared worksheet layout and product defaults.
 
-Start with the [Kashlo starter workbook](https://docs.google.com/spreadsheets/d/1DUx9pc11orQe0zhirA-l80z3VWRYEyGoILiw7znh77s/edit): **File → Make a copy**, then deploy its included Apps Script project as **Me / Only myself** and complete the welcome screen using your copied workbook URL. No code editing is needed for this template. Template access is managed by its owner.
+Start with the [Kashlo — Personal Finances](https://docs.google.com/spreadsheets/d/1DUx9pc11orQe0zhirA-l80z3VWRYEyGoILiw7znh77s/edit) workbook: **File → Make a copy**, then deploy its included Apps Script project as **Me / Only myself** and complete the welcome screen using your copied workbook URL. No code editing is needed for this template. Template access is managed by its owner.
 
 See [SETUP.md](SETUP.md#recommended-copy-the-ready-to-use-template) for the full browser-only deployment and authorization steps, updates, and the manual installation alternative. The empty template includes the required tabs and formulas for **2026**, general starter choices, and no personal transactions. Automatic workbook creation and guided year rollover are planned for a later phase.
 
