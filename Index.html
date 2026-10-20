@@ -941,6 +941,13 @@
       .negative {
         color: var(--red);
       }
+      .transaction-group {
+        color: var(--muted);
+      }
+      .mobile-transaction-toggle,
+      .mobile-field-label {
+        display: none;
+      }
       .pagination {
         display: flex;
         align-items: center;
@@ -1818,6 +1825,125 @@
           padding: 9px;
         }
       }
+      @media (max-width: 760px) {
+        .transaction-list {
+          overflow: visible;
+        }
+        .transaction-table,
+        .transaction-table tbody {
+          display: block;
+          width: 100%;
+          white-space: normal;
+        }
+        .transaction-table thead {
+          position: absolute;
+          width: 1px;
+          height: 1px;
+          padding: 0;
+          margin: -1px;
+          overflow: hidden;
+          clip-path: inset(50%);
+          white-space: nowrap;
+        }
+        .transaction-table .transaction-record {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) auto;
+          column-gap: 12px;
+          row-gap: 9px;
+          margin-bottom: 10px;
+          padding: 15px;
+          border: 1px solid var(--line);
+          border-radius: 14px;
+          background: var(--canvas);
+        }
+        .transaction-table .transaction-record:last-child {
+          margin-bottom: 0;
+        }
+        .transaction-table td {
+          padding: 0;
+          border: 0;
+          min-width: 0;
+        }
+        .transaction-table .desc {
+          grid-column: 1;
+          grid-row: 1;
+          max-width: none;
+          overflow: visible;
+          white-space: normal;
+          overflow-wrap: anywhere;
+          line-height: 1.5;
+          font-size: 13px;
+        }
+        .transaction-table .amount {
+          grid-column: 2;
+          grid-row: 1;
+          align-self: start;
+          max-width: 150px;
+          overflow-wrap: anywhere;
+          font-size: 14px;
+          line-height: 1.5;
+        }
+        .transaction-table .transaction-date {
+          grid-column: 1;
+          grid-row: 2;
+          align-self: center;
+          font-size: 11px;
+          color: var(--muted);
+        }
+        .transaction-table .mobile-transaction-toggle {
+          display: block;
+          grid-column: 2;
+          grid-row: 2;
+        }
+        .transaction-details-toggle {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          min-height: 44px;
+          margin: -10px 0;
+          padding: 10px 0 10px 8px;
+          border: 0;
+          background: transparent;
+          color: var(--green);
+          font-size: 11px;
+        }
+        .transaction-details-toggle span {
+          font-size: 16px;
+        }
+        .details-open .transaction-details-toggle span {
+          transform: rotate(180deg);
+        }
+        .transaction-table .transaction-secondary {
+          display: none;
+        }
+        .transaction-table .details-open .transaction-secondary {
+          display: block;
+          grid-column: 1 / -1;
+          padding-top: 10px;
+          border-top: 1px solid var(--line);
+          overflow-wrap: anywhere;
+          line-height: 1.5;
+        }
+        .transaction-table .details-open .transaction-empty-detail {
+          display: none;
+        }
+        .transaction-table .mobile-field-label {
+          display: block;
+          margin-bottom: 4px;
+          color: var(--muted);
+          font-size: 10px;
+        }
+        .transaction-table .transaction-actions {
+          flex-wrap: wrap;
+          gap: 10px;
+        }
+        .transaction-table .edit-transaction,
+        .transaction-table .delete-transaction {
+          min-height: 44px;
+          padding: 10px 16px;
+          font-size: 12px;
+        }
+      }
       @media (prefers-reduced-motion: reduce) {
         *,
         *::before,
@@ -2445,6 +2571,24 @@
             : "")
         );
       }
+      const expandedTransactions = new Set();
+      const transactionDetailKey = (entry) =>
+        entry.type + ":" + entry.row + ":" + entry.fingerprint;
+      const transactionDetailId = (entry, field) =>
+        "transaction-" + entry.type + "-" + entry.row + "-" + field;
+      function transactionField(entry, field, label, value, extraClass = "") {
+        return (
+          '<td role="cell" class="transaction-secondary ' +
+          extraClass +
+          '" id="' +
+          esc(transactionDetailId(entry, field)) +
+          '"><span class="mobile-field-label">' +
+          esc(label) +
+          "</span>" +
+          value +
+          "</td>"
+        );
+      }
       // Render supplied records as an escaped table, with at most 100 entries by default.
       // Callers choose filtering and ordering. Overview shows six recent entries.
       // Enable per-row editing and deletion in Overview, Transactions, and Investments only.
@@ -2464,18 +2608,22 @@
               : "Connect the app to read your journals. No sample transactions have been added.",
           );
         return (
-          '<div class="tablewrap"><table><thead><tr><th>Description</th><th>Date</th><th style="text-align:right">Amount</th><th>Category</th>' +
+          '<div class="tablewrap transaction-list"><table class="transaction-table" role="table"><thead><tr><th>Description</th><th>Date</th><th style="text-align:right">Amount</th><th>Category</th>' +
           (showExpenseGroup ? "<th>Expense group</th>" : "") +
           "<th>Payment method</th><th>Bank / card / UPI app</th>" +
           (editable ? "<th>Actions</th>" : "") +
-          "</tr></thead><tbody>" +
+          '<th class="mobile-transaction-toggle">Details</th></tr></thead><tbody>' +
           arr
             .slice(0, limit)
             .map(
               (t) =>
-                '<tr data-transaction-key="' +
+                '<tr role="row" class="transaction-record' +
+                (expandedTransactions.has(transactionDetailKey(t))
+                  ? " details-open"
+                  : "") +
+                '" data-transaction-key="' +
                 esc(t.type + ":" + t.row) +
-                '"><td class="desc">' +
+                '"><td role="cell" class="desc">' +
                 esc(t.description) +
                 '<span class="sub">' +
                 esc(
@@ -2485,25 +2633,45 @@
                     investment: "Investment",
                   }[t.type],
                 ) +
-                "</span></td><td>" +
+                '</span></td><td role="cell" class="transaction-date">' +
                 esc(dateLabel(t.date)) +
-                '</td><td class="amount" style="text-align:right">' +
+                '</td><td role="cell" class="amount" style="text-align:right">' +
                 money(t.amount) +
-                '</td><td><span class="pill">' +
-                esc(t.category || "Missing category") +
-                "</span></td>" +
-                (showExpenseGroup
-                  ? '<td style="color:var(--muted)">' +
-                    esc(t.trip || "—") +
-                    "</td>"
-                  : "") +
-                "<td>" +
-                esc(t.paymentMethod || "Not recorded") +
-                "</td><td>" +
-                esc(visiblePaymentDetail(t)) +
                 "</td>" +
+                transactionField(
+                  t,
+                  "category",
+                  "Category",
+                  '<span class="pill">' +
+                    esc(t.category || "Missing category") +
+                    "</span>",
+                ) +
+                (showExpenseGroup
+                  ? transactionField(
+                      t,
+                      "group",
+                      "Expense group",
+                      esc(t.trip || "—"),
+                      "transaction-group",
+                    )
+                  : "") +
+                transactionField(
+                  t,
+                  "method",
+                  "Payment method",
+                  esc(t.paymentMethod || "Not recorded"),
+                ) +
+                transactionField(
+                  t,
+                  "detail",
+                  "Bank / card / UPI app",
+                  esc(visiblePaymentDetail(t)),
+                  visiblePaymentDetail(t) ? "" : "transaction-empty-detail",
+                ) +
                 (editable
-                  ? '<td><div class="transaction-actions"><button type="button" class="button light edit-transaction" data-edit-type="' +
+                  ? '<td role="cell" class="transaction-secondary transaction-action-cell" id="' +
+                    esc(transactionDetailId(t, "actions")) +
+                    '"><div class="transaction-actions"><button type="button" class="button light edit-transaction" data-edit-type="' +
                     esc(t.type) +
                     '" data-edit-row="' +
                     t.row +
@@ -2533,7 +2701,29 @@
                     ) +
                     '">Delete</button></div></td>'
                   : "") +
-                "</tr>",
+                '<td role="cell" class="mobile-transaction-toggle"><button type="button" class="transaction-details-toggle" data-details-type="' +
+                esc(t.type) +
+                '" data-details-row="' +
+                t.row +
+                '" aria-label="Details for ' +
+                esc(t.description || "transaction") +
+                '" aria-expanded="' +
+                expandedTransactions.has(transactionDetailKey(t)) +
+                '" aria-controls="' +
+                [
+                  "category",
+                  ...(showExpenseGroup ? ["group"] : []),
+                  "method",
+                  "detail",
+                  ...(editable ? ["actions"] : []),
+                ]
+                  .map((field) => esc(transactionDetailId(t, field)))
+                  .join(" ") +
+                '">' +
+                (expandedTransactions.has(transactionDetailKey(t))
+                  ? "Less details"
+                  : "Details") +
+                '<span aria-hidden="true">⌄</span></button></td></tr>',
             )
             .join("") +
           "</tbody></table></div>" +
@@ -4160,6 +4350,24 @@
             openDelete(transaction);
           };
         });
+        document.querySelectorAll("[data-details-row]").forEach((button) => {
+          button.onclick = () => {
+            const entry = rows().find(
+              (item) =>
+                item.type === button.dataset.detailsType &&
+                item.row === Number(button.dataset.detailsRow),
+            );
+            if (!entry) return;
+            const key = transactionDetailKey(entry),
+              opening = !expandedTransactions.has(key);
+            if (opening) expandedTransactions.add(key);
+            else expandedTransactions.delete(key);
+            button.closest("tr").classList.toggle("details-open", opening);
+            button.setAttribute("aria-expanded", String(opening));
+            // Keep the chevron and the same focused button when toggling.
+            button.firstChild.nodeValue = opening ? "Less details" : "Details";
+          };
+        });
         document
           .querySelectorAll("[data-transaction-page]")
           .forEach((button) => {
@@ -4363,6 +4571,28 @@
           // Capture at response time so scrolling or typing during the read wins.
           const context =
             options.incremental === true ? captureViewContext() : null;
+          if (
+            sameWorkspace &&
+            options.editedTransaction &&
+            expandedTransactions.has(
+              transactionDetailKey(options.editedTransaction),
+            )
+          ) {
+            const edited = data.transactions.find(
+              (entry) =>
+                entry.type === options.editedTransaction.type &&
+                entry.row === options.editedTransaction.row,
+            );
+            if (edited) expandedTransactions.add(transactionDetailKey(edited));
+          }
+          if (!sameWorkspace) expandedTransactions.clear();
+          else if (expandedTransactions.size) {
+            const currentKeys = new Set(
+              data.transactions.map(transactionDetailKey),
+            );
+            for (const key of expandedTransactions)
+              if (!currentKeys.has(key)) expandedTransactions.delete(key);
+          }
           state.data = data;
           state.setupRequired = false;
           if (previousYear !== data.config.year) {
@@ -4736,7 +4966,11 @@
             if (!transaction && payload.type === "investment")
               celebrateInvestment(payload.amount);
             if (transaction) restoreViewContext(entryContext);
-            await refresh(transaction ? { incremental: true } : {});
+            await refresh(
+              transaction
+                ? { incremental: true, editedTransaction: transaction }
+                : {},
+            );
           } catch (e) {
             // Keep the dialog and request ID on failure; the server blocks replay if this ID already started writing.
             $("#formError").textContent =

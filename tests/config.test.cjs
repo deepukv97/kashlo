@@ -16,11 +16,25 @@ class Sheet {
     this.cells = Array.from({ length: 30 }, () => Array(30).fill(""));
     this.copies = [];
     this.validations = new Map();
+    this.operations = [];
   }
   getMaxRows() {
     return this.cells.length;
   }
   getRange(row, col, height = 1, width = 1) {
+    if (typeof row === "string") {
+      const match = row.match(/^([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?$/i);
+      assert.ok(match, row);
+      const column = (letters) =>
+        [...letters.toUpperCase()].reduce(
+          (n, letter) => n * 26 + letter.charCodeAt(0) - 64,
+          0,
+        );
+      row = Number(match[2]);
+      col = column(match[1]);
+      height = match[4] ? Number(match[4]) - row + 1 : 1;
+      width = match[3] ? column(match[3]) - col + 1 : 1;
+    }
     const values = () =>
       Array.from({ length: height }, (_, r) =>
         Array.from(
@@ -71,8 +85,19 @@ class Sheet {
             : ":" + column(col + width - 1) + (row + height - 1))
         );
       },
+      getRow: () => row,
+      getColumn: () => col,
       getFormula: () => range.getFormulas()[0][0],
-      setFormula: (formula) => range.setValue(formula),
+      setFormula: (formula) => range.setFormulas([[formula]]),
+      setFormulas: (matrix) => {
+        this.operations.push({ kind: "formulaWrite", row, col, height, width });
+        matrix.forEach((line, r) =>
+          line.forEach((formula, c) => {
+            this.cells[row - 1 + r][col - 1 + c] = formula;
+          }),
+        );
+        return range;
+      },
       getFormulas: () =>
         values().map((row) =>
           row.map((value) =>
@@ -85,6 +110,15 @@ class Sheet {
         return range;
       },
       setRichTextValue: (value) => range.setValue(value),
+      setRichTextValues: (matrix) => {
+        this.operations.push({ kind: "richText", row, col, height, width });
+        matrix.forEach((line, r) =>
+          line.forEach((value, c) => {
+            this.cells[row - 1 + r][col - 1 + c] = value;
+          }),
+        );
+        return range;
+      },
       setNumberFormat: () => range,
       setWrap: () => range,
       sort: (specs) => {
@@ -161,6 +195,33 @@ class Sheet {
       },
     };
     return range;
+  }
+  getRangeList(addresses) {
+    this.operations.push({ kind: "rangeList", addresses: [...addresses] });
+    return {
+      setValue: (value) => {
+        this.operations.push({
+          kind: "rangeListWrite",
+          value,
+          addresses: [...addresses],
+        });
+        for (const address of addresses) {
+          const match = address.match(/^([A-Z]+)(\d+):([A-Z]+)(\d+)$/);
+          assert.ok(match, address);
+          const col = [...match[1]].reduce(
+            (n, char) => n * 26 + char.charCodeAt(0) - 64,
+            0,
+          );
+          assert.equal(match[1], match[3]);
+          for (let row = Number(match[2]); row <= Number(match[4]); row++)
+            this.cells[row - 1][col - 1] = value;
+        }
+      },
+    };
+  }
+  deleteRows(row, count) {
+    this.operations.push({ kind: "deleteRows", row, count });
+    this.cells.splice(row - 1, count);
   }
   deleteRow(row) {
     this.cells.splice(row - 1, 1);
@@ -1813,7 +1874,10 @@ test("payment UI manages names and conditionally requires details without losing
       browser,
     );
     assert.doesNotMatch(element("#content").innerHTML, /Google Pay/);
-    assert.match(element("#content").innerHTML, /<td>UPI<\/td><td><\/td>/);
+    assert.match(
+      element("#content").innerHTML,
+      /id="transaction-[^"]+-method"><span class="mobile-field-label">Payment method<\/span>UPI<\/td><td[^>]+id="transaction-[^"]+-detail"><span class="mobile-field-label">Bank \/ card \/ UPI app<\/span><\/td>/,
+    );
   }
   browser.entry = JSON.parse(JSON.stringify(entry));
   vm.runInContext("openEntry(entry)", browser);
@@ -4592,4 +4656,527 @@ test("expense group records paginate while Overview keeps its six recent entries
   vm.runInContext('state.view="overview";var overviewHtml=overview();', b);
   assert.equal(tableKeys(b.overviewHtml).length, 6);
   assert.doesNotMatch(b.overviewHtml, /aria-label="Transaction pages"/);
+});
+
+test("mobile transaction details toggle only the selected record and render accessible controls", async () => {
+  const f = await pullRefreshBrowser(),
+    b = f.browser;
+  const entry = b.data.transactions[0],
+    attributes = {},
+    toggles = [];
+  const button = {
+    dataset: { detailsType: entry.type, detailsRow: String(entry.row) },
+    firstChild: { nodeValue: "Details" },
+    setAttribute: (name, value) => {
+      attributes[name] = value;
+    },
+    closest: () => ({
+      classList: { toggle: (name, open) => toggles.push([name, open]) },
+    }),
+  };
+  f.document.querySelectorAll = (selector) =>
+    selector === "[data-details-row]" ? [button] : [];
+  vm.runInContext("bindContent([])", b);
+  button.onclick();
+  assert.equal(attributes["aria-expanded"], "true");
+  assert.equal(button.firstChild.nodeValue, "Less details");
+  const expanded = vm.runInContext("transactionTable(rows(),100,true)", b);
+  assert.match(expanded, /transaction-record details-open/);
+  assert.match(
+    expanded,
+    /aria-controls="transaction-expense-2-category transaction-expense-2-group transaction-expense-2-method transaction-expense-2-detail transaction-expense-2-actions"/,
+  );
+  assert.equal((expanded.match(/data-edit-row=/g) || []).length, 1);
+  button.onclick();
+  assert.equal(attributes["aria-expanded"], "false");
+  assert.equal(button.firstChild.nodeValue, "Details");
+  assert.deepEqual(toggles, [
+    ["details-open", true],
+    ["details-open", false],
+  ]);
+  assert.doesNotMatch(
+    vm.runInContext("transactionTable(rows(),100,false)", b),
+    /data-edit-row=|data-delete-row=/,
+  );
+  assert.doesNotMatch(
+    vm.runInContext("transactionTable(rows(),100,true,false)", b),
+    /Expense group/,
+  );
+});
+
+test("mobile card expansion follows a successful edit but not shifted rows after deletion", async () => {
+  const f = await pullRefreshBrowser(),
+    b = f.browser;
+  vm.runInContext(
+    "var edited=rows()[0];expandedTransactions.add(transactionDetailKey(edited));",
+    b,
+  );
+  const task = vm.runInContext(
+    "refresh({incremental:true,editedTransaction:edited})",
+    b,
+  );
+  const updated = structuredClone(b.data);
+  updated.transactions[0].fingerprint = "after-edit";
+  updated.transactions[0].amount = 444;
+  f.requests[0].success(updated);
+  assert.equal(await task, true);
+  assert.equal(
+    vm.runInContext(
+      "expandedTransactions.has(transactionDetailKey(rows()[0]))",
+      b,
+    ),
+    true,
+  );
+  const read = vm.runInContext("refresh()", b);
+  const shifted = structuredClone(updated);
+  shifted.transactions[0].fingerprint = "after-deleting-another-row";
+  f.requests[1].success(shifted);
+  assert.equal(await read, true);
+  assert.equal(vm.runInContext("expandedTransactions.size", b), 0);
+});
+
+function reviewSnapshot(api) {
+  return api
+    .getData()
+    .transactions.map(
+      ({ type, row, fingerprint, decision, reviewNote, duplicateGroup }) => ({
+        type,
+        row,
+        fingerprint,
+        decision,
+        reviewNote,
+        duplicateGroup,
+      }),
+    );
+}
+function fragmentedDuplicates() {
+  const f = fixture(),
+    c = f.config.layout.journal;
+  const pattern = [
+    ["Group A", 50],
+    ["Group A", 50],
+    ["Unrelated", 999],
+    ["Group A", 50],
+    ["Group A", 50],
+    ["Group B", 80],
+    ["Group B", 80],
+    ["Group B", 80],
+    ["Group B", 80],
+    ["Accepted", 120],
+    ["Accepted", 120],
+  ];
+  for (const type of ["expense", "income", "investment"]) {
+    const sheet = f.sheets[f.resolve(f.config.sheets[type])];
+    sheet.cells.forEach((row) => row.fill(""));
+    pattern.forEach(([description, amount], i) => {
+      const row = sheet.cells[i + 1];
+      row[c.description - 1] = description;
+      row[c.amount - 1] = amount;
+      row[c.date - 1] = 46026;
+      row[c.category - 1] =
+        type === "investment" ? f.config.categories.investment : "Food";
+      row[c.duplicateIssue - 1] =
+        description === "Unrelated" ? "" : "Possible duplicate";
+      row[c.decision - 1] = description === "Accepted" ? "Okay" : "";
+      row[c.reviewNote - 1] = "Preserve row " + (i + 2);
+    });
+  }
+  return { ...f, c, api: f.context };
+}
+
+test("bulk Okay uses one decision batch and one contiguous note batch per journal", () => {
+  const f = bulkFixture();
+  const entries = f.entries.map((entry) => ({
+    ...entry,
+    note: entry.row === 2 ? "=SUM(1,2)" : "Reviewed " + entry.row,
+  }));
+  const input = {
+    action: "okay",
+    entries,
+    requestId: "batch_review_notes_receipt",
+  };
+  assert.equal(f.api.bulkReview(input).count, 9);
+  for (const type of ["expense", "income", "investment"]) {
+    const sheet = f.sheets[f.resolve(f.config.sheets[type])];
+    assert.equal(
+      sheet.operations.filter((op) => op.kind === "rangeListWrite").length,
+      1,
+    );
+    assert.deepEqual(
+      sheet.operations.filter((op) => op.kind === "richText"),
+      [{ kind: "richText", row: 2, col: f.c.reviewNote, height: 3, width: 1 }],
+    );
+    assert.equal(sheet.cells[1][f.c.reviewNote - 1], "=SUM(1,2)");
+    assert.equal(sheet.cells[4][f.c.reviewNote - 1], "");
+  }
+  const counts = Object.values(f.sheets).map(
+    (sheet) => sheet.operations.length,
+  );
+  f.api.bulkReview(input);
+  assert.deepEqual(
+    Object.values(f.sheets).map((sheet) => sheet.operations.length),
+    counts,
+  );
+});
+
+test("individual group Okay batches nonadjacent decisions and preserves other notes with relocated columns", () => {
+  const f = fixture({
+      apply(config) {
+        config.layout.journal.decision = 28;
+        config.layout.journal.reviewNote = 29;
+      },
+    }),
+    api = f.context,
+    c = f.config.layout.journal,
+    sheet = f.expense;
+  for (const row of [3, 5, 6]) sheet.cells[row - 1] = [...sheet.cells[1]];
+  sheet.cells[3] = [...sheet.cells[1]];
+  sheet.cells[3][c.amount - 1] = 999;
+  sheet.cells[3][c.duplicateIssue - 1] = "";
+  for (const row of [2, 3, 4, 5, 6])
+    sheet.cells[row - 1][c.reviewNote - 1] = "Keep " + row;
+  const snapshot = api.getData().transactions,
+    clicked = snapshot.find((t) => t.row === 5);
+  const members = snapshot.filter(
+    (t) => t.duplicateGroup === clicked.duplicateGroup,
+  );
+  api.setReview({
+    type: "expense",
+    row: 5,
+    fingerprint: clicked.fingerprint,
+    entries: members.map(({ row, fingerprint }) => ({ row, fingerprint })),
+    decision: "Okay",
+    note: "=literal review text",
+    requestId: "batch_single_group_receipt",
+  });
+  assert.deepEqual(
+    sheet.operations
+      .filter((op) => op.kind === "rangeListWrite")
+      .map((op) => op.addresses),
+    [["AB2:AB3", "AB5:AB6"]],
+  );
+  assert.equal(sheet.cells[3][c.decision - 1], "");
+  assert.equal(sheet.cells[4][c.reviewNote - 1], "=literal review text");
+  for (const row of [2, 3, 4, 6])
+    assert.equal(sheet.cells[row - 1][c.reviewNote - 1], "Keep " + row);
+});
+
+test("bulk deletion groups consecutive extras bottom-up and repairs each journal once", () => {
+  const f = fragmentedDuplicates(),
+    api = f.api,
+    c = f.c;
+  const repairs = [],
+    installs = [],
+    originalRefresh = api.refreshDateArrays_,
+    originalInstall = api.installDuplicateArray_;
+  for (const type of ["expense", "income", "investment"]) {
+    const sheet = f.sheets[f.resolve(f.config.sheets[type])];
+    api.installDuplicateArray_(sheet);
+    // The adapter stores formulas without calculating spill results; supply the
+    // worksheet's duplicate flags below the live anchor for this fixture.
+    for (let row = 3; row <= 12; row++)
+      sheet.cells[row - 1][c.duplicateIssue - 1] =
+        sheet.cells[row - 1][c.description - 1] === "Unrelated"
+          ? ""
+          : "Possible duplicate";
+
+    sheet
+      .getRange(2, c.dateDerived.year)
+      .setFormula('=ARRAYFORMULA(IF(F2:F30="","",YEAR(F2:F30)))');
+  }
+  api.refreshDateArrays_ = (sheet, restore) => {
+    repairs.push(sheet);
+    return originalRefresh(sheet, restore);
+  };
+  api.installDuplicateArray_ = (sheet) => {
+    installs.push(sheet);
+    return originalInstall(sheet);
+  };
+  const input = {
+    action: "delete",
+    entries: reviewSnapshot(api),
+    confirmed: true,
+    requestId: "grouped_delete_all_receipt",
+  };
+  assert.equal(api.bulkReview(input).count, 18);
+  assert.equal(repairs.length, 3);
+  assert.equal(installs.length, 3);
+  for (const type of ["expense", "income", "investment"]) {
+    const sheet = f.sheets[f.resolve(f.config.sheets[type])];
+    assert.deepEqual(
+      sheet.operations.filter((op) => op.kind === "deleteRows"),
+      [
+        { kind: "deleteRows", row: 8, count: 3 },
+        { kind: "deleteRows", row: 5, count: 2 },
+        { kind: "deleteRows", row: 3, count: 1 },
+      ],
+    );
+    assert.deepEqual(
+      sheet.cells.slice(1, 6).map((row) => row[c.description - 1]),
+      ["Group A", "Unrelated", "Group B", "Accepted", "Accepted"],
+    );
+    assert.deepEqual(
+      sheet.cells.slice(1, 6).map((row) => row[c.reviewNote - 1]),
+      [
+        "Preserve row 2",
+        "Preserve row 4",
+        "Preserve row 7",
+        "Preserve row 11",
+        "Preserve row 12",
+      ],
+    );
+    assert.match(sheet.getRange(2, c.dateDerived.year).getFormula(), /F2:F24/);
+    assert.match(
+      sheet.getRange(2, c.duplicateIssue).getFormula(),
+      /\$B\$2:\$B\$24/,
+    );
+  }
+  api.bulkReview(input);
+  assert.equal(repairs.length, 3);
+  assert.equal(installs.length, 3);
+});
+
+test("fragmented review queues use bounded decision batches without writing intervening rows", () => {
+  const f = fixture(),
+    api = f.context,
+    c = f.config.layout.journal,
+    sheet = f.expense;
+  sheet.insertRowsAfter(30, 1000);
+  const source = [...sheet.cells[1]];
+  for (let i = 0; i < 501; i++) sheet.cells[2 * i + 1] = [...source];
+  const input = {
+    action: "okay",
+    entries: reviewSnapshot(api),
+    requestId: "fragmented_review_receipt",
+  };
+  assert.equal(api.bulkReview(input).count, 501);
+  assert.deepEqual(
+    sheet.operations
+      .filter((op) => op.kind === "rangeListWrite")
+      .map((op) => op.addresses.length),
+    [250, 250, 1],
+  );
+  assert.equal(
+    sheet.operations.filter((op) => op.kind === "richText").length,
+    0,
+  );
+  for (let row = 3; row < 1002; row += 2)
+    assert.equal(sheet.cells[row - 1][c.decision - 1], "");
+});
+
+test("partially failed grouped deletions repair formulas and block replay before another row can be removed", () => {
+  for (const failAfterWrite of [false, true]) {
+    const f = fragmentedDuplicates(),
+      api = f.api,
+      c = f.c,
+      sheet = f.expense;
+    sheet
+      .getRange(2, c.dateDerived.year)
+      .setFormula('=ARRAYFORMULA(IF(F2:F30="","",YEAR(F2:F30)))');
+    const input = {
+      action: "delete",
+      entries: reviewSnapshot(api),
+      confirmed: true,
+      requestId: "partial_batch_delete_" + failAfterWrite,
+    };
+    const original = sheet.deleteRows.bind(sheet);
+    let calls = 0;
+    sheet.deleteRows = (row, count) => {
+      calls++;
+      if (calls === 2 && !failAfterWrite)
+        throw new Error("Simulated deletion failure");
+      original(row, count);
+      if (calls === 2 && failAfterWrite)
+        throw new Error("Simulated lost response");
+    };
+    assert.throws(() => api.bulkReview(input), /Simulated/);
+    const after = JSON.stringify(sheet.cells);
+    assert.match(
+      sheet.getRange(2, c.dateDerived.year).getFormula(),
+      new RegExp("F2:F" + sheet.getMaxRows()),
+    );
+    assert.throws(() => api.bulkReview(input), /may already have started/);
+    assert.equal(calls, 2);
+    assert.equal(JSON.stringify(sheet.cells), after);
+    assert.equal(
+      sheet.cells.filter((row) => row[c.description - 1] === "Unrelated")
+        .length,
+      1,
+    );
+    assert.equal(
+      sheet.cells.filter((row) => row[c.description - 1] === "Accepted").length,
+      2,
+    );
+  }
+});
+
+test("partially failed decision batches block replay without rewriting notes or later journals", () => {
+  const f = bulkFixture(),
+    sheet = f.expense;
+  const original = sheet.getRangeList.bind(sheet);
+  let calls = 0;
+  sheet.getRangeList = (addresses) => {
+    const range = original(addresses),
+      write = range.setValue;
+    range.setValue = (value) => {
+      calls++;
+      write(value);
+      throw new Error("Simulated decision response loss");
+    };
+    return range;
+  };
+  const input = {
+    action: "okay",
+    entries: f.entries,
+    requestId: "partial_decision_receipt",
+  };
+  assert.throws(() => f.api.bulkReview(input), /Simulated/);
+  const after = JSON.stringify(sheet.cells);
+  assert.throws(() => f.api.bulkReview(input), /may already have started/);
+  assert.equal(calls, 1);
+  assert.equal(JSON.stringify(sheet.cells), after);
+  assert.equal(
+    f.sheets[f.resolve(f.config.sheets.income)].operations.length,
+    0,
+  );
+});
+
+test("generated duplicate and date anchors are not rewritten when already current", () => {
+  const f = fixture(),
+    api = f.context,
+    sheet = f.expense,
+    c = f.config.layout.journal;
+  api.installDuplicateArray_(sheet);
+  for (const [part, column] of Object.entries(c.dateDerived))
+    sheet
+      .getRange(2, column)
+      .setFormula(
+        '=ARRAYFORMULA(IF(F2:F30="","",' + part.toUpperCase() + "(F2:F30)))",
+      );
+  const writes = sheet.operations.filter(
+    (op) => op.kind === "formulaWrite",
+  ).length;
+  api.installDuplicateArray_(sheet);
+  api.refreshDateArrays_(sheet);
+  assert.equal(
+    sheet.operations.filter((op) => op.kind === "formulaWrite").length,
+    writes,
+  );
+  sheet.getRange(2, c.dateDerived.year).setValue("");
+  api.refreshDateArrays_(sheet, [c.dateDerived.year]);
+  assert.match(
+    sheet.getRange(2, c.dateDerived.year).getFormula(),
+    /YEAR\(F2:F30\)/,
+  );
+  assert.equal(
+    sheet.operations.filter((op) => op.kind === "formulaWrite").length,
+    writes + 1,
+  );
+});
+
+test("duplicate spill formula binds source values and numeric checks once", () => {
+  const f = fixture(),
+    formula = f.context.duplicateArrayFormula_(20001);
+  assert.equal(formula.split("$C$2:$C$20001").length - 1, 1);
+  assert.equal(formula.split("$F$2:$F$20001").length - 1, 1);
+  assert.equal(formula.split("ISNUMBER(sourceAmounts)").length - 1, 1);
+  assert.equal(formula.split("ISNUMBER(sourceDates)").length - 1, 1);
+  assert.match(formula, /validAmounts\*validDates/);
+  assert.match(formula, /SEQUENCE\(19999\)/);
+});
+
+test("capacity range rewriting preserves quoted text, deliberate subranges, and other sheets", () => {
+  const f = fixture(),
+    api = f.context;
+  const caps = new Map([
+    ["Year Journal", { before: 650, after: 900 }],
+    ["Owner's Journal", { before: 30, after: 280 }],
+  ]);
+  const input =
+    "=SUM('Year Journal'!$C$2:$C)+SUM('Year Journal'!F2:F650)+SUM('Year Journal'!C2:C10)+SUM('Other'!C2:C)+\"'Year Journal'!C2:C\"+SUM('Owner''s Journal'!B2:B)";
+  const actual = api.boundJournalFormula_(input, caps);
+  assert.match(actual, /\$C\$2:\$C\$900/);
+  assert.match(actual, /F2:F900/);
+  assert.match(actual, /C2:C10/);
+  assert.match(actual, /'Other'!C2:C/);
+  assert.match(actual, /"'Year Journal'!C2:C"/);
+  assert.match(actual, /'Owner''s Journal'!B2:B280/);
+  assert.equal(api.boundJournalFormula_(actual, caps), actual);
+});
+
+test("growth bounds managed summary formulas in batches and preserves manual cells and status", () => {
+  const f = fixture(),
+    api = f.context,
+    dashboard = f.sheets[f.resolve(f.config.dashboardSheet)];
+  const expense = f.resolve(f.config.sheets.expense),
+    income = f.resolve(f.config.sheets.income);
+  dashboard.getRange(12, 2).setFormula("=SUM('" + income + "'!$C$2:$C)");
+  dashboard.getRange(12, 3).setFormula("=SUM('" + expense + "'!$C$2:$C$30)");
+  dashboard.getRange(12, 4).setValue(67);
+  dashboard.getRange(12, 6).setValue("Complete");
+  dashboard
+    .getRange(12, 8)
+    .setFormula("=FILTER('" + expense + "'!G2:G,'" + expense + '\'!B2:B<>"")');
+  dashboard.getRange(30, 3).setFormula("=SUM('" + expense + "'!C2:C)");
+  dashboard.operations = [];
+  api.ensureJournalCapacity_(f.expense, 31, f.book);
+  assert.match(dashboard.getRange(12, 2).getFormula(), /\$C\$2:\$C\$30/);
+  assert.match(dashboard.getRange(12, 3).getFormula(), /\$C\$2:\$C\$280/);
+  assert.match(dashboard.getRange(12, 8).getFormula(), /G2:G280/);
+  assert.equal(dashboard.getRange(12, 4).getValues()[0][0], 67);
+  assert.equal(dashboard.getRange(12, 6).getValues()[0][0], "Complete");
+  assert.equal(
+    dashboard.getRange(30, 3).getFormula(),
+    "=SUM('" + expense + "'!C2:C)",
+  );
+  assert.deepEqual(
+    dashboard.operations
+      .filter((op) => op.kind === "formulaWrite")
+      .map(({ row, col, height, width }) => ({ row, col, height, width })),
+    [
+      { row: 12, col: 2, height: 1, width: 2 },
+      { row: 12, col: 8, height: 1, width: 1 },
+    ],
+  );
+  dashboard.operations = [];
+  api.ensureJournalCapacity_(f.expense, 100, f.book);
+  api.getData();
+  assert.equal(dashboard.operations.length, 0);
+});
+
+test("managed bounds advance at successive capacity expansions and remain idempotent", () => {
+  const f = fixture(),
+    api = f.context,
+    dashboard = f.sheets[f.resolve(f.config.dashboardSheet)];
+  const name = f.resolve(f.config.sheets.expense);
+  dashboard.getRange(12, 3).setFormula("=SUM('" + name + "'!C2:C)");
+  api.ensureJournalCapacity_(f.expense, 31, f.book);
+  assert.match(dashboard.getRange(12, 3).getFormula(), /C2:C280/);
+  api.ensureJournalCapacity_(f.expense, 281, f.book);
+  assert.match(dashboard.getRange(12, 3).getFormula(), /C2:C530/);
+  dashboard.operations = [];
+  api.refreshWorkbookFormulaRanges_(f.book, f.expense, 280);
+  assert.equal(dashboard.operations.length, 0);
+});
+
+test("native Review source ranges follow growth without changing its decision logic or link cells", () => {
+  const f = fixture(),
+    api = f.context,
+    review = new Sheet(),
+    name = f.resolve(f.config.sheets.expense);
+  f.sheets[f.resolve(f.config.reviewSheet)] = review;
+  const formula =
+    "=LET(entries,FILTER('" +
+    name +
+    "'!B2:B,'" +
+    name +
+    '\'!T2:T<>"Okay"),entries)';
+  review.getRange(5, 1).setFormula(formula);
+  review.getRange(5, 8).setValue("Preserve action");
+  api.ensureJournalCapacity_(f.expense, 31, f.book);
+  assert.equal(
+    review.getRange(5, 1).getFormula(),
+    formula.replace("B2:B", "B2:B280").replace("T2:T", "T2:T280"),
+  );
+  assert.equal(review.getRange(5, 8).getValues()[0][0], "Preserve action");
 });

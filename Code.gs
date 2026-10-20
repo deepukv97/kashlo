@@ -649,22 +649,16 @@ function duplicateArrayFormula_(lastRow) {
   return (
     "=LET(descriptions," +
     text(range(c.description)) +
-    ",amounts,ARRAYFORMULA(IF(ISNUMBER(" +
+    ",sourceAmounts," +
     amount +
-    ")," +
-    amount +
-    ",0))," +
-    "days,ARRAYFORMULA(IFERROR(INT(" +
+    ",sourceDates," +
     date +
-    "),0)),methods," +
+    ",validAmounts,ARRAYFORMULA(ISNUMBER(sourceAmounts)),validDates,ARRAYFORMULA(ISNUMBER(sourceDates))," +
+    "amounts,ARRAYFORMULA(IF(validAmounts,sourceAmounts,0)),days,ARRAYFORMULA(IFERROR(INT(sourceDates),0)),methods," +
     text(range(c.paymentMethod)) +
     ",details," +
     text(range(c.paymentDetail)) +
-    ',valid,ARRAYFORMULA((descriptions<>"")*ISNUMBER(' +
-    amount +
-    ")*ISNUMBER(" +
-    date +
-    "))," +
+    ',valid,ARRAYFORMULA((descriptions<>"")*validAmounts*validDates),' +
     "ordered,SORT(HSTACK(descriptions,amounts,days,methods,details,SEQUENCE(ROWS(descriptions)),valid),1,TRUE,2,TRUE,3,TRUE,4,TRUE,5,TRUE)," +
     "earlier,CHOOSEROWS(ordered,SEQUENCE(" +
     (size - 1) +
@@ -682,17 +676,19 @@ function duplicateArrayFormula_(lastRow) {
 
 function installDuplicateArray_(sheet) {
   const c = workspaceConfig_().layout.journal;
+  const lastRow = sheet.getMaxRows();
+  const formula = duplicateArrayFormula_(lastRow);
+  const anchor = sheet.getRange(c.firstDataRow, c.duplicateIssue);
+  if (anchor.getFormula() === formula) return;
   const range = sheet.getRange(
     c.firstDataRow,
     c.duplicateIssue,
-    sheet.getMaxRows() - c.firstDataRow + 1,
+    lastRow - c.firstDataRow + 1,
     1,
   );
   // Q is a generated check column; decisions and notes in T:U are never cleared.
   range.clearContent();
-  sheet
-    .getRange(c.firstDataRow, c.duplicateIssue)
-    .setFormula(duplicateArrayFormula_(sheet.getMaxRows()));
+  anchor.setFormula(formula);
 }
 
 function refreshDateArrays_(sheet, restore = []) {
@@ -706,17 +702,18 @@ function refreshDateArrays_(sheet, restore = []) {
     )
     .getA1Notation();
   for (const [part, column] of Object.entries(c.dateDerived || {})) {
-    const anchor = sheet.getRange(c.firstDataRow, column);
-    if (restore.includes(column) || /ARRAYFORMULA/i.test(anchor.getFormula()))
-      anchor.setFormula(
-        "=ARRAYFORMULA(IF(" +
-          dates +
-          '="","",' +
-          part.toUpperCase() +
-          "(" +
-          dates +
-          ")))",
-      );
+    const anchor = sheet.getRange(c.firstDataRow, column),
+      current = anchor.getFormula();
+    if (!restore.includes(column) && !/ARRAYFORMULA/i.test(current)) continue;
+    const expected =
+      "=ARRAYFORMULA(IF(" +
+      dates +
+      '="","",' +
+      part.toUpperCase() +
+      "(" +
+      dates +
+      ")))";
+    if (current !== expected) anchor.setFormula(expected);
   }
 }
 
@@ -828,7 +825,97 @@ function ensureJournalCapacity_(sheet, row, book) {
   }
   refreshDateArrays_(sheet);
   installDuplicateArray_(sheet);
-  if (book) ensureReviewCapacity_(book);
+  if (book) {
+    ensureReviewCapacity_(book);
+    refreshWorkbookFormulaRanges_(book, sheet, before);
+  }
+}
+
+// Rewrite only quoted journal references, never quoted text or deliberate subranges.
+// `before` identifies the previous capacity; already-updated and unrelated bounds stay intact.
+function boundJournalFormula_(formula, capacities) {
+  return formula.replace(
+    /"(?:[^"]|"")*"|'((?:[^']|'')+)'!(\$?[A-Z]+)(\$?\d+):(\$?[A-Z]+)(\$?\d+)?/gi,
+    (match, quotedName, firstColumn, firstRow, lastColumn, lastRow) => {
+      if (!quotedName) return match;
+      const capacity = capacities.get(quotedName.replace(/''/g, "'"));
+      if (
+        !capacity ||
+        (lastRow && Number(lastRow.replace("$", "")) !== capacity.before)
+      )
+        return match;
+      if (Number(firstRow.replace("$", "")) > capacity.after) return match;
+      const absolute = lastRow
+        ? lastRow.startsWith("$")
+        : firstRow.startsWith("$");
+      return (
+        "'" +
+        quotedName +
+        "'!" +
+        firstColumn +
+        firstRow +
+        ":" +
+        lastColumn +
+        (absolute ? "$" : "") +
+        capacity.after
+      );
+    },
+  );
+}
+// Capacity growth is the only caller. Ordinary reads, edits, and reviews do not
+// scan or rewrite dashboard formulas. Blank cells and manual values are never replaced.
+function refreshWorkbookFormulaRanges_(book, grownSheet, previousRows) {
+  const config = workspaceConfig_(),
+    capacities = new Map();
+  Object.keys(config.sheets).forEach((type) => {
+    const journal = sheet_(book, type),
+      after = journal.getMaxRows();
+    capacities.set(sheetName_(config.sheets[type]), {
+      before: journal === grownSheet ? previousRows : after,
+      after,
+    });
+  });
+  for (const [key, addresses] of Object.entries(config.formulaRanges || {})) {
+    const name = config[key + "Sheet"];
+    if (!name) continue;
+    const sheet = book.getSheetByName(sheetName_(name));
+    if (!sheet) continue;
+    for (const address of addresses) {
+      const range = sheet.getRange(address),
+        formulas = range.getFormulas();
+      const firstRow = range.getRow(),
+        firstColumn = range.getColumn();
+      formulas.forEach((row, offset) => {
+        let start = -1,
+          updates = [];
+        const flush = () => {
+          if (start >= 0)
+            sheet
+              .getRange(
+                firstRow + offset,
+                firstColumn + start,
+                1,
+                updates.length,
+              )
+              .setFormulas([updates]);
+          start = -1;
+          updates = [];
+        };
+        row.forEach((formula, column) => {
+          const updated = formula
+            ? boundJournalFormula_(formula, capacities)
+            : formula;
+          if (updated === formula) {
+            flush();
+            return;
+          }
+          if (start < 0) start = column;
+          updates.push(updated);
+        });
+        flush();
+      });
+    }
+  }
 }
 
 // The optional native review sheet must also have room for every possible flagged entry.
@@ -1365,13 +1452,13 @@ function setReview(input) {
           "This duplicate group changed in the sheet. Refresh before accepting it.",
         );
     }
-    members.forEach((entry) => {
-      literal_(sheet.getRange(entry.row, columns.decision), decision);
-      // Preserve other members' existing notes; the note typed beside the clicked
-      // entry belongs only to that entry.
-      if (entry.row === row)
-        literal_(sheet.getRange(entry.row, columns.reviewNote), note);
-    });
+    writeReviewDecisions_(
+      sheet,
+      members.map((entry) => entry.row),
+      decision,
+    );
+    // Only the clicked entry receives its submitted note.
+    writeReviewNotes_(sheet, [{ row, note }]);
     return { ok: true, reviewedRows: members.map((entry) => entry.row) };
   });
 }
@@ -1469,29 +1556,85 @@ function deleteTransaction(input) {
   });
 }
 
-// Share row deletion and spill-anchor repairs between individual and bulk actions.
+// Compress only adjacent validated rows; gaps always remain untouched.
+function consecutiveRows_(rows) {
+  const runs = [];
+  for (const row of [...new Set(rows)].sort((a, b) => a - b)) {
+    const last = runs[runs.length - 1];
+    if (last && last.start + last.count === row) last.count++;
+    else runs.push({ start: row, count: 1 });
+  }
+  return runs;
+}
+function columnA1_(column) {
+  let name = "";
+  while (column > 0) {
+    column--;
+    name = String.fromCharCode(65 + (column % 26)) + name;
+    column = Math.floor(column / 26);
+  }
+  return name;
+}
+// Decisions are server-controlled labels; RangeList applies the same value to
+// disjoint ranges without touching any intervening entries or their notes.
+function writeReviewDecisions_(sheet, rows, decision) {
+  const column = columnA1_(workspaceConfig_().layout.journal.decision);
+  const ranges = consecutiveRows_(rows).map(
+    ({ start, count }) => column + start + ":" + column + (start + count - 1),
+  );
+  // Bound each request even for a large, highly fragmented review queue.
+  for (let offset = 0; offset < ranges.length; offset += 250)
+    sheet.getRangeList(ranges.slice(offset, offset + 250)).setValue(decision);
+}
+// Unlike decisions, notes differ per row. Batch adjacent submitted notes only,
+// retaining rich-text writes so formula-like user input stays literal text.
+function writeReviewNotes_(sheet, entries) {
+  const notes = new Map(entries.map((entry) => [entry.row, entry.note]));
+  for (const { start, count } of consecutiveRows_([...notes.keys()])) {
+    const values = Array.from({ length: count }, (_, index) => [
+      SpreadsheetApp.newRichTextValue()
+        .setText(String(notes.get(start + index)))
+        .build(),
+    ]);
+    sheet
+      .getRange(start, workspaceConfig_().layout.journal.reviewNote, count, 1)
+      .setRichTextValues(values);
+  }
+}
+
 function deleteCheckedTransaction_(current) {
+  deleteCheckedRows_(current.sheet, [current.row]);
+}
+// Callers validate every target before entering this helper. Capture spill anchors
+// once, delete bottom-up runs, and repair generated columns once per journal.
+function deleteCheckedRows_(sheet, rows) {
+  const runs = consecutiveRows_(rows);
+  if (!runs.length) return;
   const c = workspaceConfig_().layout.journal;
   const arrayCheck = /LET\(descriptions,/i.test(
-    current.sheet.getRange(c.firstDataRow, c.duplicateIssue).getFormula(),
+    sheet.getRange(c.firstDataRow, c.duplicateIssue).getFormula(),
   );
   const restoreDates =
-    current.row === c.firstDataRow
+    runs[0].start === c.firstDataRow
       ? Object.values(c.dateDerived || {}).filter((column) =>
           /ARRAYFORMULA/i.test(
-            current.sheet.getRange(c.firstDataRow, column).getFormula(),
+            sheet.getRange(c.firstDataRow, column).getFormula(),
           ),
         )
       : [];
-  current.sheet.deleteRow(current.row);
-  if (current.sheet.getMaxRows() < c.firstDataRow)
-    current.sheet.insertRowsAfter(
-      current.sheet.getMaxRows(),
-      c.firstDataRow - current.sheet.getMaxRows(),
-    );
-  // Deleting the first entry also deletes spill anchors; restore only generated columns.
-  if (arrayCheck) installDuplicateArray_(current.sheet);
-  refreshDateArrays_(current.sheet, restoreDates);
+  try {
+    runs
+      .reverse()
+      .forEach(({ start, count }) => sheet.deleteRows(start, count));
+  } finally {
+    // Also repair after a partially completed deletion; the started request receipt
+    // continues to block replay, so retrying cannot delete shifted neighbors.
+    const remaining = sheet.getMaxRows();
+    if (remaining < c.firstDataRow)
+      sheet.insertRowsAfter(remaining, c.firstDataRow - remaining);
+    if (arrayCheck) installDuplicateArray_(sheet);
+    refreshDateArrays_(sheet, restoreDates);
+  }
 }
 
 // Validate the complete loaded journal snapshot before any bulk writes. The script lock
@@ -1587,11 +1730,28 @@ function bulkReview(input) {
         )
           throw new Error("Review note is too long.");
       });
+      const journals = new Map();
       affected.forEach((entry) => {
-        literal_(entry.sheet.getRange(entry.row, c.decision), "Okay");
-        const note = notes.get(entry.type + ":" + entry.row);
-        if (note !== undefined)
-          literal_(entry.sheet.getRange(entry.row, c.reviewNote), note);
+        if (!journals.has(entry.sheet)) journals.set(entry.sheet, []);
+        journals.get(entry.sheet).push(entry);
+      });
+      journals.forEach((members, sheet) => {
+        writeReviewDecisions_(
+          sheet,
+          members.map((entry) => entry.row),
+          "Okay",
+        );
+        writeReviewNotes_(
+          sheet,
+          members
+            .filter(
+              (entry) => notes.get(entry.type + ":" + entry.row) !== undefined,
+            )
+            .map((entry) => ({
+              row: entry.row,
+              note: notes.get(entry.type + ":" + entry.row),
+            })),
+        );
       });
     } else {
       const kept = new Set();
@@ -1601,10 +1761,12 @@ function bulkReview(input) {
         kept.add(entry.group); // Keep the earliest sheet row in each exact duplicate group.
         return false;
       });
-      // Descending physical rows keep later deletions from shifting an intended target.
-      affected
-        .sort((a, b) => a.type.localeCompare(b.type) || b.row - a.row)
-        .forEach(deleteCheckedTransaction_);
+      const journals = new Map();
+      affected.forEach((entry) => {
+        if (!journals.has(entry.sheet)) journals.set(entry.sheet, []);
+        journals.get(entry.sheet).push(entry.row);
+      });
+      journals.forEach((rows, sheet) => deleteCheckedRows_(sheet, rows));
     }
     return { ok: true, count: affected.length };
   });
