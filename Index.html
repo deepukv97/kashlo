@@ -941,6 +941,30 @@
       .negative {
         color: var(--red);
       }
+      .pagination {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-top: 20px;
+        padding-top: 16px;
+        border-top: 1px solid var(--line);
+      }
+      .pagination p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.7;
+      }
+      .pagination button:disabled {
+        cursor: default;
+      }
+      .pagination-controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
       .filters {
         display: flex;
         flex-wrap: wrap;
@@ -2064,6 +2088,8 @@
         manageSection: "descriptions",
         lookupType: "expense",
         search: "",
+        transactionPage: 1,
+        transactionPageScope: "",
         trip: "",
         data: null,
         profile: null,
@@ -2447,7 +2473,9 @@
             .slice(0, limit)
             .map(
               (t) =>
-                '<tr><td class="desc">' +
+                '<tr data-transaction-key="' +
+                esc(t.type + ":" + t.row) +
+                '"><td class="desc">' +
                 esc(t.description) +
                 '<span class="sub">' +
                 esc(
@@ -2516,6 +2544,80 @@
               arr.length +
               " entries. Use search to narrow the list.</p>"
             : "")
+        );
+      }
+      const TRANSACTION_PAGE_SIZE = 25;
+      // Filter and sort the complete snapshot before selecting the visible batch.
+      // A changed view/filter starts at page one; edits/deletions clamp an existing page.
+      function paginatedTransactions(
+        arr,
+        editable = false,
+        showExpenseGroup = true,
+      ) {
+        const scope = JSON.stringify([
+          state.view,
+          state.dashboard,
+          state.month,
+          state.type,
+          state.search,
+          state.trip,
+        ]);
+        if (state.transactionPageScope !== scope) {
+          state.transactionPageScope = scope;
+          state.transactionPage = 1;
+        }
+        const pages = Math.max(
+          1,
+          Math.ceil(arr.length / TRANSACTION_PAGE_SIZE),
+        );
+        state.transactionPage = Math.max(
+          1,
+          Math.min(pages, Number(state.transactionPage) || 1),
+        );
+        const start = (state.transactionPage - 1) * TRANSACTION_PAGE_SIZE;
+        const table = transactionTable(
+          arr.slice(start, start + TRANSACTION_PAGE_SIZE),
+          TRANSACTION_PAGE_SIZE,
+          editable,
+          showExpenseGroup,
+        );
+        if (arr.length <= TRANSACTION_PAGE_SIZE) return table;
+        const button = (label, page, disabled) =>
+          '<button type="button" class="button outline" data-transaction-page="' +
+          page +
+          '" aria-label="' +
+          label +
+          ' transaction page"' +
+          (disabled ? " disabled" : "") +
+          ">" +
+          label +
+          "</button>";
+        return (
+          table +
+          '<nav class="pagination" aria-label="Transaction pages"><p>Showing ' +
+          (start + 1) +
+          "–" +
+          Math.min(start + TRANSACTION_PAGE_SIZE, arr.length) +
+          " of " +
+          arr.length +
+          " entries <span>· Page " +
+          state.transactionPage +
+          " of " +
+          pages +
+          '</span></p><div class="pagination-controls">' +
+          button("First", 1, state.transactionPage === 1) +
+          button(
+            "Previous",
+            state.transactionPage - 1,
+            state.transactionPage === 1,
+          ) +
+          button(
+            "Next",
+            state.transactionPage + 1,
+            state.transactionPage === pages,
+          ) +
+          button("Last", pages, state.transactionPage === pages) +
+          "</div></nav>"
         );
       }
       function flowHero(income, expenses, investments, status) {
@@ -2742,7 +2844,7 @@
           '</h2><span class="pill">' +
           filtered.length +
           " entries</span></div>" +
-          transactionTable(filtered, 100, true, !investments) +
+          paginatedTransactions(filtered, true, !investments) +
           "</div>"
         );
       }
@@ -2966,7 +3068,7 @@
             '</strong><p style="color:var(--muted)">Total recorded for this group · all months</p>' +
             categoryBars(selected) +
             '</div><div class="card"><div class="cardhead"><h2>Group expenses</h2></div>' +
-            transactionTable(selected) +
+            paginatedTransactions(selected) +
             "</div></div>"
           );
         }
@@ -3610,9 +3712,144 @@
           "</tbody></table></div></div>";
         return output;
       }
-      // Rebuild the current view from state, update navigation and headings, then attach handlers.
-      // Replacing content removes old elements and their listeners, so bindContent must run after each render.
-      function render() {
+      function viewContent(flagged) {
+        return state.view === "profile"
+          ? profileView()
+          : state.view === "overview"
+            ? overview()
+            : state.view === "transactions"
+              ? transactions()
+              : state.view === "investments"
+                ? transactions(true)
+                : ["dashboards", "trips"].includes(state.view)
+                  ? dashboards()
+                  : state.view === "payments"
+                    ? manage()
+                    : review(flagged);
+      }
+      // Reconcile keyed transaction rows and changed descendants without replacing
+      // unchanged controls, table viewports, or the content container.
+      function patchView(html) {
+        if (!document.createElement) return false;
+        const template = document.createElement("template");
+        template.innerHTML = html;
+        const key = (node) =>
+          node.nodeType === 1
+            ? node.id || node.getAttribute("data-transaction-key") || ""
+            : "";
+        const compatible = (a, b) =>
+          a &&
+          a.nodeType === b.nodeType &&
+          a.nodeName === b.nodeName &&
+          key(a) === key(b);
+        function sync(current, next) {
+          if (current.isEqualNode(next)) return;
+          if (current.nodeType !== 1) {
+            if (current.nodeValue !== next.nodeValue)
+              current.nodeValue = next.nodeValue;
+            return;
+          }
+          for (const attribute of [...current.attributes])
+            if (!next.hasAttribute(attribute.name))
+              current.removeAttribute(attribute.name);
+          for (const attribute of next.attributes)
+            if (current.getAttribute(attribute.name) !== attribute.value)
+              current.setAttribute(attribute.name, attribute.value);
+          children(current, next);
+        }
+        function children(current, next) {
+          const originals = [...current.childNodes],
+            used = new Set();
+          const keyed = new Map(
+            originals.filter(key).map((node) => [key(node), node]),
+          );
+          [...next.childNodes].forEach((fresh, index) => {
+            const cursor = current.childNodes[index];
+            const candidate = key(fresh) ? keyed.get(key(fresh)) : cursor;
+            if (compatible(candidate, fresh) && !used.has(candidate)) {
+              if (candidate !== cursor)
+                current.insertBefore(candidate, cursor || null);
+              used.add(candidate);
+              sync(candidate, fresh);
+            } else {
+              const copy = fresh.cloneNode(true);
+              current.insertBefore(copy, cursor || null);
+              used.add(copy);
+            }
+          });
+          originals.forEach((node) => {
+            if (!used.has(node)) node.remove();
+          });
+        }
+        children($("#content"), template.content);
+        return true;
+      }
+      const viewScope = () =>
+        JSON.stringify([
+          state.view,
+          state.month,
+          state.type,
+          state.search,
+          state.trip,
+          state.dashboard,
+          state.transactionPage,
+        ]);
+      function captureViewContext() {
+        const active = document.activeElement;
+        return {
+          scope: viewScope(),
+          active,
+          start: active?.selectionStart,
+          end: active?.selectionEnd,
+          direction: active?.selectionDirection,
+          x: globalThis.scrollX || 0,
+          y: globalThis.scrollY || 0,
+          scrolls: [
+            ...document.querySelectorAll(
+              "#content .tablewrap, #content .chartwrap",
+            ),
+          ].map((node) => ({
+            node,
+            left: node.scrollLeft,
+            top: node.scrollTop,
+          })),
+        };
+      }
+      function restoreViewContext(context) {
+        if (!context || context.scope !== viewScope()) return;
+        for (const item of context.scrolls)
+          if (item.node.isConnected) {
+            item.node.scrollLeft = item.left;
+            item.node.scrollTop = item.top;
+          }
+        if (context.active?.isConnected) {
+          context.active.focus({ preventScroll: true });
+          if (
+            typeof context.start === "number" &&
+            context.active.setSelectionRange
+          )
+            context.active.setSelectionRange(
+              context.start,
+              context.end,
+              context.direction,
+            );
+        }
+        globalThis.scrollTo?.(context.x, context.y);
+      }
+      // Edit/search updates retain unchanged nodes; navigation and manual refresh rebuild normally.
+      // Rebind property handlers to the current snapshot after either rendering path.
+      function render(incremental = false) {
+        if (
+          incremental &&
+          ["overview", "transactions", "investments"].includes(state.view) &&
+          patchView(viewContent([]))
+        ) {
+          $("#reviewBadge").textContent = rows().filter(
+            (entry) => entry.issues.length,
+          ).length;
+          bindContent([], true);
+          return;
+        }
         renderSettings();
         // Mark the active navigation button visually and through aria-current for assistive technology.
         document.querySelectorAll("[data-view]").forEach((b) => {
@@ -3694,20 +3931,7 @@
           .querySelectorAll("[data-view]")
           .forEach((button) => (button.disabled = state.setupRequired));
         const flagged = state.view === "review" ? reviewRows() : [];
-        $("#content").innerHTML =
-          state.view === "profile"
-            ? profileView()
-            : state.view === "overview"
-              ? overview()
-              : state.view === "transactions"
-                ? transactions()
-                : state.view === "investments"
-                  ? transactions(true)
-                  : ["dashboards", "trips"].includes(state.view)
-                    ? dashboards()
-                    : state.view === "payments"
-                      ? manage()
-                      : review(flagged);
+        $("#content").innerHTML = viewContent(flagged);
         // Force a layout read between class changes to restart the view entrance animation.
         $("#content").classList.remove("view");
         void $("#content").offsetWidth;
@@ -3715,7 +3939,7 @@
         bindContent(flagged);
       }
       // Attach navigation, filtering, trip, review, and status handlers to the freshly rendered content.
-      function bindContent(flagged = reviewRows()) {
+      function bindContent(flagged = reviewRows(), preserveScroll = false) {
         if (state.view === "profile") bindProfile();
         document.querySelectorAll("[data-dashboard]").forEach((button) => {
           button.onclick = () => {
@@ -3726,6 +3950,7 @@
         });
         const chartViewport = $(".chartwrap");
         if (
+          !preserveScroll &&
           chartViewport &&
           chartViewport.scrollWidth > chartViewport.clientWidth
         )
@@ -3935,18 +4160,33 @@
             openDelete(transaction);
           };
         });
-        // Re-render after each search edit, then restore focus and caret position to the replacement input.
-        $("#search")?.addEventListener("input", (e) => {
-          state.search = e.target.value;
-          const start = e.target.selectionStart;
-          render();
-          $("#search").focus();
-          $("#search").setSelectionRange(start, start);
-        });
-        $("#typeFilter")?.addEventListener("change", (e) => {
-          state.type = e.target.value;
-          render();
-        });
+        document
+          .querySelectorAll("[data-transaction-page]")
+          .forEach((button) => {
+            button.onclick = () => {
+              if (state.saveBusy || button.disabled) return;
+              state.transactionPage = Number(button.dataset.transactionPage);
+              const context = captureViewContext();
+              render(true);
+              restoreViewContext(context);
+            };
+          });
+        // Property handlers replace the previous binding on retained controls.
+        const searchInput = $("#search");
+        if (searchInput)
+          searchInput.oninput = (e) => {
+            state.search = e.target.value;
+            state.transactionPage = 1;
+            const context = captureViewContext();
+            render(true);
+            restoreViewContext(context);
+          };
+        const typeFilter = $("#typeFilter");
+        if (typeFilter)
+          typeFilter.onchange = (e) => {
+            state.type = e.target.value;
+            render();
+          };
         // Support both pointer activation and Enter/Space on the keyboard-accessible trip cards.
         document.querySelectorAll("[data-trip]").forEach((b) => {
           b.onclick = () => {
@@ -4076,9 +4316,20 @@
       // Fetch the current sheet snapshot and update connection status and last-refresh time.
       // A failed refresh retains previously loaded data; it is labeled potentially stale.
       // Local preview displays setup guidance without attempting to fabricate financial records.
-      async function refresh() {
+      let refreshCompletion = Promise.resolve();
+      async function refresh(options = {}) {
         // Prevent duplicate refreshes and temporarily disable the refresh button.
-        if (state.loading) return;
+        if (state.loading) {
+          if (options.incremental === true) {
+            await refreshCompletion;
+            return refresh(options);
+          }
+          return;
+        }
+        let completeRefresh;
+        refreshCompletion = new Promise((resolve) => {
+          completeRefresh = resolve;
+        });
         state.loading = true;
         $("#refreshButton").disabled = true;
         $("#refreshButton").textContent = "↻ Refreshing";
@@ -4106,6 +4357,12 @@
               "The app settings are missing. Deploy Config.gs with Code.gs and Index.html.",
             );
           const previousYear = settings()?.year;
+          const sameWorkspace =
+            state.data?.workspaceRevision === data.workspaceRevision &&
+            previousYear === data.config.year;
+          // Capture at response time so scrolling or typing during the read wins.
+          const context =
+            options.incremental === true ? captureViewContext() : null;
           state.data = data;
           state.setupRequired = false;
           if (previousYear !== data.config.year) {
@@ -4125,7 +4382,8 @@
               minute: "2-digit",
             }) +
             " · refresh for the latest sheet changes";
-          render();
+          render(options.incremental === true && sameWorkspace);
+          restoreViewContext(context);
           return true;
         } catch (e) {
           // Show a failure toast for hosted Apps Script errors; a local preview instead renders empty states.
@@ -4147,6 +4405,7 @@
           state.loading = false;
           $("#refreshButton").disabled = false;
           $("#refreshButton").textContent = "↻ Refresh";
+          completeRefresh();
         }
       }
       // Build the add-transaction dialog using current lookup data.
@@ -4154,7 +4413,8 @@
       // Saving is disabled before data has loaded. The server performs the final input validation.
       function openEntry(transaction = null) {
         if (state.saveBusy) return;
-        const isConnected = loaded();
+        const isConnected = loaded(),
+          entryContext = captureViewContext();
         $("#modalContainer").innerHTML =
           '<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="entryTitle"><div class="modal-head"><h2 id="entryTitle">A new entry.</h2><button class="close" aria-label="Close dialog">×</button></div>' +
           (!isConnected
@@ -4470,12 +4730,13 @@
             $("#modalContainer").innerHTML = "";
             toast(
               transaction
-                ? "Transaction updated. Refreshing totals and review checks."
+                ? "Transaction updated. Updating totals and review checks."
                 : "Saved to your Google Sheet.",
             );
             if (!transaction && payload.type === "investment")
               celebrateInvestment(payload.amount);
-            await refresh();
+            if (transaction) restoreViewContext(entryContext);
+            await refresh(transaction ? { incremental: true } : {});
           } catch (e) {
             // Keep the dialog and request ID on failure; the server blocks replay if this ID already started writing.
             $("#formError").textContent =

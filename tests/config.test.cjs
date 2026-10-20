@@ -4386,3 +4386,210 @@ test("bulk Review UI confirms counts, sends notes and snapshot, and reuses reque
   await element("#confirmBulk").onclick();
   assert.equal(browser.calls[2].payload.action, "okay");
 });
+
+test("edit refresh patches the current view, preserves focus/caret and scroll, and uses authoritative totals", async () => {
+  const f = await pullRefreshBrowser(),
+    b = f.browser;
+  const search = f.element("#search"),
+    viewport = { isConnected: true, scrollLeft: 85, scrollTop: 12 };
+  search.isConnected = true;
+  search.selectionStart = 1;
+  search.selectionEnd = 4;
+  search.selectionDirection = "backward";
+  search.focus = (options) => {
+    f.document.activeElement = search;
+    search.focusOptions = options;
+  };
+  search.setSelectionRange = (start, end, direction) => {
+    search.restored = [start, end, direction];
+  };
+  f.document.activeElement = search;
+  f.document.querySelectorAll = (selector) =>
+    selector === "#content .tablewrap, #content .chartwrap" ? [viewport] : [];
+  b.scrollX = 3;
+  b.scrollY = 420;
+  b.scrollTo = (x, y) => {
+    b.restoredScroll = [x, y];
+  };
+  vm.runInContext(
+    "var patches = []; patchView = html => { patches.push(html); return true; };",
+    b,
+  );
+  const content = f.element("#content").innerHTML;
+  const task = vm.runInContext("refresh({incremental:true})", b);
+  b.scrollX = 7;
+  b.scrollY = 630;
+  viewport.scrollLeft = 120;
+  const updated = structuredClone(b.data);
+  updated.transactions[0].amount = 321;
+  f.requests[0].success(updated);
+  assert.equal(await task, true);
+  assert.equal(f.element("#content").innerHTML, content);
+  assert.equal(b.patches.length, 1);
+  assert.equal(vm.runInContext("rows()[0].amount", b), 321);
+  assert.equal(f.document.activeElement, search);
+  assert.deepEqual(search.restored, [1, 4, "backward"]);
+  assert.equal(search.focusOptions.preventScroll, true);
+  assert.equal(viewport.scrollLeft, 120);
+  assert.deepEqual(b.restoredScroll, [7, 630]);
+});
+
+test("edit refresh waits for an earlier read and fetches again instead of leaving stale edited data", async () => {
+  const f = await pullRefreshBrowser(),
+    b = f.browser;
+  const first = vm.runInContext("refresh()", b);
+  const edit = vm.runInContext("refresh({incremental:true})", b);
+  assert.equal(f.requests.length, 1);
+  f.requests[0].success(structuredClone(b.data));
+  await first;
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(f.requests.length, 2);
+  const fresh = structuredClone(b.data);
+  fresh.transactions[0].amount = 555;
+  f.requests[1].success(fresh);
+  assert.equal(await edit, true);
+  assert.equal(vm.runInContext("rows()[0].amount", b), 555);
+});
+
+test("incremental refresh retains stale data on read failure and fully renders a different workspace", async () => {
+  const f = await pullRefreshBrowser(),
+    b = f.browser;
+  vm.runInContext(
+    "var patches = 0; patchView = () => { patches++; return true; };",
+    b,
+  );
+  const initial = f.element("#content").innerHTML;
+  const failure = vm.runInContext("refresh({incremental:true})", b);
+  f.requests[0].failure(new Error("Snapshot unavailable"));
+  assert.equal(await failure, false);
+  assert.equal(b.patches, 0);
+  assert.equal(f.element("#content").innerHTML, initial);
+  assert.match(f.element("#connectionLabel").textContent, /stale/);
+  const retry = vm.runInContext("refresh({incremental:true})", b);
+  const next = structuredClone(b.data);
+  next.workspaceRevision++;
+  f.requests[1].success(next);
+  assert.equal(await retry, true);
+  assert.equal(b.patches, 0);
+});
+
+test("view context does not restore old focus or scrolling after navigation", async () => {
+  const f = await pullRefreshBrowser(),
+    b = f.browser;
+  b.scrollTo = () => {
+    throw new Error("Must not restore previous page scroll");
+  };
+  vm.runInContext(
+    'var context = captureViewContext(); state.view="overview"; restoreViewContext(context);',
+    b,
+  );
+});
+
+async function paginationBrowser() {
+  const f = await pullRefreshBrowser();
+  f.browser.data.transactions = Array.from({ length: 155 }, (_, i) => ({
+    type: "expense",
+    row: i + 2,
+    description: i === 0 ? "Needle offpage" : "Fictional item " + i,
+    date: "2026-01-10",
+    amount: i + 1,
+    category: "Food",
+    trip: "Fictional group",
+    issues: [],
+    fingerprint: "test-" + i,
+  }));
+  vm.runInContext(
+    'state.data=data;state.view="transactions";state.month=0;state.type="all";state.search="";render();',
+    f.browser,
+  );
+  return f;
+}
+const tableKeys = (html) =>
+  [...html.matchAll(/data-transaction-key="([^"]+)"/g)].map(
+    (match) => match[1],
+  );
+
+test("pagination exposes every matching record once across bounded pages", async () => {
+  const f = await paginationBrowser(),
+    b = f.browser,
+    all = [];
+  for (let page = 1; page <= 7; page++) {
+    const html = vm.runInContext(
+      `state.transactionPage=${page};transactions()`,
+      b,
+    );
+    const keys = tableKeys(html);
+    all.push(...keys);
+    assert.equal(keys.length, page === 7 ? 5 : 25);
+    assert.match(html, new RegExp(`Page ${page} of 7`));
+    if (page === 1)
+      assert.match(html, /aria-label="Previous transaction page" disabled/);
+    if (page === 7)
+      assert.match(html, /aria-label="Next transaction page" disabled/);
+  }
+  assert.equal(all.length, 155);
+  assert.equal(new Set(all).size, 155);
+  assert.equal(all[0], "expense:156");
+  assert.equal(all.at(-1), "expense:2");
+});
+
+test("search scans beyond the visible page and resets pagination while month/type changes reset it too", async () => {
+  const f = await paginationBrowser(),
+    b = f.browser;
+  vm.runInContext("state.transactionPage=5;render();", b);
+  assert.equal(
+    tableKeys(f.element("#content").innerHTML).includes("expense:2"),
+    false,
+  );
+  f.element("#search").oninput({ target: { value: "Needle offpage" } });
+  assert.deepEqual(tableKeys(f.element("#content").innerHTML), ["expense:2"]);
+  assert.equal(vm.runInContext("state.transactionPage", b), 1);
+  assert.doesNotMatch(
+    f.element("#content").innerHTML,
+    /aria-label="Transaction pages"/,
+  );
+  vm.runInContext(
+    'state.search="";transactions();state.transactionPage=6;state.type="income";transactions();',
+    b,
+  );
+  assert.equal(vm.runInContext("state.transactionPage", b), 1);
+  vm.runInContext(
+    'state.type="all";transactions();state.transactionPage=6;state.month=1;transactions();',
+    b,
+  );
+  assert.equal(vm.runInContext("state.transactionPage", b), 1);
+  assert.match(vm.runInContext("transactions()", b), /No transactions/);
+});
+
+test("pagination clamps after fewer results and keeps investment totals independent of the visible page", async () => {
+  const f = await paginationBrowser(),
+    b = f.browser;
+  vm.runInContext(
+    "state.transactionPage=7;state.data.transactions=state.data.transactions.slice(0,50);var reduced=transactions();",
+    b,
+  );
+  assert.equal(vm.runInContext("state.transactionPage", b), 2);
+  assert.match(b.reduced, /Showing 26–50 of 50/);
+  vm.runInContext(
+    'state.data.transactions.forEach(t=>t.type="investment");state.view="investments";transactions(true);state.transactionPage=2;var html=transactions(true);',
+    b,
+  );
+  assert.equal(tableKeys(b.html).length, 25);
+  const total = vm.runInContext("money(sum(rows()))", b);
+  assert.equal(b.html.split(total).length - 1, 2);
+  assert.doesNotMatch(b.html, /<th>Expense group<\/th>/);
+});
+
+test("expense group records paginate while Overview keeps its six recent entries", async () => {
+  const f = await paginationBrowser(),
+    b = f.browser;
+  vm.runInContext(
+    'state.view="dashboards";state.dashboard="groups";state.trip="Fictional group";var grouped=trips();',
+    b,
+  );
+  assert.equal(tableKeys(b.grouped).length, 25);
+  assert.match(b.grouped, /Page 1 of 7/);
+  vm.runInContext('state.view="overview";var overviewHtml=overview();', b);
+  assert.equal(tableKeys(b.overviewHtml).length, 6);
+  assert.doesNotMatch(b.overviewHtml, /aria-label="Transaction pages"/);
+});
