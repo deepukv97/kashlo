@@ -22,6 +22,19 @@ class Sheet {
     return this.cells.length;
   }
   getRange(row, col, height = 1, width = 1) {
+    if (typeof row === "string") {
+      const match = row.match(/^([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?$/i);
+      assert.ok(match, row);
+      const column = (letters) =>
+        [...letters.toUpperCase()].reduce(
+          (n, letter) => n * 26 + letter.charCodeAt(0) - 64,
+          0,
+        );
+      row = Number(match[2]);
+      col = column(match[1]);
+      height = match[4] ? Number(match[4]) - row + 1 : 1;
+      width = match[3] ? column(match[3]) - col + 1 : 1;
+    }
     const values = () =>
       Array.from({ length: height }, (_, r) =>
         Array.from(
@@ -72,8 +85,19 @@ class Sheet {
             : ":" + column(col + width - 1) + (row + height - 1))
         );
       },
+      getRow: () => row,
+      getColumn: () => col,
       getFormula: () => range.getFormulas()[0][0],
-      setFormula: (formula) => range.setValue(formula),
+      setFormula: (formula) => range.setFormulas([[formula]]),
+      setFormulas: (matrix) => {
+        this.operations.push({ kind: "formulaWrite", row, col, height, width });
+        matrix.forEach((line, r) =>
+          line.forEach((formula, c) => {
+            this.cells[row - 1 + r][col - 1 + c] = formula;
+          }),
+        );
+        return range;
+      },
       getFormulas: () =>
         values().map((row) =>
           row.map((value) =>
@@ -5015,4 +5039,144 @@ test("partially failed decision batches block replay without rewriting notes or 
     f.sheets[f.resolve(f.config.sheets.income)].operations.length,
     0,
   );
+});
+
+test("generated duplicate and date anchors are not rewritten when already current", () => {
+  const f = fixture(),
+    api = f.context,
+    sheet = f.expense,
+    c = f.config.layout.journal;
+  api.installDuplicateArray_(sheet);
+  for (const [part, column] of Object.entries(c.dateDerived))
+    sheet
+      .getRange(2, column)
+      .setFormula(
+        '=ARRAYFORMULA(IF(F2:F30="","",' + part.toUpperCase() + "(F2:F30)))",
+      );
+  const writes = sheet.operations.filter(
+    (op) => op.kind === "formulaWrite",
+  ).length;
+  api.installDuplicateArray_(sheet);
+  api.refreshDateArrays_(sheet);
+  assert.equal(
+    sheet.operations.filter((op) => op.kind === "formulaWrite").length,
+    writes,
+  );
+  sheet.getRange(2, c.dateDerived.year).setValue("");
+  api.refreshDateArrays_(sheet, [c.dateDerived.year]);
+  assert.match(
+    sheet.getRange(2, c.dateDerived.year).getFormula(),
+    /YEAR\(F2:F30\)/,
+  );
+  assert.equal(
+    sheet.operations.filter((op) => op.kind === "formulaWrite").length,
+    writes + 1,
+  );
+});
+
+test("duplicate spill formula binds source values and numeric checks once", () => {
+  const f = fixture(),
+    formula = f.context.duplicateArrayFormula_(20001);
+  assert.equal(formula.split("$C$2:$C$20001").length - 1, 1);
+  assert.equal(formula.split("$F$2:$F$20001").length - 1, 1);
+  assert.equal(formula.split("ISNUMBER(sourceAmounts)").length - 1, 1);
+  assert.equal(formula.split("ISNUMBER(sourceDates)").length - 1, 1);
+  assert.match(formula, /validAmounts\*validDates/);
+  assert.match(formula, /SEQUENCE\(19999\)/);
+});
+
+test("capacity range rewriting preserves quoted text, deliberate subranges, and other sheets", () => {
+  const f = fixture(),
+    api = f.context;
+  const caps = new Map([
+    ["Year Journal", { before: 650, after: 900 }],
+    ["Owner's Journal", { before: 30, after: 280 }],
+  ]);
+  const input =
+    "=SUM('Year Journal'!$C$2:$C)+SUM('Year Journal'!F2:F650)+SUM('Year Journal'!C2:C10)+SUM('Other'!C2:C)+\"'Year Journal'!C2:C\"+SUM('Owner''s Journal'!B2:B)";
+  const actual = api.boundJournalFormula_(input, caps);
+  assert.match(actual, /\$C\$2:\$C\$900/);
+  assert.match(actual, /F2:F900/);
+  assert.match(actual, /C2:C10/);
+  assert.match(actual, /'Other'!C2:C/);
+  assert.match(actual, /"'Year Journal'!C2:C"/);
+  assert.match(actual, /'Owner''s Journal'!B2:B280/);
+  assert.equal(api.boundJournalFormula_(actual, caps), actual);
+});
+
+test("growth bounds managed summary formulas in batches and preserves manual cells and status", () => {
+  const f = fixture(),
+    api = f.context,
+    dashboard = f.sheets[f.resolve(f.config.dashboardSheet)];
+  const expense = f.resolve(f.config.sheets.expense),
+    income = f.resolve(f.config.sheets.income);
+  dashboard.getRange(12, 2).setFormula("=SUM('" + income + "'!$C$2:$C)");
+  dashboard.getRange(12, 3).setFormula("=SUM('" + expense + "'!$C$2:$C$30)");
+  dashboard.getRange(12, 4).setValue(67);
+  dashboard.getRange(12, 6).setValue("Complete");
+  dashboard
+    .getRange(12, 8)
+    .setFormula("=FILTER('" + expense + "'!G2:G,'" + expense + '\'!B2:B<>"")');
+  dashboard.getRange(30, 3).setFormula("=SUM('" + expense + "'!C2:C)");
+  dashboard.operations = [];
+  api.ensureJournalCapacity_(f.expense, 31, f.book);
+  assert.match(dashboard.getRange(12, 2).getFormula(), /\$C\$2:\$C\$30/);
+  assert.match(dashboard.getRange(12, 3).getFormula(), /\$C\$2:\$C\$280/);
+  assert.match(dashboard.getRange(12, 8).getFormula(), /G2:G280/);
+  assert.equal(dashboard.getRange(12, 4).getValues()[0][0], 67);
+  assert.equal(dashboard.getRange(12, 6).getValues()[0][0], "Complete");
+  assert.equal(
+    dashboard.getRange(30, 3).getFormula(),
+    "=SUM('" + expense + "'!C2:C)",
+  );
+  assert.deepEqual(
+    dashboard.operations
+      .filter((op) => op.kind === "formulaWrite")
+      .map(({ row, col, height, width }) => ({ row, col, height, width })),
+    [
+      { row: 12, col: 2, height: 1, width: 2 },
+      { row: 12, col: 8, height: 1, width: 1 },
+    ],
+  );
+  dashboard.operations = [];
+  api.ensureJournalCapacity_(f.expense, 100, f.book);
+  api.getData();
+  assert.equal(dashboard.operations.length, 0);
+});
+
+test("managed bounds advance at successive capacity expansions and remain idempotent", () => {
+  const f = fixture(),
+    api = f.context,
+    dashboard = f.sheets[f.resolve(f.config.dashboardSheet)];
+  const name = f.resolve(f.config.sheets.expense);
+  dashboard.getRange(12, 3).setFormula("=SUM('" + name + "'!C2:C)");
+  api.ensureJournalCapacity_(f.expense, 31, f.book);
+  assert.match(dashboard.getRange(12, 3).getFormula(), /C2:C280/);
+  api.ensureJournalCapacity_(f.expense, 281, f.book);
+  assert.match(dashboard.getRange(12, 3).getFormula(), /C2:C530/);
+  dashboard.operations = [];
+  api.refreshWorkbookFormulaRanges_(f.book, f.expense, 280);
+  assert.equal(dashboard.operations.length, 0);
+});
+
+test("native Review source ranges follow growth without changing its decision logic or link cells", () => {
+  const f = fixture(),
+    api = f.context,
+    review = new Sheet(),
+    name = f.resolve(f.config.sheets.expense);
+  f.sheets[f.resolve(f.config.reviewSheet)] = review;
+  const formula =
+    "=LET(entries,FILTER('" +
+    name +
+    "'!B2:B,'" +
+    name +
+    '\'!T2:T<>"Okay"),entries)';
+  review.getRange(5, 1).setFormula(formula);
+  review.getRange(5, 8).setValue("Preserve action");
+  api.ensureJournalCapacity_(f.expense, 31, f.book);
+  assert.equal(
+    review.getRange(5, 1).getFormula(),
+    formula.replace("B2:B", "B2:B280").replace("T2:T", "T2:T280"),
+  );
+  assert.equal(review.getRange(5, 8).getValues()[0][0], "Preserve action");
 });

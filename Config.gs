@@ -25,6 +25,11 @@ const FINANCE = Object.freeze({
   dashboardSheet: "{year} Dashboard",
   reviewSheet: "{year} Review",
   groupSummarySheet: "{year} Group Summary",
+  // Only these generated cells participate in capacity-bound formula maintenance.
+  formulaRanges: {
+    dashboard: ["B12:D23", "H12:I12"],
+    review: ["A5"],
+  },
   // The blank template keeps literal {year} tab names until first-time setup.
   workbookYear: { sheet: "Start here", row: 16, labelColumn: 1, yearColumn: 2 },
 

@@ -649,22 +649,16 @@ function duplicateArrayFormula_(lastRow) {
   return (
     "=LET(descriptions," +
     text(range(c.description)) +
-    ",amounts,ARRAYFORMULA(IF(ISNUMBER(" +
+    ",sourceAmounts," +
     amount +
-    ")," +
-    amount +
-    ",0))," +
-    "days,ARRAYFORMULA(IFERROR(INT(" +
+    ",sourceDates," +
     date +
-    "),0)),methods," +
+    ",validAmounts,ARRAYFORMULA(ISNUMBER(sourceAmounts)),validDates,ARRAYFORMULA(ISNUMBER(sourceDates))," +
+    "amounts,ARRAYFORMULA(IF(validAmounts,sourceAmounts,0)),days,ARRAYFORMULA(IFERROR(INT(sourceDates),0)),methods," +
     text(range(c.paymentMethod)) +
     ",details," +
     text(range(c.paymentDetail)) +
-    ',valid,ARRAYFORMULA((descriptions<>"")*ISNUMBER(' +
-    amount +
-    ")*ISNUMBER(" +
-    date +
-    "))," +
+    ',valid,ARRAYFORMULA((descriptions<>"")*validAmounts*validDates),' +
     "ordered,SORT(HSTACK(descriptions,amounts,days,methods,details,SEQUENCE(ROWS(descriptions)),valid),1,TRUE,2,TRUE,3,TRUE,4,TRUE,5,TRUE)," +
     "earlier,CHOOSEROWS(ordered,SEQUENCE(" +
     (size - 1) +
@@ -682,17 +676,19 @@ function duplicateArrayFormula_(lastRow) {
 
 function installDuplicateArray_(sheet) {
   const c = workspaceConfig_().layout.journal;
+  const lastRow = sheet.getMaxRows();
+  const formula = duplicateArrayFormula_(lastRow);
+  const anchor = sheet.getRange(c.firstDataRow, c.duplicateIssue);
+  if (anchor.getFormula() === formula) return;
   const range = sheet.getRange(
     c.firstDataRow,
     c.duplicateIssue,
-    sheet.getMaxRows() - c.firstDataRow + 1,
+    lastRow - c.firstDataRow + 1,
     1,
   );
   // Q is a generated check column; decisions and notes in T:U are never cleared.
   range.clearContent();
-  sheet
-    .getRange(c.firstDataRow, c.duplicateIssue)
-    .setFormula(duplicateArrayFormula_(sheet.getMaxRows()));
+  anchor.setFormula(formula);
 }
 
 function refreshDateArrays_(sheet, restore = []) {
@@ -706,17 +702,18 @@ function refreshDateArrays_(sheet, restore = []) {
     )
     .getA1Notation();
   for (const [part, column] of Object.entries(c.dateDerived || {})) {
-    const anchor = sheet.getRange(c.firstDataRow, column);
-    if (restore.includes(column) || /ARRAYFORMULA/i.test(anchor.getFormula()))
-      anchor.setFormula(
-        "=ARRAYFORMULA(IF(" +
-          dates +
-          '="","",' +
-          part.toUpperCase() +
-          "(" +
-          dates +
-          ")))",
-      );
+    const anchor = sheet.getRange(c.firstDataRow, column),
+      current = anchor.getFormula();
+    if (!restore.includes(column) && !/ARRAYFORMULA/i.test(current)) continue;
+    const expected =
+      "=ARRAYFORMULA(IF(" +
+      dates +
+      '="","",' +
+      part.toUpperCase() +
+      "(" +
+      dates +
+      ")))";
+    if (current !== expected) anchor.setFormula(expected);
   }
 }
 
@@ -828,7 +825,97 @@ function ensureJournalCapacity_(sheet, row, book) {
   }
   refreshDateArrays_(sheet);
   installDuplicateArray_(sheet);
-  if (book) ensureReviewCapacity_(book);
+  if (book) {
+    ensureReviewCapacity_(book);
+    refreshWorkbookFormulaRanges_(book, sheet, before);
+  }
+}
+
+// Rewrite only quoted journal references, never quoted text or deliberate subranges.
+// `before` identifies the previous capacity; already-updated and unrelated bounds stay intact.
+function boundJournalFormula_(formula, capacities) {
+  return formula.replace(
+    /"(?:[^"]|"")*"|'((?:[^']|'')+)'!(\$?[A-Z]+)(\$?\d+):(\$?[A-Z]+)(\$?\d+)?/gi,
+    (match, quotedName, firstColumn, firstRow, lastColumn, lastRow) => {
+      if (!quotedName) return match;
+      const capacity = capacities.get(quotedName.replace(/''/g, "'"));
+      if (
+        !capacity ||
+        (lastRow && Number(lastRow.replace("$", "")) !== capacity.before)
+      )
+        return match;
+      if (Number(firstRow.replace("$", "")) > capacity.after) return match;
+      const absolute = lastRow
+        ? lastRow.startsWith("$")
+        : firstRow.startsWith("$");
+      return (
+        "'" +
+        quotedName +
+        "'!" +
+        firstColumn +
+        firstRow +
+        ":" +
+        lastColumn +
+        (absolute ? "$" : "") +
+        capacity.after
+      );
+    },
+  );
+}
+// Capacity growth is the only caller. Ordinary reads, edits, and reviews do not
+// scan or rewrite dashboard formulas. Blank cells and manual values are never replaced.
+function refreshWorkbookFormulaRanges_(book, grownSheet, previousRows) {
+  const config = workspaceConfig_(),
+    capacities = new Map();
+  Object.keys(config.sheets).forEach((type) => {
+    const journal = sheet_(book, type),
+      after = journal.getMaxRows();
+    capacities.set(sheetName_(config.sheets[type]), {
+      before: journal === grownSheet ? previousRows : after,
+      after,
+    });
+  });
+  for (const [key, addresses] of Object.entries(config.formulaRanges || {})) {
+    const name = config[key + "Sheet"];
+    if (!name) continue;
+    const sheet = book.getSheetByName(sheetName_(name));
+    if (!sheet) continue;
+    for (const address of addresses) {
+      const range = sheet.getRange(address),
+        formulas = range.getFormulas();
+      const firstRow = range.getRow(),
+        firstColumn = range.getColumn();
+      formulas.forEach((row, offset) => {
+        let start = -1,
+          updates = [];
+        const flush = () => {
+          if (start >= 0)
+            sheet
+              .getRange(
+                firstRow + offset,
+                firstColumn + start,
+                1,
+                updates.length,
+              )
+              .setFormulas([updates]);
+          start = -1;
+          updates = [];
+        };
+        row.forEach((formula, column) => {
+          const updated = formula
+            ? boundJournalFormula_(formula, capacities)
+            : formula;
+          if (updated === formula) {
+            flush();
+            return;
+          }
+          if (start < 0) start = column;
+          updates.push(updated);
+        });
+        flush();
+      });
+    }
+  }
 }
 
 // The optional native review sheet must also have room for every possible flagged entry.
