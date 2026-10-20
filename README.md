@@ -4,11 +4,15 @@
 
 A private Google Apps Script web app for recording expenses, income, investment contributions, expense groups (events, projects, and trips), and review decisions in Google Sheets.
 
-Complete the welcome screen to set your name, workbook, currency, locale, time zone, and year. Open **Profile & settings** through the sidebar avatar/name, or the profile icon beside the logo on mobile, to update these later. Personal settings are stored in Apps Script Properties; [Config.gs](Config.gs) contains the shared worksheet layout and product defaults.
+On phones, use the menu button beside the Kashlo logo to open the left navigation drawer. Choose Overview, Transactions, Investments, Dashboards, Review, or Manage; the drawer closes after selection. Desktop navigation stays in the sidebar.
+
+To refresh on a phone, scroll to the top, pull down until **Release to refresh** appears, then release. **Refreshing…** stays visible while the latest sheet data loads; your selected page, month, and search stay in place. The gesture is disabled while editing forms, viewing settings, or running another operation. The **Refresh** button remains available.
+
+Complete the welcome screen to set your name, workbook, currency, locale, time zone, and year. Open **Profile & settings** through the sidebar avatar/name, or the profile icon beside the logo on mobile, to update profile and display preferences later. Personal settings are stored in Apps Script Properties; [Config.gs](Config.gs) contains the shared worksheet layout and product defaults.
 
 Start with the [Kashlo — Personal Finances](https://docs.google.com/spreadsheets/d/1DUx9pc11orQe0zhirA-l80z3VWRYEyGoILiw7znh77s/edit) workbook: **File → Make a copy**, then deploy its included Apps Script project as **Me / Only myself** and complete the welcome screen using your copied workbook URL. No code editing is needed for this template. Template access is managed by its owner.
 
-See [SETUP.md](SETUP.md#recommended-copy-the-ready-to-use-template) for the full browser-only deployment and authorization steps, updates, and the manual installation alternative. The empty template includes the required tabs and formulas for **2026**, general starter choices, and no personal transactions. Automatic workbook creation and guided year rollover are planned for a later phase.
+See [SETUP.md](SETUP.md#recommended-copy-the-ready-to-use-template) for the full browser-only deployment and authorization steps, updates, and the manual installation alternative. The empty template works for the calendar year you choose during setup. Kashlo assigns its journal, dashboard, review, and summary tabs to that year automatically. It includes general starter choices and no personal transactions. **Use one workbook and one private app deployment per year.** For another year, make a fresh copy of the shared template and repeat setup; keep the earlier workbook and app for its historical records.
 
 Journals add space automatically as you record transactions through Kashlo, including the necessary formatting, dropdowns, and checks. Existing installations need the latest app files and a redeployment to receive this behavior.
 
@@ -46,12 +50,12 @@ Names are trimmed and checked without regard to case within each journal. Existi
 
 ## Duplicate review
 
-Expense, income, and investment journals share one policy: possible duplicates match the calendar date, description, amount, and recorded payment type/name within the same journal. Text comparison ignores case and extra whitespace. Repeating a description on another day or for another amount is allowed. No investment names receive special treatment. **Okay** keeps and accepts the exact matching group; correction and confirmed deletion remain user decisions.
+Expense, income, and investment journals share one policy: possible duplicates match the calendar date, description, amount, and recorded payment type/name within the same journal. Text comparison ignores case and extra whitespace. Repeating a description on another day or for another amount is allowed. No investment names receive special treatment. **Okay** keeps and accepts the exact matching group; correction and confirmed deletion remain user decisions. At the top of Review, **Okay all** accepts the current review entries while keeping all amounts. **Delete all duplicates** asks for confirmation, shows the number of extra entries to remove, and keeps the earliest sheet row in each pending exact duplicate group. Already accepted groups are kept. Both bulk actions check for changes before writing and protect retries from repeating a deletion. As with individual Okay, missing or invalid details still need correction.
 
 ## Profile & first-time setup
 
 A fresh installation starts with **Welcome to Kashlo**. Connect an existing compatible Kashlo workbook using its URL or ID; the app validates its journal, lookup, dashboard layout, and prepared duplicate-check formulas before saving. This step does not create a blank workbook template. The Google account comes from the private deployment and cannot be changed through the profile.
 
-Changing currency changes app display formatting without converting existing amounts or changing the sheet’s number formats. Changing time zone updates the selected workbook's time zone and date grouping. Changing the workbook or year requires the matching journal/dashboard sheets. Settings changes invalidate older open tabs, which must refresh before saving to prevent transactions from going to a different workspace. Existing records remain in their original workbook.
+Changing currency changes app display formatting without converting existing amounts or changing the sheet’s number formats. Changing time zone updates the selected workbook's time zone and date grouping. A connected workbook stays assigned to one year. For another year, create a fresh template copy and a new private deployment. Settings changes invalidate older open tabs, which must refresh before saving to prevent transactions from going to a different workspace. Existing records remain in their original workbook.
 
 The first launch of this settings-enabled release also requires setup for an existing installation; select your existing workbook to continue. Each person must use their own owner-only Apps Script deployment and workbook. The application is not a shared multi-user service.

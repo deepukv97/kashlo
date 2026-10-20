@@ -2,7 +2,7 @@
  * Shared workbook schema and product defaults. Personal settings are collected in the app
  * and stored in Script Properties, separately from source code.
  * Keep the internal journal keys expense/income/investment: they define app behavior.
- * Sheet names may contain {year}; it is replaced with the year below at runtime.
+ * Sheet names may contain {year}; setup replaces it with the user's selected year.
  * Changes take effect after uploading the project and updating its deployment.
  */
 const FINANCE = Object.freeze({
@@ -25,6 +25,8 @@ const FINANCE = Object.freeze({
   dashboardSheet: "{year} Dashboard",
   reviewSheet: "{year} Review",
   groupSummarySheet: "{year} Group Summary",
+  // The blank template keeps literal {year} tab names until first-time setup.
+  workbookYear: { sheet: "Start here", row: 16, labelColumn: 1, yearColumn: 2 },
 
   // Shared branding. Personal display preferences are collected in Profile & settings.
   display: {

@@ -60,11 +60,101 @@ function workbookId_(value) {
   if (/^[a-zA-Z0-9_-]{20,}$/.test(text)) return text;
   throw new Error("Enter a Google Sheets workbook URL or ID.");
 }
-function validateWorkspaceWorkbook_(book, year) {
+// A workbook is assigned once. A fresh template is the only workbook setup may rename.
+function workbookYearPlan_(book, year, previous, spreadsheetId) {
+  if (
+    previous &&
+    previous.spreadsheetId === spreadsheetId &&
+    previous.year !== year
+  )
+    throw new Error(
+      "Use a fresh Kashlo workbook and a new deployment for another year. Existing records stay in their original year.",
+    );
+  const schema = FINANCE.workbookYear;
+  const guide = schema && book.getSheetByName(schema.sheet);
+  if (
+    !guide ||
+    guide.getRange(schema.row, schema.labelColumn).getValues()[0][0] !==
+      "Workbook year"
+  )
+    return null; // Older prepared workbooks keep their existing names and formulas.
+  const cell = guide.getRange(schema.row, schema.yearColumn);
+  const assigned = cell.getValues()[0][0];
+  if (assigned !== "") {
+    if (Number(assigned) !== year)
+      throw new Error(
+        "This workbook belongs to " +
+          assigned +
+          ". Use a fresh Kashlo copy for another year.",
+      );
+    return null;
+  }
+  for (const template of Object.values(FINANCE.sheets)) {
+    const sheet = book.getSheetByName(template);
+    if (!sheet)
+      throw new Error(
+        "Use a fresh, unconfigured Kashlo template for this year.",
+      );
+    const c = FINANCE.layout.journal;
+    const columns = [
+      c.description,
+      c.amount,
+      c.date,
+      c.notes,
+      c.trip,
+      c.decision,
+      c.reviewNote,
+      c.paymentMethod,
+      c.paymentDetail,
+    ];
+    const values = sheet
+      .getRange(
+        c.firstDataRow,
+        1,
+        sheet.getMaxRows() - c.firstDataRow + 1,
+        Math.max(...columns),
+      )
+      .getValues();
+    if (
+      values.some((row) =>
+        columns.some((column) => String(row[column - 1] ?? "").trim()),
+      )
+    )
+      throw new Error(
+        "This unconfigured workbook contains entries. Use an empty Kashlo template; no records were changed.",
+      );
+  }
+  const renames = book
+    .getSheets()
+    .filter((sheet) => sheet.getName().includes("{year}"))
+    .map((sheet) => ({
+      sheet,
+      before: sheet.getName(),
+      after: sheet.getName().replace(/\{year\}/g, String(year)),
+    }));
+  if (renames.some((item) => book.getSheetByName(item.after)))
+    throw new Error(
+      "Year-specific tabs already exist. Use a fresh Kashlo template.",
+    );
+  return { cell, renames };
+}
+function applyWorkbookYear_(plan, year) {
+  if (!plan) return;
+  for (const item of plan.renames) item.sheet.setName(item.after);
+  plan.cell.setValue(year);
+}
+function restoreWorkbookYear_(plan) {
+  if (!plan) return;
+  plan.cell.clearContent();
+  for (const item of plan.renames.slice().reverse())
+    if (item.sheet.getName() !== item.before) item.sheet.setName(item.before);
+}
+function validateWorkspaceWorkbook_(book, year, unassigned = false) {
   const missing = [];
   const required = [
     ...Object.values(FINANCE.sheets).map((template) => ({
       name: template.replace(/\{year\}/g, String(year)),
+      template,
       rows: FINANCE.layout.journal.firstDataRow,
       columns: Math.max(
         FINANCE.layout.journal.category,
@@ -84,12 +174,15 @@ function validateWorkspaceWorkbook_(book, year) {
     })),
     {
       name: FINANCE.dashboardSheet.replace(/\{year\}/g, String(year)),
+      template: FINANCE.dashboardSheet,
       rows: FINANCE.layout.dashboard.firstMonthRow + 11,
       columns: FINANCE.layout.dashboard.statusColumn,
     },
   ];
-  required.forEach(({ name, rows, columns }) => {
-    const sheet = book.getSheetByName(name);
+  required.forEach(({ name, template, rows, columns }) => {
+    const sheet =
+      book.getSheetByName(name) ||
+      (unassigned && template && book.getSheetByName(template));
     if (!sheet) missing.push(name);
     else if (sheet.getMaxRows() < rows || sheet.getMaxColumns() < columns)
       missing.push(name + " (required rows/columns are missing)");
@@ -97,7 +190,9 @@ function validateWorkspaceWorkbook_(book, year) {
   if (!missing.length) {
     Object.values(FINANCE.sheets).forEach((template) => {
       const name = template.replace(/\{year\}/g, String(year));
-      const sheet = book.getSheetByName(name);
+      const sheet =
+        book.getSheetByName(name) ||
+        (unassigned && book.getSheetByName(template));
       if (
         !sheet
           .getRange(
@@ -177,7 +272,8 @@ function saveWorkspaceSettings(input) {
         "This Google account cannot open that workbook. Check its URL and access.",
       );
     }
-    validateWorkspaceWorkbook_(book, year);
+    const yearPlan = workbookYearPlan_(book, year, previous, spreadsheetId);
+    validateWorkspaceWorkbook_(book, year, !!yearPlan);
     const record = {
       ownerEmail: normalized_(Session.getEffectiveUser().getEmail()),
       ownerName,
@@ -205,11 +301,14 @@ function saveWorkspaceSettings(input) {
       );
     }
     try {
+      applyWorkbookYear_(yearPlan, year);
+      validateWorkspaceWorkbook_(book, year);
       PropertiesService.getScriptProperties().setProperty(
         WORKSPACE_SETTINGS_KEY_,
         JSON.stringify(record),
       );
     } catch (error) {
+      restoreWorkbookYear_(yearPlan);
       if (previousZone !== timeZone) book.setSpreadsheetTimeZone(previousZone);
       throw error;
     }
@@ -277,14 +376,14 @@ function journalWidth_() {
   );
 }
 
-function mappingRows_(sheet) {
+function mappingRows_(sheet, extraColumns = []) {
   const columns = workspaceConfig_().layout.lookup;
   return sheet
     .getRange(
       columns.firstDataRow,
       1,
       sheet.getMaxRows() - columns.firstDataRow + 1,
-      Math.max(columns.description, columns.category),
+      Math.max(columns.description, columns.category, ...extraColumns),
     )
     .getDisplayValues();
 }
@@ -334,7 +433,20 @@ function authorize_() {
 // Open the configured spreadsheet. Public callers perform authorization before using this helper.
 function book_() {
   validateConfig_();
-  return SpreadsheetApp.openById(workspaceConfig_().spreadsheetId);
+  const book = SpreadsheetApp.openById(workspaceConfig_().spreadsheetId);
+  const schema = FINANCE.workbookYear;
+  const guide = schema && book.getSheetByName(schema.sheet);
+  if (
+    guide &&
+    guide.getRange(schema.row, schema.labelColumn).getValues()[0][0] ===
+      "Workbook year" &&
+    Number(guide.getRange(schema.row, schema.yearColumn).getValues()[0][0]) !==
+      workspaceConfig_().year
+  )
+    throw new Error(
+      "The workbook year does not match this app. Restore its assigned year or connect the correct yearly workbook.",
+    );
+  return book;
 }
 // Resolve a supported journal type and fail clearly if its worksheet is missing.
 function sheet_(book, type) {
@@ -353,10 +465,11 @@ function literal_(range, value) {
 // Read a one-based worksheet column below its header, using visible cell text.
 // Flatten the rows, trim spaces, discard blanks, and preserve each distinct option once.
 // This uses all prepared rows, not just the last populated row.
-function options_(sheet, column) {
-  return [
-    ...new Set(
-      sheet
+function options_(sheet, column, rows) {
+  // Reuse a caller's lookup read when multiple lists share the same sheet.
+  const values = rows
+    ? rows.map((row) => row[column - 1])
+    : sheet
         .getRange(
           workspaceConfig_().layout.lookup.firstDataRow,
           column,
@@ -366,11 +479,8 @@ function options_(sheet, column) {
           1,
         )
         .getDisplayValues()
-        .flat()
-        .map((s) => s.trim())
-        .filter(Boolean),
-    ),
-  ];
+        .flat();
+  return [...new Set(values.map((s) => s.trim()).filter(Boolean))];
 }
 // Normalize descriptions for case-insensitive matching, ignoring surrounding spaces.
 function normalized_(value) {
@@ -381,27 +491,37 @@ function normalized_(value) {
 // Convert a sheet date into the YYYY-MM-DD string sent to the browser.
 // Date objects use the workbook time zone. Numeric dates use the spreadsheet serial-date
 // base of 30 December 1899 and UTC arithmetic; unsupported or invalid values return an empty string.
-function dateString_(date, zone) {
-  if (date instanceof Date && !isNaN(date.getTime()))
-    return Utilities.formatDate(date, zone, "yyyy-MM-dd");
-  if (typeof date === "number" && isFinite(date) && date > 0)
-    return new Date(Date.UTC(1899, 11, 30) + date * 86400000)
-      .toISOString()
-      .slice(0, 10);
-  return "";
+function dateString_(date, zone, cache) {
+  const isDate = date instanceof Date;
+  if (
+    isDate
+      ? isNaN(date.getTime())
+      : typeof date !== "number" || !isFinite(date) || date <= 0
+  )
+    return "";
+  // The optional cache belongs to one snapshot and one time zone, never another request.
+  const key = isDate ? "d" + date.getTime() : "n" + date;
+  if (cache?.has(key)) return cache.get(key);
+  const value = isDate
+    ? Utilities.formatDate(date, zone, "yyyy-MM-dd")
+    : new Date(Date.UTC(1899, 11, 30) + date * 86400000)
+        .toISOString()
+        .slice(0, 10);
+  cache?.set(key, value);
+  return value;
 }
 // Hash the configured source columns to detect changes before a review write.
 // Normalize date values before JSON serialization. Fingerprints cover source and payment fields
 // and excludes review fields T:U; the SHA-256 digest uses web-safe Base64.
 // Include the worksheet row count so deletion invalidates stale row references,
 // even when the next row contains an identical duplicate.
-function fingerprint_(row, zone, rowCount) {
+function fingerprint_(row, zone, rowCount, dates) {
   const payload = workspaceConfig_().layout.journal.fingerprintColumns.map(
     (column) => {
       const value = row[column - 1];
       return column === workspaceConfig_().layout.journal.date ||
         value instanceof Date
-        ? dateString_(value, zone)
+        ? dateString_(value, zone, dates)
         : value;
     },
   );
@@ -422,11 +542,11 @@ function duplicateText_(value) {
 }
 // Every journal uses the same day, description, amount, and recorded payment details.
 // The worksheet Q flag identifies candidates; Okay only accepts this exact matching group.
-function duplicateGroup_(values, type, zone) {
+function duplicateGroup_(values, type, zone, dates) {
   const c = workspaceConfig_().layout.journal;
   if (!values[c.duplicateIssue - 1]) return "";
   const description = duplicateText_(values[c.description - 1]),
-    date = dateString_(values[c.date - 1], zone),
+    date = dateString_(values[c.date - 1], zone, dates),
     amount = values[c.amount - 1];
   if (!description || !date || typeof amount !== "number" || !isFinite(amount))
     return "";
@@ -766,27 +886,27 @@ function dataSnapshot_() {
   const book = book_(),
     zone = book.getSpreadsheetTimeZone(),
     transactions = [],
+    dates = new Map(),
     columns = workspaceConfig_().layout.journal;
-  ensurePaymentStorage_(book);
+  const paymentRecords = ensurePaymentStorage_(book),
+    paymentMethods = paymentMethods_(book);
   ensureReviewCapacity_(book);
   // Read through payment details below the header of each journal, including formula-prepared rows.
   Object.keys(workspaceConfig_().sheets).forEach((type) => {
     const sheet = sheet_(book, type),
+      rowCount = sheet.getMaxRows(),
       rows = sheet
         .getRange(
           columns.firstDataRow,
           1,
-          sheet.getMaxRows() - columns.firstDataRow + 1,
+          rowCount - columns.firstDataRow + 1,
           journalWidth_(),
         )
         .getValues();
     rows.forEach((r, index) => {
+      const date = dateString_(r[columns.date - 1], zone, dates);
       // Ignore rows with no description in B, no amount in C, and no usable date in F.
-      if (
-        !r[columns.description - 1] &&
-        r[columns.amount - 1] === "" &&
-        !dateString_(r[columns.date - 1], zone)
-      )
+      if (!r[columns.description - 1] && r[columns.amount - 1] === "" && !date)
         return;
       // Review columns: Q = duplicate check, R and S = other sheet checks,
       // T = review decision, U = review note. An Okay decision suppresses only the Q issue.
@@ -808,7 +928,7 @@ function dataSnapshot_() {
           typeof r[columns.amount - 1] === "number"
             ? r[columns.amount - 1]
             : null,
-        date: dateString_(r[columns.date - 1], zone),
+        date,
         category: String(r[columns.category - 1] || ""),
         notes: String(r[columns.notes - 1] || ""),
         trip: type === "expense" ? String(r[columns.trip - 1] || "") : "",
@@ -817,8 +937,8 @@ function dataSnapshot_() {
         issues,
         decision: decision || "Pending",
         reviewNote: String(r[columns.reviewNote - 1] || ""),
-        fingerprint: fingerprint_(r, zone, sheet.getMaxRows()),
-        duplicateGroup: duplicateGroup_(r, type, zone),
+        fingerprint: fingerprint_(r, zone, rowCount, dates),
+        duplicateGroup: duplicateGroup_(r, type, zone, dates),
       });
     });
   });
@@ -832,22 +952,39 @@ function dataSnapshot_() {
       book,
       workspaceConfig_().lookupSheets.investment,
     );
-  const mappings = {};
+  const mappings = {},
+    lookupRows = new Map(),
+    lookupColumns = workspaceConfig_().layout.lookup;
   // Each journal has its own descriptions; investments retain their fixed category.
   [
     ["expense", mapping],
     ["income", incomeMapping],
     ["investment", investmentMapping],
   ].forEach(([type, sheet]) => {
-    mappings[type] = mappingRows_(sheet)
+    const width = Math.max(
+      lookupColumns.description,
+      lookupColumns.category,
+      type !== "investment" ? lookupColumns.categoryOptions : 0,
+      type === "expense" ? lookupColumns.trips : 0,
+    );
+    const rows = sheet
+      .getRange(
+        lookupColumns.firstDataRow,
+        1,
+        sheet.getMaxRows() - lookupColumns.firstDataRow + 1,
+        width,
+      )
+      .getDisplayValues();
+    lookupRows.set(sheet, rows);
+    mappings[type] = rows
       .filter(
         (r) =>
-          r[workspaceConfig_().layout.lookup.description - 1].trim() &&
-          r[workspaceConfig_().layout.lookup.category - 1].trim(),
+          r[lookupColumns.description - 1].trim() &&
+          r[lookupColumns.category - 1].trim(),
       )
       .map((r) => ({
-        description: r[workspaceConfig_().layout.lookup.description - 1].trim(),
-        category: r[workspaceConfig_().layout.lookup.category - 1].trim(),
+        description: r[lookupColumns.description - 1].trim(),
+        category: r[lookupColumns.category - 1].trim(),
       }));
   });
   // Monthly completeness is stored in the existing dashboard rather than inferred from totals.
@@ -856,23 +993,29 @@ function dataSnapshot_() {
   return {
     workspaceRevision: workspaceRecord_()?.revision || 0,
     year: workspaceConfig_().year,
-    config: { ...clientConfig_(zone), paymentMethods: paymentMethods_(book) },
+    config: { ...clientConfig_(zone), paymentMethods },
     updatedAt: new Date().toISOString(),
     transactions,
     categories: {
       expense: options_(
         mapping,
         workspaceConfig_().layout.lookup.categoryOptions,
+        lookupRows.get(mapping),
       ),
       income: options_(
         incomeMapping,
         workspaceConfig_().layout.lookup.categoryOptions,
+        lookupRows.get(incomeMapping),
       ),
       investment: [workspaceConfig_().categories.investment],
     },
     mappings,
-    paymentOptions: paymentOptions_(book),
-    trips: options_(mapping, workspaceConfig_().layout.lookup.trips),
+    paymentOptions: paymentOptions_(book, paymentMethods, paymentRecords),
+    trips: options_(
+      mapping,
+      workspaceConfig_().layout.lookup.trips,
+      lookupRows.get(mapping),
+    ),
     monthStatus: dashboard
       .getRange(
         workspaceConfig_().layout.dashboard.firstMonthRow,
@@ -1001,11 +1144,14 @@ function transactionValues_(book, input) {
     workspaceConfig_().lookupSheets[input.type],
   );
   const lookupColumns = workspaceConfig_().layout.lookup;
+  const mappings = mappingRows_(lookup, [
+    lookupColumns.categoryOptions,
+    ...(input.type === "expense" ? [lookupColumns.trips] : []),
+  ]);
   const allowed =
     input.type === "investment"
       ? [workspaceConfig_().categories.investment]
-      : options_(lookup, lookupColumns.categoryOptions);
-  const mappings = mappingRows_(lookup);
+      : options_(lookup, lookupColumns.categoryOptions, mappings);
   // Find an existing description without regard to case or surrounding spaces.
   const match = mappings.find(
     (r) =>
@@ -1022,7 +1168,7 @@ function transactionValues_(book, input) {
   if (!allowed.includes(category)) throw new Error("Choose a valid category.");
   // The legacy trip field stores any expense group, including events and projects.
   let trip = input.type === "expense" ? String(input.trip || "").trim() : "";
-  if (trip && !options_(lookup, lookupColumns.trips).includes(trip))
+  if (trip && !options_(lookup, lookupColumns.trips, mappings).includes(trip))
     throw new Error(
       "Choose an existing expense group, or create one in Dashboards → Expense groups first.",
     );
@@ -1095,14 +1241,17 @@ function addTransaction(input) {
       )
       .getValues();
     let last = columns.firstDataRow - 1;
-    inputs.forEach((values, i) => {
+    for (let i = inputs.length - 1; i >= 0; i--) {
+      const values = inputs[i];
       if (
         inputColumns.some((column) =>
           String(values[column - firstColumn] ?? "").trim(),
         )
-      )
+      ) {
         last = i + columns.firstDataRow;
-    });
+        break;
+      }
+    }
     const row = Math.max(last + 1, columns.firstDataRow);
     ensureJournalCapacity_(sheet, row, book);
     writeTransaction_(sheet, row, values, input.type);
@@ -1170,41 +1319,41 @@ function setReview(input) {
     if (note.length > workspaceConfig_().limits.noteLength)
       throw new Error("Review note is too long.");
     // Read the current A:U values immediately before checking for changes to the entry.
-    const values = sheet.getRange(row, 1, 1, journalWidth_()).getValues()[0];
+    const values = sheet.getRange(row, 1, 1, journalWidth_()).getValues()[0],
+      zone = book.getSpreadsheetTimeZone(),
+      rowCount = sheet.getMaxRows(),
+      dates = new Map();
     if (
       !input.fingerprint ||
-      fingerprint_(
-        values,
-        book.getSpreadsheetTimeZone(),
-        sheet.getMaxRows(),
-      ) !== input.fingerprint
+      fingerprint_(values, zone, rowCount, dates) !== input.fingerprint
     )
       throw new Error(
         "This entry changed in the sheet. Refresh before reviewing it.",
       );
-    const zone = book.getSpreadsheetTimeZone(),
-      rowCount = sheet.getMaxRows();
     const group =
-      decision === "Okay" ? duplicateGroup_(values, input.type, zone) : "";
+      decision === "Okay"
+        ? duplicateGroup_(values, input.type, zone, dates)
+        : "";
     let members = [{ row, values }];
     if (group) {
-      members = sheet
+      const candidates = sheet
         .getRange(
           columns.firstDataRow,
           1,
           rowCount - columns.firstDataRow + 1,
           journalWidth_(),
         )
-        .getValues()
-        .map((values, i) => ({ row: i + columns.firstDataRow, values }))
-        .filter(
-          (entry) => duplicateGroup_(entry.values, input.type, zone) === group,
-        );
+        .getValues();
+      members = [];
+      candidates.forEach((values, i) => {
+        if (duplicateGroup_(values, input.type, zone, dates) === group)
+          members.push({ row: i + columns.firstDataRow, values });
+      });
       // Check every member before any write. A group that changed since loading must
       // be refreshed, even if the clicked entry itself still has the same fingerprint.
       const expected = members.map((entry) => [
         entry.row,
-        fingerprint_(entry.values, zone, rowCount),
+        fingerprint_(entry.values, zone, rowCount, dates),
       ]);
       const supplied = Array.isArray(input.entries)
         ? input.entries
@@ -1315,28 +1464,149 @@ function deleteTransaction(input) {
     throw new Error("Confirm the transaction deletion first.");
   return withWorkspaceWrite_(input, () => {
     const current = checkedTransaction_(book_(), input);
-    const c = workspaceConfig_().layout.journal;
-    const arrayCheck = /LET\(descriptions,/i.test(
-      current.sheet.getRange(c.firstDataRow, c.duplicateIssue).getFormula(),
-    );
-    const restoreDates =
-      current.row === c.firstDataRow
-        ? Object.values(c.dateDerived || {}).filter((column) =>
-            /ARRAYFORMULA/i.test(
-              current.sheet.getRange(c.firstDataRow, column).getFormula(),
-            ),
-          )
-        : [];
-    current.sheet.deleteRow(current.row);
-    if (current.sheet.getMaxRows() < c.firstDataRow)
-      current.sheet.insertRowsAfter(
-        current.sheet.getMaxRows(),
-        c.firstDataRow - current.sheet.getMaxRows(),
-      );
-    // Deleting the first entry also deletes spill anchors; restore only generated columns.
-    if (arrayCheck) installDuplicateArray_(current.sheet);
-    refreshDateArrays_(current.sheet, restoreDates);
+    deleteCheckedTransaction_(current);
     return { ok: true, type: input.type, row: current.row };
+  });
+}
+
+// Share row deletion and spill-anchor repairs between individual and bulk actions.
+function deleteCheckedTransaction_(current) {
+  const c = workspaceConfig_().layout.journal;
+  const arrayCheck = /LET\(descriptions,/i.test(
+    current.sheet.getRange(c.firstDataRow, c.duplicateIssue).getFormula(),
+  );
+  const restoreDates =
+    current.row === c.firstDataRow
+      ? Object.values(c.dateDerived || {}).filter((column) =>
+          /ARRAYFORMULA/i.test(
+            current.sheet.getRange(c.firstDataRow, column).getFormula(),
+          ),
+        )
+      : [];
+  current.sheet.deleteRow(current.row);
+  if (current.sheet.getMaxRows() < c.firstDataRow)
+    current.sheet.insertRowsAfter(
+      current.sheet.getMaxRows(),
+      c.firstDataRow - current.sheet.getMaxRows(),
+    );
+  // Deleting the first entry also deletes spill anchors; restore only generated columns.
+  if (arrayCheck) installDuplicateArray_(current.sheet);
+  refreshDateArrays_(current.sheet, restoreDates);
+}
+
+// Validate the complete loaded journal snapshot before any bulk writes. The script lock
+// prevents competing app writes; fingerprints also catch edits made directly in Sheets.
+function bulkReview(input) {
+  if (!input || !["okay", "delete"].includes(input.action))
+    throw new Error("Invalid bulk review action.");
+  if (input.action === "delete" && input.confirmed !== true)
+    throw new Error("Confirm duplicate deletion first.");
+  return withWorkspaceWrite_(input, () => {
+    const book = book_(),
+      c = workspaceConfig_().layout.journal,
+      zone = book.getSpreadsheetTimeZone(),
+      dates = new Map(),
+      entries = [];
+    Object.keys(workspaceConfig_().sheets).forEach((type) => {
+      const sheet = sheet_(book, type),
+        count = sheet.getMaxRows();
+      sheet
+        .getRange(
+          c.firstDataRow,
+          1,
+          count - c.firstDataRow + 1,
+          journalWidth_(),
+        )
+        .getValues()
+        .forEach((values, index) => {
+          if (
+            !values[c.description - 1] &&
+            values[c.amount - 1] === "" &&
+            !dateString_(values[c.date - 1], zone, dates)
+          )
+            return;
+          entries.push({
+            type,
+            sheet,
+            row: index + c.firstDataRow,
+            values,
+            fingerprint: fingerprint_(values, zone, count, dates),
+            decision: String(values[c.decision - 1] || "Pending"),
+            reviewNote: String(values[c.reviewNote - 1] || ""),
+            group: duplicateGroup_(values, type, zone, dates),
+            pending:
+              !!values[c.duplicateIssue - 1] &&
+              values[c.decision - 1] !== "Okay",
+            other: c.otherIssues.some((column) => !!values[column - 1]),
+          });
+        });
+    });
+    const signature = (items) =>
+      JSON.stringify(
+        items
+          .map((entry) => [
+            entry.type,
+            Number(entry.row),
+            entry.fingerprint,
+            entry.decision,
+            entry.reviewNote,
+            entry.group ?? entry.duplicateGroup,
+          ])
+          .sort((a, b) => a[0].localeCompare(b[0]) || a[1] - b[1]),
+      );
+    if (
+      !Array.isArray(input.entries) ||
+      signature(entries) !== signature(input.entries)
+    )
+      throw new Error(
+        "Transactions changed in the sheet. Refresh before reviewing all entries.",
+      );
+    const groups = new Set(
+      entries
+        .filter((entry) => entry.pending && entry.group)
+        .map((entry) => entry.group),
+    );
+    let affected;
+    if (input.action === "okay") {
+      affected = entries.filter(
+        (entry) => entry.pending || entry.other || groups.has(entry.group),
+      );
+      const notes = new Map(
+        input.entries.map((entry) => [
+          entry.type + ":" + entry.row,
+          entry.note,
+        ]),
+      );
+      // Validate every note before the first write; preserve notes not submitted by the UI.
+      affected.forEach((entry) => {
+        const note = notes.get(entry.type + ":" + entry.row);
+        if (
+          note !== undefined &&
+          (typeof note !== "string" ||
+            note.length > workspaceConfig_().limits.noteLength)
+        )
+          throw new Error("Review note is too long.");
+      });
+      affected.forEach((entry) => {
+        literal_(entry.sheet.getRange(entry.row, c.decision), "Okay");
+        const note = notes.get(entry.type + ":" + entry.row);
+        if (note !== undefined)
+          literal_(entry.sheet.getRange(entry.row, c.reviewNote), note);
+      });
+    } else {
+      const kept = new Set();
+      affected = entries.filter((entry) => {
+        if (!groups.has(entry.group)) return false;
+        if (kept.has(entry.group)) return true;
+        kept.add(entry.group); // Keep the earliest sheet row in each exact duplicate group.
+        return false;
+      });
+      // Descending physical rows keep later deletions from shifting an intended target.
+      affected
+        .sort((a, b) => a.type.localeCompare(b.type) || b.row - a.row)
+        .forEach(deleteCheckedTransaction_);
+    }
+    return { ok: true, count: affected.length };
   });
 }
 
@@ -1419,12 +1689,16 @@ function ensurePaymentStorage_(book) {
         sheet.getMaxColumns(),
         width - sheet.getMaxColumns(),
       );
+    const firstColumn = Math.min(columns.paymentMethod, columns.paymentDetail);
+    const headers = sheet
+      .getRange(1, firstColumn, 1, width - firstColumn + 1)
+      .getDisplayValues()[0];
     [
       [columns.paymentMethod, "Payment method"],
       [columns.paymentDetail, "Bank / card / UPI app"],
     ].forEach(([column, title]) => {
       const cell = sheet.getRange(1, column);
-      if (!cell.getDisplayValues()[0][0]) {
+      if (!headers[column - firstColumn]) {
         cell
           .setValue(title)
           .setBackground("#23614a")
@@ -1467,10 +1741,13 @@ function ensurePaymentStorage_(book) {
   }
   // Migrate previously removed choices without touching journal history.
   // Delete bottom-up so one deletion cannot change another row's position.
-  paymentRecords_(book)
+  const records = paymentRecords_(book);
+  const removed = records
     .filter((record) => record.removed)
-    .sort((a, b) => b.row - a.row)
-    .forEach((record) => sheet.deleteRow(record.row));
+    .sort((a, b) => b.row - a.row);
+  removed.forEach((record) => sheet.deleteRow(record.row));
+  // A deletion shifts physical row numbers; reread only when migration changed the sheet.
+  return removed.length ? paymentRecords_(book) : records;
 }
 function paymentRecords_(book) {
   const sheet = book.getSheetByName(workspaceConfig_().paymentMethodsSheet);
@@ -1512,13 +1789,15 @@ function paymentMethods_(book) {
       return true;
     });
 }
-function paymentOptions_(book) {
+function paymentOptions_(
+  book,
+  methods = paymentMethods_(book),
+  records = paymentRecords_(book),
+) {
   const options = Object.fromEntries(
-    paymentMethods_(book)
-      .filter((method) => method !== "Cash")
-      .map((method) => [method, []]),
+    methods.filter((method) => method !== "Cash").map((method) => [method, []]),
   );
-  paymentRecords_(book).forEach((r) => {
+  records.forEach((r) => {
     if (r.active && Object.prototype.hasOwnProperty.call(options, r.method))
       options[r.method].push(r.name);
   });
@@ -1534,7 +1813,7 @@ function addPaymentType(input) {
     throw new Error("Enter a payment type name up to 60 characters.");
   return withWorkspaceWrite_(input, () => {
     const book = book_();
-    ensurePaymentStorage_(book);
+    const records = ensurePaymentStorage_(book);
     const existing = paymentMethods_(book).find(
       (method) => normalized_(method) === normalized_(name),
     );
@@ -1554,12 +1833,13 @@ function addPaymentType(input) {
       sheet.getRange(row, 1).setWrap(true);
       sheet.autoResizeRows(row, 1);
     }
+    const methods = paymentMethods_(book);
     return {
       ok: true,
       name: existing || name,
       created: !existing,
-      paymentMethods: paymentMethods_(book),
-      paymentOptions: paymentOptions_(book),
+      paymentMethods: methods,
+      paymentOptions: paymentOptions_(book, methods, records),
     };
   });
 }
@@ -1584,7 +1864,8 @@ function paymentValues_(book, input) {
   }
   // Explicitly clearing the optional method also clears any stale detail on edits.
   if (!paymentMethod) return { paymentMethod: "", paymentDetail: "" };
-  if (!paymentMethods_(book).includes(paymentMethod))
+  const methods = paymentMethods_(book);
+  if (!methods.includes(paymentMethod))
     throw new Error("Choose a valid payment method.");
   if (paymentMethod === "Cash") return { paymentMethod, paymentDetail: "" };
   // Custom types may stand alone (for example Cheque); built-in account methods still require a name.
@@ -1593,7 +1874,7 @@ function paymentValues_(book, input) {
     !["Bank transfer", "Card", "UPI"].includes(paymentMethod)
   )
     return { paymentMethod, paymentDetail: "" };
-  const active = (paymentOptions_(book)[paymentMethod] || []).includes(
+  const active = (paymentOptions_(book, methods)[paymentMethod] || []).includes(
     paymentDetail,
   );
   // A removed name may be retained only on the same existing transaction.
@@ -1624,13 +1905,12 @@ function managePaymentOption(input) {
     );
   return withWorkspaceWrite_(input, () => {
     const book = book_();
-    ensurePaymentStorage_(book);
+    const records = ensurePaymentStorage_(book);
     if (method === "Cash" || !paymentMethods_(book).includes(method))
       throw new Error("Choose an available payment type.");
-    const records = paymentRecords_(book),
-      existing = records.find(
-        (r) => r.method === method && normalized_(r.name) === normalized_(name),
-      );
+    const existing = records.find(
+      (r) => r.method === method && normalized_(r.name) === normalized_(name),
+    );
     if (input.action === "remove" && !existing)
       throw new Error(
         "This payment name is no longer available. Refresh the app.",

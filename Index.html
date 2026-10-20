@@ -252,6 +252,12 @@
       .mobile-profile {
         display: none;
       }
+      .mobile-menu-toggle,
+      .drawer-heading,
+      .nav-backdrop,
+      .pull-refresh {
+        display: none;
+      }
       .settings-grid {
         display: grid;
         grid-template-columns: 1fr 1.2fr;
@@ -1421,6 +1427,37 @@
         }
       }
       @media (max-width: 760px) {
+        html {
+          overscroll-behavior-y: contain;
+        }
+        .pull-refresh {
+          display: flex;
+          align-items: center;
+          gap: 9px;
+          position: fixed;
+          top: max(12px, env(safe-area-inset-top));
+          left: 50%;
+          transform: translateX(-50%);
+          z-index: 29;
+          max-width: calc(100vw - 32px);
+          padding: 11px 17px;
+          border: 1px solid var(--line);
+          border-radius: 999px;
+          background: #273024;
+          color: var(--green);
+          box-shadow: 0 8px 24px #0005;
+          font-size: 12px;
+          white-space: nowrap;
+          pointer-events: none;
+        }
+        .pull-refresh-icon {
+          display: inline-block;
+          font-size: 18px;
+          line-height: 1;
+        }
+        .pull-refresh.refreshing .pull-refresh-icon {
+          animation: activity-spin 0.8s linear infinite;
+        }
         .dashboard-tabs {
           display: grid;
           grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1435,15 +1472,15 @@
           display: block;
         }
         .sidebar {
-          position: static;
+          position: relative;
           height: auto;
-          padding: 20px 17px 0;
+          padding: 20px 17px 18px;
           border-right: 0;
           border-bottom: 1px solid var(--line);
         }
         .brand {
           font-size: 27px;
-          padding: 0;
+          padding: 0 48px;
         }
         .brandmark,
         .brandmark svg {
@@ -1451,35 +1488,89 @@
           height: 29px;
         }
         .brand-tagline {
-          position: absolute;
-          right: 18px;
-          top: 29px;
+          position: static;
           padding: 0;
-          margin: 0;
+          margin: 5px 48px 0;
           font-size: 9px;
         }
-        .navlabel,
         .source,
         .profile {
           display: none;
         }
+        .mobile-menu-toggle {
+          display: grid;
+          place-items: center;
+          position: absolute;
+          left: 17px;
+          top: 18px;
+          width: 40px;
+          height: 40px;
+          padding: 9px;
+        }
+        .navigation-panel {
+          position: fixed;
+          inset: 0 auto 0 0;
+          width: min(300px, 85vw);
+          height: 100dvh;
+          padding: 24px 18px;
+          padding-top: max(24px, env(safe-area-inset-top));
+          padding-bottom: max(24px, env(safe-area-inset-bottom));
+          background: #151819;
+          border-right: 1px solid var(--line);
+          z-index: 41;
+          overflow-y: auto;
+          overscroll-behavior: contain;
+          visibility: hidden;
+          transform: translateX(-100%);
+          transition:
+            transform 0.2s ease,
+            visibility 0.2s;
+        }
+        .sidebar.menu-open .navigation-panel {
+          visibility: visible;
+          transform: translateX(0);
+          box-shadow: 16px 0 48px #0006;
+        }
+        .drawer-heading {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 16px;
+          margin-bottom: 30px;
+        }
+        .drawer-heading h2 {
+          margin: 0;
+          font-size: 22px;
+        }
+        .drawer-heading button {
+          width: 40px;
+          height: 40px;
+          font-size: 23px;
+        }
+        .nav-backdrop {
+          display: block;
+          position: fixed;
+          inset: 0;
+          z-index: 40;
+          border: 0;
+          background: #0009;
+          padding: 0;
+        }
+        body.mobile-menu-open {
+          overflow: hidden;
+        }
         .nav {
-          flex-direction: row;
-          overflow: auto;
-          margin-top: 20px;
-          gap: 4px;
-          padding-bottom: 13px;
-          scrollbar-width: none;
+          flex-direction: column;
+          gap: 8px;
         }
         .nav button {
-          flex-shrink: 0;
-          padding: 10px;
-          gap: 7px;
-          font-size: 10px;
+          padding: 14px;
+          gap: 12px;
+          font-size: 14px;
         }
         .nav svg {
-          width: 15px;
-          height: 15px;
+          width: 20px;
+          height: 20px;
         }
         .main {
           padding: 21px 17px 30px;
@@ -1702,9 +1793,6 @@
           top: 18px;
           padding: 9px;
         }
-        .brand-tagline {
-          right: 72px;
-        }
       }
       @media (prefers-reduced-motion: reduce) {
         *,
@@ -1720,6 +1808,26 @@
     <div class="app">
       <!-- Persistent sidebar: navigation switches the client view without navigating to a different URL. -->
       <aside class="sidebar">
+        <button
+          type="button"
+          class="iconbtn mobile-menu-toggle"
+          id="mobileMenuButton"
+          aria-label="Open navigation"
+          aria-controls="navigationPanel"
+          aria-expanded="false"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            width="20"
+            height="20"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            aria-hidden="true"
+          >
+            <path d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        </button>
         <div class="brand" aria-label="Kashlo">
           <span class="brandmark" aria-hidden="true"
             ><svg viewBox="0 0 40 40" fill="none">
@@ -1733,46 +1841,71 @@
           kashlo<span class="brand-dot">.</span>
         </div>
         <p class="brand-tagline">Your money. Your flow.</p>
-        <div class="navlabel">YOUR WORKSPACE</div>
-        <!-- data-view values match state.view and the render functions in the script below. -->
-        <nav class="nav" aria-label="Main navigation">
-          <button data-view="overview" class="active">
-            <svg viewBox="0 0 24 24">
-              <rect x="3" y="3" width="7" height="7" rx="1.5" />
-              <rect x="14" y="3" width="7" height="7" rx="1.5" />
-              <rect x="3" y="14" width="7" height="7" rx="1.5" />
-              <rect x="14" y="14" width="7" height="7" rx="1.5" /></svg
-            >Overview
-          </button>
-          <button data-view="transactions">
-            <svg viewBox="0 0 24 24">
-              <path d="M4 7h16M4 12h16M4 17h16" />
-              <path d="m16 4 4 3-4 3M8 14l-4 3 4 3" /></svg
-            >Transactions
-          </button>
-          <button data-view="investments">
-            <svg viewBox="0 0 24 24">
-              <path d="M4 20V10m6 10V6m6 14V3m5 17H2" /></svg
-            >Investments
-          </button>
-          <button data-view="dashboards">
-            <svg viewBox="0 0 24 24">
-              <path d="M3 7V5h7l2 2h9v13H3Z" /></svg
-            >Dashboards
-          </button>
-          <button data-view="review">
-            <svg viewBox="0 0 24 24">
-              <rect x="5" y="4" width="14" height="17" rx="2" />
-              <path d="M9 3h6v3H9zM9 12l2 2 4-4M9 18h6" /></svg
-            >Review<span class="badge" id="reviewBadge">—</span>
-          </button>
-          <button data-view="payments">
-            <svg viewBox="0 0 24 24">
-              <rect x="3" y="5" width="18" height="14" rx="2" />
-              <path d="M3 10h18M7 15h4" /></svg
-            >Manage
-          </button>
-        </nav>
+        <button
+          type="button"
+          class="nav-backdrop"
+          id="navigationBackdrop"
+          aria-label="Close navigation"
+          tabindex="-1"
+          hidden
+        ></button>
+        <div
+          class="navigation-panel"
+          id="navigationPanel"
+          aria-label="Navigation"
+        >
+          <div class="drawer-heading">
+            <h2>Navigation</h2>
+            <button
+              type="button"
+              class="iconbtn"
+              id="closeMobileMenu"
+              aria-label="Close navigation"
+            >
+              ×
+            </button>
+          </div>
+          <div class="navlabel">YOUR WORKSPACE</div>
+          <!-- data-view values match state.view and the render functions in the script below. -->
+          <nav class="nav" aria-label="Main navigation">
+            <button data-view="overview" class="active">
+              <svg viewBox="0 0 24 24">
+                <rect x="3" y="3" width="7" height="7" rx="1.5" />
+                <rect x="14" y="3" width="7" height="7" rx="1.5" />
+                <rect x="3" y="14" width="7" height="7" rx="1.5" />
+                <rect x="14" y="14" width="7" height="7" rx="1.5" /></svg
+              >Overview
+            </button>
+            <button data-view="transactions">
+              <svg viewBox="0 0 24 24">
+                <path d="M4 7h16M4 12h16M4 17h16" />
+                <path d="m16 4 4 3-4 3M8 14l-4 3 4 3" /></svg
+              >Transactions
+            </button>
+            <button data-view="investments">
+              <svg viewBox="0 0 24 24">
+                <path d="M4 20V10m6 10V6m6 14V3m5 17H2" /></svg
+              >Investments
+            </button>
+            <button data-view="dashboards">
+              <svg viewBox="0 0 24 24">
+                <path d="M3 7V5h7l2 2h9v13H3Z" /></svg
+              >Dashboards
+            </button>
+            <button data-view="review">
+              <svg viewBox="0 0 24 24">
+                <rect x="5" y="4" width="14" height="17" rx="2" />
+                <path d="M9 3h6v3H9zM9 12l2 2 4-4M9 18h6" /></svg
+              >Review<span class="badge" id="reviewBadge">—</span>
+            </button>
+            <button data-view="payments">
+              <svg viewBox="0 0 24 24">
+                <rect x="3" y="5" width="18" height="14" rx="2" />
+                <path d="M3 10h18M7 15h4" /></svg
+              >Manage
+            </button>
+          </nav>
+        </div>
         <!-- Connection indicators and the workbook link are updated only after a successful server response. -->
         <div class="source">
           <strong
@@ -1820,7 +1953,7 @@
         </button>
       </aside>
       <!-- Main workspace contains the page controls and the dynamically replaced view. -->
-      <main class="main">
+      <main class="main" id="mainWorkspace">
         <!-- Refresh reads the sheet; Add transaction opens the entry form. -->
         <header class="topbar">
           <div class="crumb">
@@ -1877,6 +2010,18 @@
     </div>
     <!-- Dedicated containers for temporary dialogs and status/error notifications. -->
     <div id="modalContainer"></div>
+    <div
+      class="pull-refresh"
+      id="pullRefreshIndicator"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      hidden
+    >
+      <span class="pull-refresh-icon" id="pullRefreshIcon" aria-hidden="true"
+        >↓</span
+      ><span id="pullRefreshLabel">Pull to refresh</span>
+    </div>
     <div
       id="celebrationContainer"
       role="status"
@@ -1944,40 +2089,50 @@
       // Config.gs is the only source of workbook-specific browser settings.
       // A local preview has no configuration and displays placeholders until connected.
       const settings = () => state.data?.config;
+      // Reuse Intl instances until regional settings change; keep caches browser-only.
+      let formatterKey = "",
+        formatterCache = {};
+      function formatter(name) {
+        const config = settings();
+        const key = JSON.stringify([config.locale, config.currency]);
+        if (key !== formatterKey) {
+          formatterKey = key;
+          formatterCache = {};
+        }
+        if (!formatterCache[name]) {
+          formatterCache[name] =
+            name === "date"
+              ? new Intl.DateTimeFormat(config.locale, {
+                  day: "numeric",
+                  month: "short",
+                  year: "numeric",
+                })
+              : new Intl.NumberFormat(config.locale, {
+                  style: "currency",
+                  currency: config.currency,
+                  ...(name === "symbol"
+                    ? { currencyDisplay: "narrowSymbol" }
+                    : name === "compact"
+                      ? { notation: "compact", maximumFractionDigits: 1 }
+                      : { maximumFractionDigits: 2 }),
+                });
+        }
+        return formatterCache[name];
+      }
       const money = (n) =>
-        settings()
-          ? new Intl.NumberFormat(settings().locale, {
-              style: "currency",
-              currency: settings().currency,
-              maximumFractionDigits: 2,
-            }).format(Number(n) || 0)
-          : "—";
+        settings() ? formatter("money").format(Number(n) || 0) : "—";
       const currencySymbol = () =>
         settings()
-          ? new Intl.NumberFormat(settings().locale, {
-              style: "currency",
-              currency: settings().currency,
-              currencyDisplay: "narrowSymbol",
-            })
+          ? formatter("symbol")
               .formatToParts(0)
               .find((part) => part.type === "currency")?.value ||
             settings().currency
           : "¤";
       // Intl selects appropriate compact units for the configured locale and currency.
-      const short = (n) =>
-        new Intl.NumberFormat(settings().locale, {
-          style: "currency",
-          currency: settings().currency,
-          notation: "compact",
-          maximumFractionDigits: 1,
-        }).format(Number(n) || 0);
+      const short = (n) => formatter("compact").format(Number(n) || 0);
       const dateLabel = (s) =>
         s
-          ? new Intl.DateTimeFormat(settings().locale, {
-              day: "numeric",
-              month: "short",
-              year: "numeric",
-            }).format(new Date(s + "T12:00:00"))
+          ? formatter("date").format(new Date(s + "T12:00:00"))
           : "Missing date";
       const monthPrefix = (month = state.month) =>
         settings()?.year + "-" + String(month + 1).padStart(2, "0");
@@ -1989,6 +2144,25 @@
         rows().filter(
           (t) => t.type === type && t.date.startsWith(monthPrefix(month)),
         );
+      // Calculate all chart series in one pass instead of scanning every journal for each month.
+      function cashFlowTotals() {
+        const months = {
+          income: Array(12).fill(0),
+          expense: Array(12).fill(0),
+          investment: Array(12).fill(0),
+        };
+        const annual = { income: 0, expense: 0, investment: 0 };
+        const prefixes = new Map(MONTHS.map((_, i) => [monthPrefix(i), i]));
+        for (const transaction of rows()) {
+          if (!Object.prototype.hasOwnProperty.call(months, transaction.type))
+            continue;
+          const amount = Number(transaction.amount) || 0;
+          annual[transaction.type] += amount;
+          const month = prefixes.get(transaction.date.slice(0, 7));
+          if (month !== undefined) months[transaction.type][month] += amount;
+        }
+        return { months, annual };
+      }
       // Aggregate amounts by a chosen property, grouping blank labels under Uncategorized.
       const group = (arr, key) =>
         arr.reduce((o, t) => {
@@ -2071,6 +2245,7 @@
             else if (name === "createExpenseGroup")
               runner.createExpenseGroup(args);
             else if (name === "setReview") runner.setReview(args);
+            else if (name === "bulkReview") runner.bulkReview(args);
             else if (name === "setMonthStatus") runner.setMonthStatus(args);
             else reject(new Error("Unknown action."));
           });
@@ -2138,10 +2313,8 @@
       // Build an inline SVG with income, expense, and investment bars for all twelve months.
       // Series use the same vertical scale; negative values have zero bar height.
       // SVG titles expose the full month, series name, and amount for each bar.
-      function chart() {
-        const income = MONTHS.map((_, i) => sum(monthly("income", i))),
-          expense = MONTHS.map((_, i) => sum(monthly("expense", i))),
-          investment = MONTHS.map((_, i) => sum(monthly("investment", i)));
+      function chart(totals = cashFlowTotals()) {
+        const { income, expense, investment } = totals.months;
         // Keep the scale at least 1 to avoid division by zero; reserve space for axes and month labels.
         const max = Math.max(...income, ...expense, ...investment, 1),
           w = 620,
@@ -2265,9 +2438,9 @@
               : "Connect the app to read your journals. No sample transactions have been added.",
           );
         return (
-          '<div class="tablewrap"><table><thead><tr><th>Description</th><th>Date</th><th>Category</th>' +
+          '<div class="tablewrap"><table><thead><tr><th>Description</th><th>Date</th><th style="text-align:right">Amount</th><th>Category</th>' +
           (showExpenseGroup ? "<th>Expense group</th>" : "") +
-          '<th>Payment method</th><th>Bank / card / UPI app</th><th style="text-align:right">Amount</th>' +
+          "<th>Payment method</th><th>Bank / card / UPI app</th>" +
           (editable ? "<th>Actions</th>" : "") +
           "</tr></thead><tbody>" +
           arr
@@ -2286,6 +2459,8 @@
                 ) +
                 "</span></td><td>" +
                 esc(dateLabel(t.date)) +
+                '</td><td class="amount" style="text-align:right">' +
+                money(t.amount) +
                 '</td><td><span class="pill">' +
                 esc(t.category || "Missing category") +
                 "</span></td>" +
@@ -2298,8 +2473,6 @@
                 esc(t.paymentMethod || "Not recorded") +
                 "</td><td>" +
                 esc(visiblePaymentDetail(t)) +
-                '</td><td class="amount" style="text-align:right">' +
-                money(t.amount) +
                 "</td>" +
                 (editable
                   ? '<td><div class="transaction-actions"><button type="button" class="button light edit-transaction" data-edit-type="' +
@@ -2433,9 +2606,10 @@
       // Compose selected-month metrics, completeness notice, annual chart, category bars, recent entries, and annual totals.
       function overview() {
         // Recorded cash surplus/shortfall equals income minus expenses minus investment contributions.
-        const income = sum(monthly("income")),
-          expenses = sum(monthly("expense")),
-          investments = sum(monthly("investment")),
+        const totals = cashFlowTotals(),
+          income = totals.months.income[state.month],
+          expenses = totals.months.expense[state.month],
+          investments = totals.months.investment[state.month],
           balance = income - expenses - investments,
           status = state.data?.monthStatus?.[state.month] || "Not reviewed";
         const cards =
@@ -2470,7 +2644,7 @@
           esc(settings()?.year || "—") +
           "</span></div>" +
           (loaded()
-            ? chart()
+            ? chart(totals)
             : empty(
                 "A clearer picture of your year",
                 "Monthly patterns will appear here once the sheet is connected.",
@@ -2501,34 +2675,30 @@
           "</div>" +
           recent +
           '<div class="card" style="margin-top:23px"><div class="cardhead"><h2>Year-to-date totals</h2><span class="pill">All recorded entries</span></div><div class="annual"><div>Income<strong>' +
-          (loaded()
-            ? money(sum(rows().filter((t) => t.type === "income")))
-            : "—") +
+          (loaded() ? money(totals.annual.income) : "—") +
           "</strong></div><div>Expenses<strong>" +
-          (loaded()
-            ? money(sum(rows().filter((t) => t.type === "expense")))
-            : "—") +
+          (loaded() ? money(totals.annual.expense) : "—") +
           "</strong></div><div>Investment contributions<strong>" +
-          (loaded()
-            ? money(sum(rows().filter((t) => t.type === "investment")))
-            : "—") +
+          (loaded() ? money(totals.annual.investment) : "—") +
           "</strong></div></div></div>"
         );
       }
       // Render the monthly transaction journal, or an investment-only version with contribution summaries.
       function transactions(investments = false) {
         // Apply journal, configured month, and case-insensitive description/category/trip search filters, then sort newest first.
+        const prefix = monthPrefix(),
+          search = state.search.toLowerCase();
         const filtered = rows()
           .filter(
             (t) =>
               (investments
                 ? t.type === "investment"
                 : state.type === "all" || t.type === state.type) &&
-              t.date.startsWith(monthPrefix()) &&
-              (!state.search ||
+              t.date.startsWith(prefix) &&
+              (!search ||
                 (t.description + " " + t.category + " " + t.trip)
                   .toLowerCase()
-                  .includes(state.search.toLowerCase())),
+                  .includes(search)),
           )
           .sort((a, b) => b.date.localeCompare(a.date) || b.row - a.row);
         const filter =
@@ -2705,9 +2875,10 @@
         );
       }
       function cashFlowDashboard() {
-        const income = sum(monthly("income")),
-          expenses = sum(monthly("expense")),
-          investments = sum(monthly("investment"));
+        const totals = cashFlowTotals(),
+          income = totals.months.income[state.month],
+          expenses = totals.months.expense[state.month],
+          investments = totals.months.investment[state.month];
         const balance = income - expenses - investments;
         return (
           '<div class="cards">' +
@@ -2731,7 +2902,7 @@
           esc(settings()?.year || "—") +
           "</span></div>" +
           (loaded()
-            ? chart()
+            ? chart(totals)
             : empty(
                 "Your year in view",
                 "Connect your sheet to see annual cash flow.",
@@ -2740,9 +2911,9 @@
           (loaded()
             ? '<div class="tablewrap"><table><thead><tr><th>Month</th><th>Income</th><th>Expenses</th><th>Investments</th><th>Surplus / shortfall</th><th>Record status</th></tr></thead><tbody>' +
               MONTHS.map((month, index) => {
-                const earned = sum(monthly("income", index)),
-                  spent = sum(monthly("expense", index)),
-                  invested = sum(monthly("investment", index)),
+                const earned = totals.months.income[index],
+                  spent = totals.months.expense[index],
+                  invested = totals.months.investment[index],
                   net = earned - spent - invested;
                 return (
                   "<tr><td>" +
@@ -2776,8 +2947,13 @@
         const groups = state.data?.trips || [];
         const expenses = rows().filter((entry) => entry.type === "expense");
         const grouped = expenses.filter((entry) => entry.trip);
+        const byGroup = new Map();
+        for (const entry of grouped) {
+          if (!byGroup.has(entry.trip)) byGroup.set(entry.trip, []);
+          byGroup.get(entry.trip).push(entry);
+        }
         if (state.trip) {
-          const selected = grouped.filter((entry) => entry.trip === state.trip);
+          const selected = byGroup.get(state.trip) || [];
           return (
             '<div class="cardhead"><button class="textlink" id="backTrips">← All expense groups</button><button class="button" id="addGroupExpense">+ Add expense</button></div>' +
             '<div class="notice">This group brings expenses from different categories together. Each recorded payment is counted once; avoid recording both an aggregate payment and its itemized costs.</div>' +
@@ -2802,9 +2978,7 @@
             ? '<div class="tripgrid">' +
               groups
                 .map((name) => {
-                  const entries = grouped.filter(
-                    (entry) => entry.trip === name,
-                  );
+                  const entries = byGroup.get(name) || [];
                   return (
                     '<article class="card tripcard" tabindex="0" role="button" data-trip="' +
                     esc(name) +
@@ -2995,6 +3169,7 @@
       }
       async function openProfile() {
         if (state.saveBusy) return;
+        setMobileMenu(false);
         state.view = "profile";
         state.profileLoading = true;
         render();
@@ -3087,7 +3262,7 @@
             "Year",
             p.year,
             'type="number" required min="1900" max="9999" step="1"',
-            "January–December. Must match the workbook's journal and dashboard sheets.",
+            "One calendar year per workbook. A fresh template is prepared for this year automatically. Use a new copy and deployment for another year.",
           ) +
           '</div></section></div><datalist id="profileCurrencies">' +
           [
@@ -3323,22 +3498,28 @@
         const compare = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
         return rows()
           .filter((entry) => entry.issues.length)
+          .map((entry) => ({
+            entry,
+            description: normalize(entry.description),
+            method: normalize(entry.paymentMethod),
+            detail: normalize(entry.paymentDetail),
+          }))
           .sort(
             (a, b) =>
-              compare(a.type, b.type) ||
-              compare(normalize(a.description), normalize(b.description)) ||
-              compare(a.date, b.date) ||
-              (Number(a.amount) || 0) - (Number(b.amount) || 0) ||
-              compare(normalize(a.paymentMethod), normalize(b.paymentMethod)) ||
-              compare(normalize(a.paymentDetail), normalize(b.paymentDetail)) ||
-              a.row - b.row,
-          );
+              compare(a.entry.type, b.entry.type) ||
+              compare(a.description, b.description) ||
+              compare(a.entry.date, b.entry.date) ||
+              (Number(a.entry.amount) || 0) - (Number(b.entry.amount) || 0) ||
+              compare(a.method, b.method) ||
+              compare(a.detail, b.detail) ||
+              a.entry.row - b.entry.row,
+          )
+          .map(({ entry }) => entry);
       }
       // Render records with nonempty server-supplied issues and the twelve month-completeness controls.
       // Duplicate/check rules are evaluated by the source sheet and getData, not recalculated here.
-      function review() {
+      function review(flagged = reviewRows()) {
         // Use the shared grouped order so button indexes match the rendered entries and notes.
-        const flagged = reviewRows();
         let output =
           '<div class="notice">' +
           esc(
@@ -3348,6 +3529,15 @@
           '</div><div class="card"><div class="cardhead"><div><h2>Entries to look over</h2><p>The exact date and amount, with a decision you control.</p></div><span class="pill warn">' +
           flagged.length +
           " entries</span></div>";
+        if (flagged.length)
+          output +=
+            '<div class="reviewactions" style="margin-bottom:20px"><button class="button light" id="okayAll">✓ Okay all</button><button class="button outline" id="deleteAllDuplicates" ' +
+            (flagged.some(
+              (entry) => entry.duplicateGroup && entry.decision !== "Okay",
+            )
+              ? ""
+              : "disabled") +
+            ">Delete all duplicates</button></div>";
         // Each review button stores its index into flagged; notes preserve the last saved review text.
         output += flagged.length
           ? flagged
@@ -3503,6 +3693,7 @@
         document
           .querySelectorAll("[data-view]")
           .forEach((button) => (button.disabled = state.setupRequired));
+        const flagged = state.view === "review" ? reviewRows() : [];
         $("#content").innerHTML =
           state.view === "profile"
             ? profileView()
@@ -3516,15 +3707,15 @@
                     ? dashboards()
                     : state.view === "payments"
                       ? manage()
-                      : review();
+                      : review(flagged);
         // Force a layout read between class changes to restart the view entrance animation.
         $("#content").classList.remove("view");
         void $("#content").offsetWidth;
         $("#content").classList.add("view");
-        bindContent();
+        bindContent(flagged);
       }
       // Attach navigation, filtering, trip, review, and status handlers to the freshly rendered content.
-      function bindContent() {
+      function bindContent(flagged = reviewRows()) {
         if (state.view === "profile") bindProfile();
         document.querySelectorAll("[data-dashboard]").forEach((button) => {
           button.onclick = () => {
@@ -3775,9 +3966,14 @@
           state.trip = "";
           render();
         });
-        // Use the shared grouped order so button indexes match the rendered entries and notes.
-        const flagged = reviewRows();
+        // Use the same records and ordering as the rendered review list.
         // Handle review actions using the matching issue record, physical row, and loaded fingerprint.
+        $("#okayAll")?.addEventListener("click", () =>
+          openBulkReview("okay", flagged),
+        );
+        $("#deleteAllDuplicates")?.addEventListener("click", () =>
+          openBulkReview("delete", flagged),
+        );
         document.querySelectorAll("[data-okay]").forEach(
           (b) =>
             (b.onclick = async () => {
@@ -3862,6 +4058,7 @@
       }
       // Switch pages and reset search text and selected trip; the selected month and journal filter persist.
       function navigate(view) {
+        setMobileMenu(false);
         if (state.setupRequired) {
           state.view = "profile";
           render();
@@ -3968,7 +4165,7 @@
             ["expense", "income", "investment"],
             state.view === "investments" ? "investment" : "expense",
           ) +
-          '</select></div><div class="field"><label for="entryDate">Date</label><input id="entryDate" type="date" required></div><div class="field full"><label for="entryDescription">Description</label><input id="entryDescription" placeholder="For example, groceries or salary" list="knownDescriptions" autocomplete="off" required><datalist id="knownDescriptions"></datalist><small>Known descriptions select their category automatically.</small></div><div class="field"><label for="entryAmount">Amount</label><input id="entryAmount" type="number" step="0.01" placeholder="0.00" required></div><div class="field"><label for="entryCategory">Category</label><select id="entryCategory" required></select></div><div class="field full" id="tripField"><label for="entryTrip">Expense group (optional)</label><select id="entryTrip"></select><button type="button" class="textlink" id="newEntryGroup" style="margin-top:8px">+ Create new group</button><div id="inlineGroup" hidden style="margin-top:12px"><label for="inlineGroupName">New group name</label><input id="inlineGroupName" placeholder="For example, Wedding"><div style="display:flex;gap:10px;margin-top:8px"><button type="button" class="button light" id="saveInlineGroup">Add group</button><button type="button" class="textlink" id="cancelInlineGroup">Cancel</button></div><div class="formerror" id="inlineGroupError"></div></div></div><div class="field" id="paymentMethodField"><label for="entryPaymentMethod">Payment method (optional)</label><select id="entryPaymentMethod"></select><button type="button" class="textlink" id="newEntryPaymentType" aria-expanded="false" aria-controls="entryPaymentTypeCreator" style="margin-top:10px">+ Add payment type</button></div><div class="field full" id="entryPaymentTypeCreator" hidden>' +
+          '</select></div><div class="field"><label for="entryDate">Date</label><input id="entryDate" type="date" required></div><div class="field full"><label for="entryDescription">Description</label><input id="entryDescription" placeholder="For example, groceries or salary" list="knownDescriptions" autocomplete="off" required><datalist id="knownDescriptions"></datalist><small>Known descriptions select their category automatically.</small></div><div class="field"><label for="entryAmount">Amount</label><input id="entryAmount" type="number" inputmode="decimal" step="0.01" placeholder="0.00" required></div><div class="field"><label for="entryCategory">Category</label><select id="entryCategory" required></select></div><div class="field full" id="tripField"><label for="entryTrip">Expense group (optional)</label><select id="entryTrip"></select><button type="button" class="textlink" id="newEntryGroup" style="margin-top:8px">+ Create new group</button><div id="inlineGroup" hidden style="margin-top:12px"><label for="inlineGroupName">New group name</label><input id="inlineGroupName" placeholder="For example, Wedding"><div style="display:flex;gap:10px;margin-top:8px"><button type="button" class="button light" id="saveInlineGroup">Add group</button><button type="button" class="textlink" id="cancelInlineGroup">Cancel</button></div><div class="formerror" id="inlineGroupError"></div></div></div><div class="field" id="paymentMethodField"><label for="entryPaymentMethod">Payment method (optional)</label><select id="entryPaymentMethod"></select><button type="button" class="textlink" id="newEntryPaymentType" aria-expanded="false" aria-controls="entryPaymentTypeCreator" style="margin-top:10px">+ Add payment type</button></div><div class="field full" id="entryPaymentTypeCreator" hidden>' +
           paymentTypeFields("entry") +
           '</div><div class="field" id="paymentDetailField" hidden><label for="entryPaymentDetail" id="paymentDetailLabel">Which bank?</label><select id="entryPaymentDetail"></select></div><div class="field full" id="paymentNameControls" hidden><button type="button" class="textlink" id="newPaymentName">+ Add payment name</button><small>Manage or remove names in Manage → Payment methods.</small><div id="inlinePayment" hidden><label for="inlinePaymentType">Payment type</label><select id="inlinePaymentType"></select><label for="inlinePaymentName">Payment name</label><input id="inlinePaymentName" maxlength="100" placeholder="Enter a name"><button type="button" class="button light" id="saveInlinePayment">Add and select</button><button type="button" class="textlink" id="cancelInlinePayment">Cancel</button><div class="formerror" id="inlinePaymentError"></div></div></div><div class="field full"><label for="entryNotes">Notes (optional)</label><textarea id="entryNotes" placeholder="Anything you would like to remember"></textarea></div></div><div class="formerror" id="formError"></div><div class="modal-footer"><button type="button" class="button outline" id="cancelEntry">Cancel</button><button class="button" id="saveEntry" ' +
           (!isConnected ? "disabled" : "") +
@@ -4343,6 +4540,99 @@
           }
         };
       }
+      // Capture one immutable snapshot and request ID per confirmation, including unsaved review notes.
+      function openBulkReview(action, flagged) {
+        if (state.saveBusy || !loaded()) return;
+        const notes = new Map(
+          flagged.map((entry, i) => [
+            entry.type + ":" + entry.row,
+            $("#note_" + i).value,
+          ]),
+        );
+        const entries = rows().map((entry) => ({
+          type: entry.type,
+          row: entry.row,
+          fingerprint: entry.fingerprint,
+          decision: entry.decision,
+          reviewNote: entry.reviewNote,
+          duplicateGroup: entry.duplicateGroup,
+          note: notes.get(entry.type + ":" + entry.row),
+        }));
+        const groups = new Map();
+        const pending = new Set(
+          flagged
+            .filter(
+              (entry) => entry.duplicateGroup && entry.decision !== "Okay",
+            )
+            .map((entry) => entry.duplicateGroup),
+        );
+        rows().forEach((entry) => {
+          if (pending.has(entry.duplicateGroup))
+            groups.set(
+              entry.duplicateGroup,
+              (groups.get(entry.duplicateGroup) || 0) + 1,
+            );
+        });
+        const count = [...groups.values()].reduce(
+          (total, size) => total + Math.max(0, size - 1),
+          0,
+        );
+        if (action === "delete" && !count) return;
+        const requestId = id(),
+          deleting = action === "delete";
+        $("#modalContainer").innerHTML =
+          '<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="bulkTitle"><div class="modal-head"><h2 id="bulkTitle">' +
+          (deleting ? "Delete all duplicates?" : "Mark all as Okay?") +
+          '</h2><button class="close" aria-label="Close dialog">×</button></div><div class="notice warning">' +
+          (deleting
+            ? "Permanently delete " +
+              count +
+              " extra transaction(s) from your sheet and totals. Keep the earliest entry in each of " +
+              groups.size +
+              " matching duplicate group(s). Other entries are kept."
+            : "Accept all entries currently in Review, keeping every transaction and amount unchanged. Duplicate warnings will clear. Missing or invalid details still need correction, just as with the individual Okay button.") +
+          '</div><div class="formerror" id="bulkError"></div><div class="modal-footer"><button class="button outline" id="cancelBulk">Cancel</button><button class="button ' +
+          (deleting ? "danger" : "") +
+          '" id="confirmBulk">' +
+          (deleting ? "Delete " + count + " duplicate(s)" : "Okay all") +
+          "</button></div></section></div>";
+        const close = () => {
+          if (!state.saveBusy) $("#modalContainer").innerHTML = "";
+        };
+        $(".close").onclick = close;
+        $("#cancelBulk").onclick = close;
+        $("#cancelBulk").focus();
+        $("#confirmBulk").onclick = async () => {
+          if (state.saveBusy) return;
+          state.saveBusy = true;
+          $("#confirmBulk").disabled = true;
+          $("#bulkError").textContent = "";
+          try {
+            const result = await rpc("bulkReview", {
+              action,
+              entries,
+              requestId,
+              confirmed: true,
+            });
+            $("#modalContainer").innerHTML = "";
+            toast(
+              deleting
+                ? result.count +
+                    " duplicate(s) deleted. One entry per group kept."
+                : "Entries marked Okay. All amounts are unchanged.",
+            );
+            await refresh();
+          } catch (error) {
+            $("#bulkError").textContent =
+              error.message +
+              " If the result is uncertain, refresh and check the sheet before starting another bulk action.";
+            $("#confirmBulk").disabled = false;
+            $("#confirmBulk").textContent = "Retry same action";
+          } finally {
+            state.saveBusy = false;
+          }
+        };
+      }
       // Rebuild year labels whenever configuration loads or the view changes.
       function renderSettings() {
         const config = settings();
@@ -4373,6 +4663,186 @@
         render();
       };
       // Bind persistent sidebar and top-bar buttons, which live outside the replaceable view content.
+      const mobileNavigation = globalThis.matchMedia?.("(max-width: 760px)");
+      let mobileMenuOpen = false;
+      let pullStart = null,
+        pullReady = false,
+        pullRefreshing = false;
+      function setMobileMenu(open, restoreFocus = true) {
+        const wasOpen = mobileMenuOpen;
+        const mobile = !!mobileNavigation?.matches;
+        mobileMenuOpen = mobile && !!open;
+        const panel = $("#navigationPanel");
+        $(".sidebar").classList.toggle("menu-open", mobileMenuOpen);
+        document.body?.classList.toggle("mobile-menu-open", mobileMenuOpen);
+        panel.inert = mobile && !mobileMenuOpen;
+        panel.setAttribute("aria-hidden", String(panel.inert));
+        if (mobile) {
+          panel.setAttribute("role", "dialog");
+          panel.setAttribute("aria-modal", String(mobileMenuOpen));
+        } else {
+          panel.removeAttribute?.("role");
+          panel.removeAttribute?.("aria-modal");
+        }
+        $("#mainWorkspace").inert = mobileMenuOpen;
+        $("#navigationBackdrop").hidden = !mobileMenuOpen;
+        const button = $("#mobileMenuButton");
+        button.setAttribute("aria-expanded", String(mobileMenuOpen));
+        button.setAttribute(
+          "aria-label",
+          mobileMenuOpen ? "Close navigation" : "Open navigation",
+        );
+        if (mobileMenuOpen) {
+          resetPullGesture();
+          $("#closeMobileMenu").focus();
+        } else if (wasOpen && restoreFocus && mobile) button.focus();
+      }
+      $("#mobileMenuButton").onclick = () => setMobileMenu(!mobileMenuOpen);
+      $("#closeMobileMenu").onclick = () => setMobileMenu(false);
+      $("#navigationBackdrop").onclick = () => setMobileMenu(false);
+      const resetMobileMenu = () => {
+        setMobileMenu(false, false);
+        resetPullGesture();
+      };
+      if (mobileNavigation?.addEventListener)
+        mobileNavigation.addEventListener("change", resetMobileMenu);
+      else mobileNavigation?.addListener?.(resetMobileMenu);
+      resetMobileMenu();
+      // Refresh data without reloading the app or losing the selected view and month.
+      // Only claim a downward, one-finger gesture that begins at the page's top edge.
+      function atPageTop() {
+        return (
+          Math.max(
+            globalThis.scrollY || 0,
+            document.scrollingElement?.scrollTop || 0,
+          ) <= 0
+        );
+      }
+      function canPullRefresh(target) {
+        if (
+          !mobileNavigation?.matches ||
+          mobileMenuOpen ||
+          pullRefreshing ||
+          state.loading ||
+          state.saveBusy ||
+          pendingActivities ||
+          state.setupRequired ||
+          state.view === "profile" ||
+          $("#modalContainer").innerHTML
+        )
+          return false;
+        const controls =
+          'input, select, textarea, button, a, label, form, [contenteditable]:not([contenteditable="false"]), [role="button"], [role="dialog"], .tablewrap, .navigation-panel, .modal-backdrop';
+        if (
+          target?.closest?.(controls) ||
+          document.activeElement?.closest?.(
+            'input, select, textarea, [contenteditable]:not([contenteditable="false"])',
+          )
+        )
+          return false;
+        // Master-list forms can contain a draft even after the keyboard has been dismissed.
+        if (
+          state.view === "payments" &&
+          Array.from(
+            document.querySelectorAll(
+              "#content form input, #content form textarea",
+            ),
+          ).some((input) => input.value.trim())
+        )
+          return false;
+        return true;
+      }
+      function resetPullGesture() {
+        pullStart = null;
+        pullReady = false;
+        if (!pullRefreshing) $("#pullRefreshIndicator").hidden = true;
+      }
+      function showPullRefresh(text, icon, refreshing = false) {
+        const indicator = $("#pullRefreshIndicator"),
+          label = $("#pullRefreshLabel");
+        if (label.textContent !== text) label.textContent = text;
+        $("#pullRefreshIcon").textContent = icon;
+        indicator.classList.toggle("refreshing", refreshing);
+        indicator.hidden = false;
+      }
+      document.addEventListener(
+        "touchstart",
+        (event) => {
+          resetPullGesture();
+          if (
+            event.touches.length !== 1 ||
+            !atPageTop() ||
+            !canPullRefresh(event.target)
+          )
+            return;
+          const touch = event.touches[0];
+          pullStart = { x: touch.clientX, y: touch.clientY };
+        },
+        { passive: true },
+      );
+      document.addEventListener(
+        "touchmove",
+        (event) => {
+          if (!pullStart) return;
+          if (
+            event.touches.length !== 1 ||
+            !atPageTop() ||
+            !canPullRefresh(event.target)
+          ) {
+            resetPullGesture();
+            return;
+          }
+          const touch = event.touches[0],
+            down = touch.clientY - pullStart.y,
+            across = Math.abs(touch.clientX - pullStart.x);
+          if (down < -6 || (across > 10 && across > down)) {
+            resetPullGesture();
+            return;
+          }
+          if (down <= 0) {
+            pullReady = false;
+            $("#pullRefreshIndicator").hidden = true;
+            return;
+          }
+          if (!event.cancelable) {
+            resetPullGesture();
+            return;
+          }
+          event.preventDefault();
+          pullReady = down >= 84;
+          if (down >= 12)
+            showPullRefresh(
+              pullReady ? "Release to refresh" : "Pull to refresh",
+              pullReady ? "↻" : "↓",
+            );
+        },
+        { passive: false },
+      );
+      document.addEventListener(
+        "touchend",
+        async (event) => {
+          const refreshNow =
+            pullStart &&
+            pullReady &&
+            event.touches.length === 0 &&
+            atPageTop() &&
+            canPullRefresh(event.target);
+          resetPullGesture();
+          if (!refreshNow) return;
+          pullRefreshing = true;
+          showPullRefresh("Refreshing…", "↻", true);
+          try {
+            await refresh();
+          } finally {
+            pullRefreshing = false;
+            resetPullGesture();
+          }
+        },
+        { passive: true },
+      );
+      document.addEventListener("touchcancel", resetPullGesture, {
+        passive: true,
+      });
       document
         .querySelectorAll("[data-view]")
         .forEach((b) => (b.onclick = () => navigate(b.dataset.view)));
@@ -4388,6 +4858,26 @@
       };
       // Allow Escape to dismiss a dialog unless a save is in progress.
       document.addEventListener("keydown", (e) => {
+        if (mobileMenuOpen && e.key === "Tab") {
+          const controls = Array.from(
+            $("#navigationPanel").querySelectorAll("button:not(:disabled)"),
+          );
+          const first = controls[0],
+            last = controls[controls.length - 1];
+          if (e.shiftKey && document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+          } else if (!e.shiftKey && document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+          }
+          return;
+        }
+        if (e.key === "Escape" && mobileMenuOpen) {
+          e.preventDefault();
+          setMobileMenu(false);
+          return;
+        }
         if (e.key === "Escape" && !state.saveBusy)
           $("#modalContainer").innerHTML = "";
       });

@@ -345,6 +345,7 @@ function fixture(overrides = {}) {
           "updateTransaction",
           "deleteTransaction",
           "setReview",
+          "bulkReview",
           "setMonthStatus",
           "createExpenseGroup",
           "managePaymentOption",
@@ -2042,7 +2043,7 @@ test("Kashlo checkpoints and cash-flow states reflect records without changing f
     Date,
     crypto,
     document: {
-      querySelector: () => ({}),
+      querySelector: () => ({ classList: { toggle() {} }, setAttribute() {} }),
       querySelectorAll: () => [],
       addEventListener() {},
     },
@@ -2147,6 +2148,7 @@ test("Dashboards nests the existing groups and calculates spending comparisons a
         value: "",
         classList: { add() {}, remove() {}, toggle() {} },
         addEventListener() {},
+        setAttribute() {},
       });
     return elements.get(selector);
   };
@@ -3339,4 +3341,1048 @@ test("journal growth expands the optional native review sheet and its entry link
   assert.equal(review.getMaxRows(), 341);
   assert.match(review.getRange(5, 8).getFormula(), /A5:A341,G5:G341/);
   assert.equal(review.getRange(1, 1).getValues()[0][0], "Review heading");
+});
+
+// Model the blank distributable template without rewriting an existing user's journals.
+function freshYearTemplate() {
+  const f = fixture();
+  prepareProfileWorkbook(f);
+  f.clearSetup();
+  for (const template of [
+    ...Object.values(f.config.sheets),
+    f.config.dashboardSheet,
+    f.config.groupSummarySheet,
+  ]) {
+    const old = f.resolve(template);
+    f.sheets[template] = f.sheets[old];
+    delete f.sheets[old];
+  }
+  for (const template of Object.values(f.config.sheets)) {
+    const sheet = f.sheets[template];
+    const c = f.config.layout.journal;
+    for (const column of [
+      c.description,
+      c.amount,
+      c.date,
+      c.category,
+      c.notes,
+      c.trip,
+      c.decision,
+      c.reviewNote,
+      c.paymentMethod,
+      c.paymentDetail,
+    ])
+      sheet
+        .getRange(
+          c.firstDataRow,
+          column,
+          sheet.getMaxRows() - c.firstDataRow + 1,
+          1,
+        )
+        .clearContent();
+  }
+  const guide = f.book.insertSheet(f.config.workbookYear.sheet);
+  guide.getRange(16, 1).setValue("Workbook year");
+  f.sheets["{year} Expense Summary"] = new Sheet();
+  for (const [initial, sheet] of Object.entries(f.sheets)) {
+    let name = initial;
+    sheet.getName = () => name;
+    sheet.setName = (next) => {
+      if (f.sheets[next]) throw new Error("Sheet already exists");
+      delete f.sheets[name];
+      name = next;
+      f.sheets[name] = sheet;
+      return sheet;
+    };
+  }
+  f.book.getSheets = () => Object.values(f.sheets);
+  return { ...f, guide };
+}
+for (const year of [2027, 2028, 2031]) {
+  test(`fresh template initializes for ${year} and remains a single-year workbook`, () => {
+    const f = freshYearTemplate(),
+      api = f.rawContext;
+    const input = profileInput(f, { revision: 0, year });
+    const response = api.saveWorkspaceSettings(input);
+    assert.equal(response.profile.year, year);
+    assert.equal(f.guide.getRange(16, 2).getValues()[0][0], year);
+    assert.ok(f.sheets[`${year} Expense Summary`]);
+    assert.equal(
+      Object.keys(f.sheets).some((name) => name.includes("{year}")),
+      false,
+    );
+    assert.equal(api.saveWorkspaceSettings(input).profile.year, year);
+    assert.throws(
+      () => api.saveWorkspaceSettings(profileInput(f, { year: year + 1 })),
+      /fresh Kashlo workbook/,
+    );
+    const entry = api.addTransaction({
+      requestId: `new_year_${year}`,
+      workspaceRevision: 1,
+      type: "expense",
+      description: "Known item",
+      category: "Food",
+      amount: 21,
+      date: year === 2028 ? "2028-02-29" : `${year}-02-28`,
+    });
+    assert.equal(entry.row, 2);
+    assert.equal(
+      api.getData().transactions.find((t) => t.type === "expense").date,
+      year === 2028 ? "2028-02-29" : `${year}-02-28`,
+    );
+    f.guide.getRange(16, 2).setValue(year + 1);
+    assert.throws(() => api.getData(), /workbook year does not match/);
+  });
+}
+test("fresh setup refuses entries, naming collisions, and missing formulas before changing the template", () => {
+  for (const problem of ["entries", "collision", "formulas"]) {
+    const f = freshYearTemplate(),
+      c = f.config.layout.journal;
+    if (problem === "entries")
+      f.sheets[f.config.sheets.expense].getRange(5, c.amount).setValue(12);
+    if (problem === "collision") {
+      const sheet = new Sheet();
+      sheet.getName = () => "2027 Expense Summary";
+      f.sheets["2027 Expense Summary"] = sheet;
+    }
+    if (problem === "formulas")
+      f.sheets[f.config.sheets.income]
+        .getRange(c.firstDataRow, c.duplicateIssue)
+        .clearContent();
+    const before = Object.keys(f.sheets);
+    assert.throws(
+      () =>
+        f.rawContext.saveWorkspaceSettings(
+          profileInput(f, { revision: 0, year: 2027 }),
+        ),
+      /contains entries|already exist|formulas are missing/,
+    );
+    assert.deepEqual(Object.keys(f.sheets), before);
+    assert.equal(f.guide.getRange(16, 2).getValues()[0][0], "");
+    assert.equal(f.book.getSpreadsheetTimeZone(), "Asia/Kolkata");
+    assert.equal(f.rawContext.getWorkspaceSettings().setupRequired, true);
+  }
+});
+test("fresh setup rolls back tab names, year, and time zone if saving fails", () => {
+  const f = freshYearTemplate(),
+    api = f.rawContext;
+  const original = api.PropertiesService.getScriptProperties;
+  api.PropertiesService.getScriptProperties = () => {
+    const store = original();
+    return {
+      ...store,
+      setProperty(key, value) {
+        if (key === "kashlo:workspace:v1")
+          throw new Error("Settings storage unavailable");
+        store.setProperty(key, value);
+      },
+    };
+  };
+  const before = Object.keys(f.sheets).sort();
+  assert.throws(
+    () =>
+      api.saveWorkspaceSettings(profileInput(f, { revision: 0, year: 2028 })),
+    /storage unavailable/,
+  );
+  assert.deepEqual(Object.keys(f.sheets).sort(), before);
+  assert.equal(f.guide.getRange(16, 2).getValues()[0][0], "");
+  assert.equal(f.book.getSpreadsheetTimeZone(), "Asia/Kolkata");
+});
+test("a previously assigned workbook cannot be reinterpreted after a new deployment", () => {
+  const f = freshYearTemplate(),
+    api = f.rawContext;
+  api.saveWorkspaceSettings(profileInput(f, { revision: 0, year: 2027 }));
+  f.clearSetup();
+  const before = Object.keys(f.sheets);
+  assert.throws(
+    () =>
+      api.saveWorkspaceSettings(profileInput(f, { revision: 0, year: 2028 })),
+    /belongs to 2027/,
+  );
+  assert.deepEqual(Object.keys(f.sheets), before);
+  assert.equal(f.guide.getRange(16, 2).getValues()[0][0], 2027);
+});
+
+test("fresh setup restores earlier renames if a later tab rename fails", () => {
+  const f = freshYearTemplate(),
+    api = f.rawContext;
+  const sheet = f.sheets[f.config.dashboardSheet],
+    rename = sheet.setName;
+  sheet.setName = (name) => {
+    if (name === "2028 Dashboard") throw new Error("Rename unavailable");
+    return rename(name);
+  };
+  const before = Object.keys(f.sheets).sort();
+  assert.throws(
+    () =>
+      api.saveWorkspaceSettings(profileInput(f, { revision: 0, year: 2028 })),
+    /Rename unavailable/,
+  );
+  assert.deepEqual(Object.keys(f.sheets).sort(), before);
+  assert.equal(f.guide.getRange(16, 2).getValues()[0][0], "");
+  assert.equal(f.book.getSpreadsheetTimeZone(), "Asia/Kolkata");
+  assert.equal(api.getWorkspaceSettings().setupRequired, true);
+});
+
+test("fresh setup checks edit access before assigning a year or renaming tabs", () => {
+  const f = freshYearTemplate(),
+    api = f.rawContext;
+  f.book.setSpreadsheetTimeZone = () => {
+    throw new Error("Read only");
+  };
+  const before = Object.keys(f.sheets).sort();
+  assert.throws(
+    () =>
+      api.saveWorkspaceSettings(profileInput(f, { revision: 0, year: 2028 })),
+    /must be editable/,
+  );
+  assert.deepEqual(Object.keys(f.sheets).sort(), before);
+  assert.equal(f.guide.getRange(16, 2).getValues()[0][0], "");
+  assert.equal(api.getWorkspaceSettings().setupRequired, true);
+});
+
+test("snapshot reuses lookup reads and date conversions without retaining stale data", () => {
+  const f = fixture(),
+    c = f.config.layout.journal;
+  f.context.managePaymentOption({
+    action: "add",
+    method: "UPI",
+    name: "Sample app",
+    requestId: "optimization_payment_seed",
+  });
+  f.expense.insertRowsAfter(30, 971);
+  for (let row = 2; row <= 1001; row++) {
+    f.expense.getRange(row, c.description).setValue("Synthetic entry");
+    f.expense.getRange(row, c.amount).setValue(row);
+    f.expense.getRange(row, c.date).setValue(new Date(Date.UTC(2026, 0, 4)));
+  }
+  const before = JSON.stringify(f.expense.cells);
+  const reads = new Map();
+  let metadataReads = 0,
+    dateFormats = 0;
+  for (const [name, sheet] of Object.entries(f.sheets)) {
+    const range = sheet.getRange.bind(sheet),
+      maxRows = sheet.getMaxRows.bind(sheet);
+    sheet.getMaxRows = () => {
+      metadataReads++;
+      return maxRows();
+    };
+    sheet.getRange = (...args) => {
+      const value = range(...args),
+        display = value.getDisplayValues;
+      value.getDisplayValues = () => {
+        reads.set(name, (reads.get(name) || 0) + 1);
+        return display();
+      };
+      return value;
+    };
+  }
+  const format = f.rawContext.Utilities.formatDate;
+  f.rawContext.Utilities.formatDate = (...args) => {
+    dateFormats++;
+    return format(...args);
+  };
+  const snapshot = f.context.getData();
+  assert.equal(snapshot.transactions.length, 1000);
+  assert.equal(snapshot.transactions[0].date, "2026-01-04");
+  assert.ok(dateFormats <= 2, `formatted dates ${dateFormats} times`);
+  assert.ok(metadataReads < 50, `read row metadata ${metadataReads} times`);
+  for (const name of [
+    ...Object.values(f.config.lookupSheets),
+    f.config.paymentMethodsSheet,
+    f.config.paymentTypesSheet,
+  ])
+    assert.equal(reads.get(name), 1, name);
+  assert.deepEqual(Array.from(snapshot.paymentOptions.UPI), ["Sample app"]);
+  assert.equal(JSON.stringify(f.expense.cells), before);
+  const fingerprint = snapshot.transactions[0].fingerprint;
+  f.expense.getRange(2, c.amount).setValue(987);
+  f.book.setSpreadsheetTimeZone("America/Los_Angeles");
+  const updated = f.context.getData();
+  assert.equal(updated.transactions[0].amount, 987);
+  assert.equal(updated.transactions[0].date, "2026-01-03");
+  assert.notEqual(updated.transactions[0].fingerprint, fingerprint);
+  assert.equal(JSON.stringify(snapshot.transactions[0].amount), "2");
+});
+
+async function optimizationBrowser(intl = Intl) {
+  const elements = new Map();
+  const element = (selector) => {
+    if (!elements.has(selector))
+      elements.set(selector, {
+        value: "",
+        innerHTML: "",
+        textContent: "",
+        dataset: {},
+        classList: { add() {}, remove() {}, toggle() {} },
+        addEventListener() {},
+        setAttribute() {},
+        focus() {},
+        setSelectionRange() {},
+      });
+    return elements.get(selector);
+  };
+  const browser = vm.createContext({
+    console,
+    Intl: intl,
+    Date,
+    crypto,
+    setTimeout: () => 0,
+    window: {},
+    document: {
+      querySelector: element,
+      querySelectorAll: () => [],
+      addEventListener() {},
+    },
+  });
+  vm.runInContext(browserSource, browser);
+  await new Promise((resolve) => setImmediate(resolve));
+  browser.data = JSON.parse(JSON.stringify(fixture().context.getData()));
+  vm.runInContext("state.data=data;state.month=0;", browser);
+  return browser;
+}
+
+test("browser reuses number/date formatters and responds to in-place regional setting changes", async () => {
+  let numbers = 0,
+    dates = 0;
+  const browser = await optimizationBrowser({
+    NumberFormat: function (...args) {
+      numbers++;
+      return new Intl.NumberFormat(...args);
+    },
+    DateTimeFormat: function (...args) {
+      dates++;
+      return new Intl.DateTimeFormat(...args);
+    },
+    supportedValuesOf: Intl.supportedValuesOf,
+  });
+  const formatted = vm.runInContext(
+    'Array.from({length:1000},()=>[money(1234.5),short(1234.5),currencySymbol(),dateLabel("2026-01-04")])',
+    browser,
+  );
+  assert.equal(
+    formatted[0][0],
+    new Intl.NumberFormat("en-IN", {
+      style: "currency",
+      currency: "INR",
+      maximumFractionDigits: 2,
+    }).format(1234.5),
+  );
+  assert.deepEqual(Array.from(formatted[999]), Array.from(formatted[0]));
+  assert.equal(numbers, 3);
+  assert.equal(dates, 1);
+  assert.equal(
+    vm.runInContext(
+      'state.data.config.locale="en-US";state.data.config.currency="USD";money(1234.5)',
+      browser,
+    ),
+    "$1,234.50",
+  );
+  assert.equal(numbers, 4);
+  assert.equal(
+    vm.runInContext('dateLabel("2026-01-04")', browser),
+    new Intl.DateTimeFormat("en-US", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    }).format(new Date("2026-01-04T12:00:00")),
+  );
+  assert.equal(dates, 2);
+});
+
+test("single-pass cash flow keeps monthly and all-recorded totals including refunds and missing dates", async () => {
+  const browser = await optimizationBrowser();
+  browser.entries = Array.from({ length: 2000 }, (_, i) => ({
+    type: ["expense", "income", "investment"][i % 3],
+    date:
+      i % 31 === 0
+        ? ""
+        : `${i % 37 === 0 ? 2025 : 2026}-${String((i % 12) + 1).padStart(2, "0")}-04`,
+    amount: i % 19 === 0 ? null : i % 17 === 0 ? -2.5 : 3.25,
+  }));
+  vm.runInContext("state.data.transactions=entries;", browser);
+  const totals = vm.runInContext("cashFlowTotals()", browser);
+  for (const type of ["expense", "income", "investment"]) {
+    for (let month = 0; month < 12; month++)
+      assert.equal(
+        totals.months[type][month],
+        vm.runInContext(
+          `sum(monthly(${JSON.stringify(type)},${month}))`,
+          browser,
+        ),
+      );
+    assert.equal(
+      totals.annual[type],
+      browser.entries
+        .filter((t) => t.type === type)
+        .reduce((value, t) => value + (Number(t.amount) || 0), 0),
+    );
+  }
+  const chart = vm.runInContext("chart()", browser);
+  assert.equal((chart.match(/<rect /g) || []).length, 36);
+  const before = JSON.stringify(browser.entries);
+  vm.runInContext("chart();cashFlowDashboard();overview();", browser);
+  assert.equal(JSON.stringify(browser.entries), before);
+});
+
+test("phone navigation opens a focus-contained drawer, closes on selection, and resets on desktop", async () => {
+  const elements = new Map(),
+    listeners = new Map();
+  let resize;
+  const media = {
+    matches: true,
+    addEventListener(type, callback) {
+      assert.equal(type, "change");
+      resize = callback;
+    },
+  };
+  let document;
+  const element = (selector) => {
+    if (!elements.has(selector)) {
+      const classes = new Set();
+      const node = {
+        value: "",
+        innerHTML: "",
+        textContent: "",
+        dataset: {},
+        attributes: {},
+        classList: {
+          add(name) {
+            classes.add(name);
+          },
+          remove(name) {
+            classes.delete(name);
+          },
+          toggle(name, on) {
+            on ? classes.add(name) : classes.delete(name);
+          },
+          contains(name) {
+            return classes.has(name);
+          },
+        },
+        addEventListener() {},
+        setAttribute(key, value) {
+          this.attributes[key] = value;
+        },
+        removeAttribute(key) {
+          delete this.attributes[key];
+        },
+        focus() {
+          document.activeElement = this;
+        },
+        setSelectionRange() {},
+      };
+      elements.set(selector, node);
+    }
+    return elements.get(selector);
+  };
+  const views = [
+    "overview",
+    "transactions",
+    "investments",
+    "dashboards",
+    "review",
+    "payments",
+  ];
+  const buttons = views.map((view) => {
+    const button = element("nav:" + view);
+    button.dataset.view = view;
+    return button;
+  });
+  element("#navigationPanel").querySelectorAll = () => [
+    element("#closeMobileMenu"),
+    ...buttons,
+  ];
+  document = {
+    body: element("body"),
+    activeElement: null,
+    querySelector: element,
+    querySelectorAll: (selector) => (selector === "[data-view]" ? buttons : []),
+    addEventListener(type, callback) {
+      listeners.set(type, callback);
+    },
+  };
+  const browser = vm.createContext({
+    Intl,
+    Date,
+    crypto,
+    setTimeout: () => 0,
+    window: {},
+    matchMedia: () => media,
+    document,
+  });
+  vm.runInContext(browserSource, browser);
+  await new Promise((resolve) => setImmediate(resolve));
+  browser.data = JSON.parse(JSON.stringify(fixture().context.getData()));
+  vm.runInContext("state.data=data;render();", browser);
+  const toggle = element("#mobileMenuButton"),
+    panel = element("#navigationPanel"),
+    backdrop = element("#navigationBackdrop");
+  assert.equal(panel.inert, true);
+  toggle.onclick();
+  assert.equal(toggle.attributes["aria-expanded"], "true");
+  assert.equal(panel.inert, false);
+  assert.equal(panel.attributes["aria-modal"], "true");
+  assert.equal(element("#mainWorkspace").inert, true);
+  assert.equal(document.body.classList.contains("mobile-menu-open"), true);
+  assert.equal(backdrop.hidden, false);
+  assert.equal(document.activeElement, element("#closeMobileMenu"));
+  let prevented = 0;
+  buttons.at(-1).focus();
+  listeners.get("keydown")({
+    key: "Tab",
+    preventDefault() {
+      prevented++;
+    },
+  });
+  assert.equal(document.activeElement, element("#closeMobileMenu"));
+  listeners.get("keydown")({
+    key: "Tab",
+    shiftKey: true,
+    preventDefault() {
+      prevented++;
+    },
+  });
+  assert.equal(document.activeElement, buttons.at(-1));
+  listeners.get("keydown")({
+    key: "Escape",
+    preventDefault() {
+      prevented++;
+    },
+  });
+  assert.equal(prevented, 3);
+  assert.equal(toggle.attributes["aria-expanded"], "false");
+  assert.equal(document.activeElement, toggle);
+  for (const [index, view] of views.entries()) {
+    toggle.onclick();
+    buttons[index].onclick();
+    assert.equal(vm.runInContext("state.view", browser), view);
+    assert.equal(toggle.attributes["aria-expanded"], "false");
+    assert.equal(element("#mainWorkspace").inert, false);
+  }
+  toggle.onclick();
+  backdrop.onclick();
+  assert.equal(backdrop.hidden, true);
+  toggle.onclick();
+  element("#closeMobileMenu").onclick();
+  assert.equal(panel.inert, true);
+  toggle.onclick();
+  media.matches = false;
+  resize();
+  assert.equal(panel.inert, false);
+  assert.equal(panel.attributes.role, undefined);
+  assert.equal(document.body.classList.contains("mobile-menu-open"), false);
+  toggle.onclick();
+  assert.equal(toggle.attributes["aria-expanded"], "false");
+  media.matches = true;
+  resize();
+  assert.equal(panel.inert, true);
+});
+
+async function pullRefreshBrowser() {
+  const elements = new Map(),
+    listeners = new Map(),
+    changes = new Map(),
+    requests = [];
+  let drafts = [];
+  const media = {
+    matches: true,
+    addEventListener(type, callback) {
+      changes.set(type, callback);
+    },
+  };
+  const element = (selector) => {
+    if (!elements.has(selector))
+      elements.set(selector, {
+        value: "",
+        innerHTML: "",
+        textContent: "",
+        dataset: {},
+        attributes: {},
+        classList: { add() {}, remove() {}, toggle() {} },
+        addEventListener() {},
+        setAttribute(key, value) {
+          this.attributes[key] = value;
+        },
+        removeAttribute(key) {
+          delete this.attributes[key];
+        },
+        focus() {},
+        setSelectionRange() {},
+      });
+    return elements.get(selector);
+  };
+  const document = {
+    body: element("body"),
+    activeElement: null,
+    scrollingElement: { scrollTop: 0 },
+    querySelector: element,
+    querySelectorAll: (selector) =>
+      selector === "#content form input, #content form textarea" ? drafts : [],
+    addEventListener(type, callback) {
+      listeners.set(type, callback);
+    },
+  };
+  const browser = vm.createContext({
+    Intl,
+    Date,
+    crypto,
+    setTimeout: () => 0,
+    window: {},
+    matchMedia: () => media,
+    document,
+  });
+  vm.runInContext(browserSource, browser);
+  await new Promise((resolve) => setImmediate(resolve));
+  browser.data = JSON.parse(JSON.stringify(fixture().context.getData()));
+  vm.runInContext(
+    'state.data=data;state.view="transactions";state.month=4;state.search="Known";render();',
+    browser,
+  );
+  const runner = {
+    withSuccessHandler(handler) {
+      this.success = handler;
+      return this;
+    },
+    withFailureHandler(handler) {
+      this.failure = handler;
+      return this;
+    },
+    getData() {
+      requests.push({ success: this.success, failure: this.failure });
+    },
+  };
+  browser.google = { script: { run: runner } };
+  browser.window.google = browser.google;
+  const target = {
+    closest() {
+      return null;
+    },
+  };
+  const event = (x, y, extra = {}) => ({
+    target,
+    touches: [{ clientX: x, clientY: y }],
+    cancelable: true,
+    preventDefault() {
+      this.prevented = true;
+    },
+    ...extra,
+  });
+  return {
+    browser,
+    element,
+    listeners,
+    requests,
+    media,
+    document,
+    event,
+    changes,
+    setDrafts(value) {
+      drafts = value;
+    },
+  };
+}
+
+test("pull-to-refresh requests one snapshot, shows progress, and preserves page, month, and search", async () => {
+  const f = await pullRefreshBrowser();
+  f.listeners.get("touchstart")(f.event(100, 100));
+  const pull = f.event(100, 140);
+  f.listeners.get("touchmove")(pull);
+  assert.equal(pull.prevented, true);
+  assert.equal(f.element("#pullRefreshLabel").textContent, "Pull to refresh");
+  f.listeners.get("touchmove")(f.event(100, 200));
+  assert.equal(
+    f.element("#pullRefreshLabel").textContent,
+    "Release to refresh",
+  );
+  const finished = f.listeners.get("touchend")(
+    f.event(100, 200, { touches: [] }),
+  );
+  assert.equal(f.requests.length, 1);
+  assert.equal(f.element("#pullRefreshLabel").textContent, "Refreshing…");
+  assert.equal(f.element("#pullRefreshIndicator").hidden, false);
+  f.listeners.get("touchstart")(f.event(100, 100));
+  f.listeners.get("touchmove")(f.event(100, 220));
+  await f.listeners.get("touchend")(f.event(100, 220, { touches: [] }));
+  assert.equal(f.requests.length, 1);
+  const updated = JSON.parse(JSON.stringify(f.browser.data));
+  updated.transactions[0].amount = 321;
+  f.requests[0].success(updated);
+  await finished;
+  assert.equal(f.element("#pullRefreshIndicator").hidden, true);
+  assert.equal(f.element("#refreshButton").disabled, false);
+  assert.equal(
+    vm.runInContext("state.data.transactions[0].amount", f.browser),
+    321,
+  );
+  assert.equal(vm.runInContext("state.view", f.browser), "transactions");
+  assert.equal(vm.runInContext("state.month", f.browser), 4);
+  assert.equal(vm.runInContext("state.search", f.browser), "Known");
+});
+
+test("pull-to-refresh ignores short, cancelled, horizontal, nested, busy, draft, and desktop gestures", async () => {
+  const f = await pullRefreshBrowser(),
+    start = f.listeners.get("touchstart"),
+    move = f.listeners.get("touchmove"),
+    end = f.listeners.get("touchend");
+  const finish = () => end(f.event(100, 220, { touches: [] }));
+  start(f.event(100, 100));
+  move(f.event(100, 140));
+  await finish();
+  start(f.event(100, 100));
+  move(f.event(100, 220));
+  move(f.event(100, 130));
+  await finish();
+  start(f.event(100, 100));
+  move(f.event(230, 120));
+  await finish();
+  start(f.event(100, 100));
+  move(f.event(100, 220));
+  f.listeners.get("touchcancel")();
+  await finish();
+  start(f.event(100, 100));
+  move(f.event(100, 220, { cancelable: false }));
+  await finish();
+  start(f.event(100, 100, { touches: [{}, {}] }));
+  move(f.event(100, 220));
+  await finish();
+  for (const reason of [
+    "scroll",
+    "target",
+    "focus",
+    "modal",
+    "drawer",
+    "busy",
+    "loading",
+    "profile",
+    "draft",
+    "desktop",
+  ]) {
+    if (reason === "scroll") f.document.scrollingElement.scrollTop = 100;
+    if (reason === "focus")
+      f.document.activeElement = {
+        closest() {
+          return {};
+        },
+      };
+    if (reason === "modal")
+      f.element("#modalContainer").innerHTML = "<form>Draft</form>";
+    if (reason === "drawer") f.element("#mobileMenuButton").onclick();
+    if (reason === "busy") vm.runInContext("state.saveBusy=true", f.browser);
+    if (reason === "loading") vm.runInContext("state.loading=true", f.browser);
+    if (reason === "profile")
+      vm.runInContext('state.view="profile"', f.browser);
+    if (reason === "draft") {
+      vm.runInContext('state.view="payments"', f.browser);
+      f.setDrafts([{ value: "Unfinished description" }]);
+    }
+    if (reason === "desktop") f.media.matches = false;
+    const target =
+      reason === "target"
+        ? {
+            closest() {
+              return {};
+            },
+          }
+        : undefined;
+    start(f.event(100, 100, target ? { target } : {}));
+    move(f.event(100, 220));
+    await finish();
+    f.document.scrollingElement.scrollTop = 0;
+    f.document.activeElement = null;
+    f.element("#modalContainer").innerHTML = "";
+    if (reason === "drawer") f.element("#closeMobileMenu").onclick();
+    vm.runInContext(
+      'state.loading=false;state.saveBusy=false;state.view="transactions"',
+      f.browser,
+    );
+    f.setDrafts([]);
+    f.media.matches = true;
+  }
+  assert.equal(f.requests.length, 0);
+  assert.equal(f.element("#pullRefreshIndicator").hidden, true);
+});
+
+test("failed pull-to-refresh retains data, clears progress, and permits a new pull", async () => {
+  const f = await pullRefreshBrowser();
+  const pull = () => {
+    f.listeners.get("touchstart")(f.event(100, 100));
+    f.listeners.get("touchmove")(f.event(100, 220));
+    return f.listeners.get("touchend")(f.event(100, 220, { touches: [] }));
+  };
+  const failed = pull();
+  f.requests[0].failure(new Error("Synthetic connection failure"));
+  await failed;
+  assert.equal(f.element("#pullRefreshIndicator").hidden, true);
+  assert.equal(vm.runInContext("state.loading", f.browser), false);
+  assert.equal(
+    vm.runInContext("state.data.transactions[0].amount", f.browser),
+    50,
+  );
+  assert.match(
+    f.element("#toastContainer").innerHTML,
+    /Synthetic connection failure/,
+  );
+  const retry = pull();
+  assert.equal(f.requests.length, 2);
+  f.requests[1].success(f.browser.data);
+  await retry;
+  assert.equal(f.element("#pullRefreshIndicator").hidden, true);
+});
+
+function bulkFixture() {
+  const f = fixture(),
+    api = f.context,
+    c = f.config.layout.journal;
+  for (const type of ["expense", "income", "investment"]) {
+    const sheet = f.sheets[f.resolve(f.config.sheets[type])];
+    sheet.cells[1] = [...f.expense.cells[1]];
+    sheet.cells[2] = [...sheet.cells[1]];
+    sheet.cells[3] = [...sheet.cells[1]];
+    sheet.cells[4] = [...sheet.cells[1]];
+    sheet.cells[4][c.amount - 1] = 987;
+    sheet.cells[4][c.duplicateIssue - 1] = "";
+  }
+  const entries = api
+    .getData()
+    .transactions.map(
+      ({ type, row, fingerprint, decision, reviewNote, duplicateGroup }) => ({
+        type,
+        row,
+        fingerprint,
+        decision,
+        reviewNote,
+        duplicateGroup,
+      }),
+    );
+  return { ...f, api, c, entries };
+}
+
+test("bulk Okay accepts all exact groups and preserves amounts and other validation issues", () => {
+  const f = bulkFixture();
+  f.expense.cells[4][f.c.otherIssues[0] - 1] = "Missing category";
+  f.entries = f.api
+    .getData()
+    .transactions.map(
+      ({ type, row, fingerprint, decision, reviewNote, duplicateGroup }) => ({
+        type,
+        row,
+        fingerprint,
+        decision,
+        reviewNote,
+        duplicateGroup,
+      }),
+    );
+  f.entries[0].note = "Intentional payments";
+  const before = f.api.getData().transactions.map((t) => t.amount);
+  const input = {
+    action: "okay",
+    entries: f.entries,
+    requestId: "bulk_okay_request",
+  };
+  assert.equal(f.api.bulkReview(input).count, 10);
+  assert.equal(f.api.bulkReview(input).count, 10);
+  const after = f.api.getData().transactions;
+  assert.deepEqual(
+    Array.from(after, (t) => t.amount),
+    Array.from(before),
+  );
+  assert.equal(
+    after.filter((t) => t.issues.includes("Possible duplicate")).length,
+    0,
+  );
+  assert.equal(
+    after.filter((t) => t.issues.includes("Missing category")).length,
+    1,
+  );
+  assert.equal(after[0].reviewNote, "Intentional payments");
+});
+
+test("bulk delete keeps one per group across all journals, preserves unrelated records and retries safely", () => {
+  const f = bulkFixture();
+  const input = {
+    action: "delete",
+    entries: f.entries,
+    confirmed: true,
+    requestId: "bulk_delete_request",
+  };
+  assert.equal(f.api.bulkReview(input).count, 6);
+  assert.equal(f.api.bulkReview(input).count, 6);
+  for (const type of ["expense", "income", "investment"]) {
+    const sheet = f.sheets[f.resolve(f.config.sheets[type])];
+    assert.equal(
+      sheet.cells[1][f.c.amount - 1],
+      f.expense.cells[1][f.c.amount - 1],
+    );
+    assert.equal(sheet.cells[2][f.c.amount - 1], 987);
+    assert.equal(sheet.getMaxRows(), 28);
+  }
+});
+
+test("bulk deletion validates confirmation and the entire snapshot before any deletion", () => {
+  for (const mutation of [
+    "changed",
+    "new",
+    "removed",
+    "missing",
+    "confirmation",
+    "reviewed",
+  ]) {
+    const f = bulkFixture();
+    const input = {
+      action: "delete",
+      entries: f.entries,
+      confirmed: true,
+      requestId: "bulk_guard_" + mutation,
+    };
+    if (mutation === "reviewed") f.expense.cells[2][f.c.decision - 1] = "Okay";
+    if (mutation === "changed") f.expense.cells[2][f.c.amount - 1] = 999;
+    if (mutation === "new") f.expense.cells[5] = [...f.expense.cells[1]];
+    if (mutation === "removed") f.expense.cells[2] = Array(30).fill("");
+    if (mutation === "missing") input.entries = input.entries.slice(1);
+    if (mutation === "confirmation") input.confirmed = false;
+    const before = JSON.stringify(f.expense.cells);
+    assert.throws(() => f.api.bulkReview(input), /changed|Confirm/);
+    assert.equal(JSON.stringify(f.expense.cells), before);
+    assert.equal(f.expense.getMaxRows(), 30);
+  }
+});
+
+test("bulk deletion excludes accepted groups and distinguishes payment details", () => {
+  const f = bulkFixture();
+  for (let i = 1; i <= 3; i++) f.expense.cells[i][f.c.decision - 1] = "Okay";
+  const investment = f.sheets[f.resolve(f.config.sheets.investment)];
+  investment.cells[3][f.c.paymentDetail - 1] = "Other fictional source";
+  const entries = f.api
+    .getData()
+    .transactions.map(
+      ({ type, row, fingerprint, decision, reviewNote, duplicateGroup }) => ({
+        type,
+        row,
+        fingerprint,
+        decision,
+        reviewNote,
+        duplicateGroup,
+      }),
+    );
+  assert.equal(
+    f.api.bulkReview({
+      action: "delete",
+      entries,
+      confirmed: true,
+      requestId: "bulk_scope_request",
+    }).count,
+    3,
+  );
+  assert.equal(f.expense.getMaxRows(), 30);
+  assert.equal(investment.getMaxRows(), 29);
+  assert.equal(
+    investment.cells[2][f.c.paymentDetail - 1],
+    "Other fictional source",
+  );
+});
+
+test("bulk review rejects oversized notes and wrong workspace without writing decisions", () => {
+  for (const invalid of ["note", "workspace"]) {
+    const f = bulkFixture();
+    const input = {
+      action: "okay",
+      entries: f.entries,
+      requestId: "bulk_invalid_" + invalid,
+    };
+    if (invalid === "note")
+      input.entries[0].note = "x".repeat(f.config.limits.noteLength + 1);
+    else input.workspaceRevision = 999;
+    const before = JSON.stringify(f.expense.cells);
+    assert.throws(() => f.api.bulkReview(input), /note|Workspace/);
+    assert.equal(JSON.stringify(f.expense.cells), before);
+  }
+});
+
+test("bulk Review UI confirms counts, sends notes and snapshot, and reuses request ID on retry", async () => {
+  const nodes = new Map();
+  const element = (key) => {
+    if (!nodes.has(key))
+      nodes.set(key, {
+        innerHTML: "",
+        textContent: "",
+        value: "",
+        hidden: false,
+        classList: { add() {}, remove() {}, toggle() {} },
+        addEventListener() {},
+        setAttribute() {},
+        focus() {},
+      });
+    return nodes.get(key);
+  };
+  const browser = vm.createContext({
+    console,
+    Intl,
+    Date,
+    crypto,
+    setTimeout: () => 0,
+    window: {},
+    document: {
+      querySelector: element,
+      querySelectorAll: () => [],
+      addEventListener() {},
+    },
+  });
+  vm.runInContext(browserSource, browser);
+  await new Promise((resolve) => setImmediate(resolve));
+  browser.snapshot = {
+    config: { year: 2026, locale: "en-US", currency: "USD", monthStatuses: [] },
+    transactions: [2, 3, 4].map((row) => ({
+      type: "expense",
+      row,
+      description: "Fictional snack",
+      date: "2026-01-05",
+      amount: 20,
+      category: "Food",
+      issues: ["Possible duplicate"],
+      decision: "Pending",
+      reviewNote: "",
+      duplicateGroup: "group-a",
+      fingerprint: "fp-" + row,
+    })),
+  };
+  vm.runInContext(
+    'state.data = snapshot; state.view = "review"; render(); refresh = async () => {}; var calls = []; rpc = async (name, payload) => { calls.push({name,payload}); if (calls.length === 1) throw new Error("Network failure"); return {count:2}; };',
+    browser,
+  );
+  assert.match(element("#content").innerHTML, /id="okayAll"/);
+  assert.match(element("#content").innerHTML, /id="deleteAllDuplicates"/);
+  element("#note_0").value = "Keep this review note";
+  vm.runInContext('openBulkReview("delete", reviewRows());', browser);
+  assert.match(
+    element("#modalContainer").innerHTML,
+    /Permanently delete 2 extra/,
+  );
+  assert.match(element("#modalContainer").innerHTML, /earliest entry/);
+  assert.equal(browser.calls.length, 0);
+  element("#cancelBulk").onclick();
+  assert.equal(element("#modalContainer").innerHTML, "");
+  vm.runInContext('openBulkReview("delete", reviewRows());', browser);
+  await element("#confirmBulk").onclick();
+  assert.match(element("#bulkError").textContent, /Network failure/);
+  assert.equal(element("#confirmBulk").disabled, false);
+  await element("#confirmBulk").onclick();
+  assert.equal(browser.calls[0].name, "bulkReview");
+  assert.equal(
+    browser.calls[0].payload.requestId,
+    browser.calls[1].payload.requestId,
+  );
+  assert.equal(browser.calls[1].payload.confirmed, true);
+  assert.equal(
+    browser.calls[1].payload.entries[0].note,
+    "Keep this review note",
+  );
+  assert.equal(element("#modalContainer").innerHTML, "");
+  vm.runInContext('openBulkReview("okay", reviewRows());', browser);
+  assert.match(
+    element("#modalContainer").innerHTML,
+    /every transaction and amount unchanged/,
+  );
+  await element("#confirmBulk").onclick();
+  assert.equal(browser.calls[2].payload.action, "okay");
 });
