@@ -60,11 +60,101 @@ function workbookId_(value) {
   if (/^[a-zA-Z0-9_-]{20,}$/.test(text)) return text;
   throw new Error("Enter a Google Sheets workbook URL or ID.");
 }
-function validateWorkspaceWorkbook_(book, year) {
+// A workbook is assigned once. A fresh template is the only workbook setup may rename.
+function workbookYearPlan_(book, year, previous, spreadsheetId) {
+  if (
+    previous &&
+    previous.spreadsheetId === spreadsheetId &&
+    previous.year !== year
+  )
+    throw new Error(
+      "Use a fresh Kashlo workbook and a new deployment for another year. Existing records stay in their original year.",
+    );
+  const schema = FINANCE.workbookYear;
+  const guide = schema && book.getSheetByName(schema.sheet);
+  if (
+    !guide ||
+    guide.getRange(schema.row, schema.labelColumn).getValues()[0][0] !==
+      "Workbook year"
+  )
+    return null; // Older prepared workbooks keep their existing names and formulas.
+  const cell = guide.getRange(schema.row, schema.yearColumn);
+  const assigned = cell.getValues()[0][0];
+  if (assigned !== "") {
+    if (Number(assigned) !== year)
+      throw new Error(
+        "This workbook belongs to " +
+          assigned +
+          ". Use a fresh Kashlo copy for another year.",
+      );
+    return null;
+  }
+  for (const template of Object.values(FINANCE.sheets)) {
+    const sheet = book.getSheetByName(template);
+    if (!sheet)
+      throw new Error(
+        "Use a fresh, unconfigured Kashlo template for this year.",
+      );
+    const c = FINANCE.layout.journal;
+    const columns = [
+      c.description,
+      c.amount,
+      c.date,
+      c.notes,
+      c.trip,
+      c.decision,
+      c.reviewNote,
+      c.paymentMethod,
+      c.paymentDetail,
+    ];
+    const values = sheet
+      .getRange(
+        c.firstDataRow,
+        1,
+        sheet.getMaxRows() - c.firstDataRow + 1,
+        Math.max(...columns),
+      )
+      .getValues();
+    if (
+      values.some((row) =>
+        columns.some((column) => String(row[column - 1] ?? "").trim()),
+      )
+    )
+      throw new Error(
+        "This unconfigured workbook contains entries. Use an empty Kashlo template; no records were changed.",
+      );
+  }
+  const renames = book
+    .getSheets()
+    .filter((sheet) => sheet.getName().includes("{year}"))
+    .map((sheet) => ({
+      sheet,
+      before: sheet.getName(),
+      after: sheet.getName().replace(/\{year\}/g, String(year)),
+    }));
+  if (renames.some((item) => book.getSheetByName(item.after)))
+    throw new Error(
+      "Year-specific tabs already exist. Use a fresh Kashlo template.",
+    );
+  return { cell, renames };
+}
+function applyWorkbookYear_(plan, year) {
+  if (!plan) return;
+  for (const item of plan.renames) item.sheet.setName(item.after);
+  plan.cell.setValue(year);
+}
+function restoreWorkbookYear_(plan) {
+  if (!plan) return;
+  plan.cell.clearContent();
+  for (const item of plan.renames.slice().reverse())
+    if (item.sheet.getName() !== item.before) item.sheet.setName(item.before);
+}
+function validateWorkspaceWorkbook_(book, year, unassigned = false) {
   const missing = [];
   const required = [
     ...Object.values(FINANCE.sheets).map((template) => ({
       name: template.replace(/\{year\}/g, String(year)),
+      template,
       rows: FINANCE.layout.journal.firstDataRow,
       columns: Math.max(
         FINANCE.layout.journal.category,
@@ -84,12 +174,15 @@ function validateWorkspaceWorkbook_(book, year) {
     })),
     {
       name: FINANCE.dashboardSheet.replace(/\{year\}/g, String(year)),
+      template: FINANCE.dashboardSheet,
       rows: FINANCE.layout.dashboard.firstMonthRow + 11,
       columns: FINANCE.layout.dashboard.statusColumn,
     },
   ];
-  required.forEach(({ name, rows, columns }) => {
-    const sheet = book.getSheetByName(name);
+  required.forEach(({ name, template, rows, columns }) => {
+    const sheet =
+      book.getSheetByName(name) ||
+      (unassigned && template && book.getSheetByName(template));
     if (!sheet) missing.push(name);
     else if (sheet.getMaxRows() < rows || sheet.getMaxColumns() < columns)
       missing.push(name + " (required rows/columns are missing)");
@@ -97,7 +190,9 @@ function validateWorkspaceWorkbook_(book, year) {
   if (!missing.length) {
     Object.values(FINANCE.sheets).forEach((template) => {
       const name = template.replace(/\{year\}/g, String(year));
-      const sheet = book.getSheetByName(name);
+      const sheet =
+        book.getSheetByName(name) ||
+        (unassigned && book.getSheetByName(template));
       if (
         !sheet
           .getRange(
@@ -177,7 +272,8 @@ function saveWorkspaceSettings(input) {
         "This Google account cannot open that workbook. Check its URL and access.",
       );
     }
-    validateWorkspaceWorkbook_(book, year);
+    const yearPlan = workbookYearPlan_(book, year, previous, spreadsheetId);
+    validateWorkspaceWorkbook_(book, year, !!yearPlan);
     const record = {
       ownerEmail: normalized_(Session.getEffectiveUser().getEmail()),
       ownerName,
@@ -205,11 +301,14 @@ function saveWorkspaceSettings(input) {
       );
     }
     try {
+      applyWorkbookYear_(yearPlan, year);
+      validateWorkspaceWorkbook_(book, year);
       PropertiesService.getScriptProperties().setProperty(
         WORKSPACE_SETTINGS_KEY_,
         JSON.stringify(record),
       );
     } catch (error) {
+      restoreWorkbookYear_(yearPlan);
       if (previousZone !== timeZone) book.setSpreadsheetTimeZone(previousZone);
       throw error;
     }
@@ -334,7 +433,20 @@ function authorize_() {
 // Open the configured spreadsheet. Public callers perform authorization before using this helper.
 function book_() {
   validateConfig_();
-  return SpreadsheetApp.openById(workspaceConfig_().spreadsheetId);
+  const book = SpreadsheetApp.openById(workspaceConfig_().spreadsheetId);
+  const schema = FINANCE.workbookYear;
+  const guide = schema && book.getSheetByName(schema.sheet);
+  if (
+    guide &&
+    guide.getRange(schema.row, schema.labelColumn).getValues()[0][0] ===
+      "Workbook year" &&
+    Number(guide.getRange(schema.row, schema.yearColumn).getValues()[0][0]) !==
+      workspaceConfig_().year
+  )
+    throw new Error(
+      "The workbook year does not match this app. Restore its assigned year or connect the correct yearly workbook.",
+    );
+  return book;
 }
 // Resolve a supported journal type and fail clearly if its worksheet is missing.
 function sheet_(book, type) {

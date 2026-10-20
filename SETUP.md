@@ -13,12 +13,16 @@ You only need a Google account and a browser. No local software or code editing 
 3. In Apps Script, choose **Deploy → New deployment**. Click the gear beside **Select type**, then choose **Web app**. Enter a description such as `Kashlo — initial setup`, set **Execute as: Me**, and set **Who has access: Only myself**. Click **Deploy**.
 4. Click **Authorize access** and choose the same Google account you used to copy the workbook. If Google shows **"Google hasn’t verified this app"**, click **Advanced → Go to [your project name] (unsafe)** to continue with the Kashlo copy you just created. This notice can appear for a personal deployment that Google has not verified. Only continue for your own Kashlo copy; check the permissions shown and click **Allow** to authorize it. If Google says **"This app is blocked"** or there is no option to continue, stop and ask your work/school administrator if applicable. When deployment finishes, copy the **Web app URL** ending in `/exec`, open it, and bookmark it.
 5. Return to **your copied Kashlo sheet** in Google Sheets. Click the browser's address bar and copy the full URL, which starts with `https://docs.google.com/spreadsheets/d/`. Keep this sheet tab open.
-6. Switch back to the Kashlo web app. On **Welcome to Kashlo**, paste that URL into **Google Sheet URL or ID**. Use the URL of **your own copy**, not the shared template or the Apps Script deployment URL. Enter your name, workspace name, currency code, locale, time zone, and year **2026**. For example, an India-based user may choose `INR`, `en-IN`, and `Asia/Kolkata`. Use your own preferences; the Google account is detected automatically and is read-only.
-7. Choose **Validate & connect workbook**. After the empty dashboard loads, use **Manage** to add descriptions, categories, and payment names, then add your first transaction. A transaction date is required.
+6. Switch back to the Kashlo web app. On **Welcome to Kashlo**, paste that URL into **Google Sheet URL or ID**. Use the URL of **your own copy**, not the shared template or the Apps Script deployment URL. Enter your name, workspace name, currency code, locale, time zone, and the **calendar year you want to track**. The current year is suggested automatically; you can choose another year before connecting. For example, an India-based user may choose `INR`, `en-IN`, and `Asia/Kolkata`. Use your own preferences; the Google account is detected automatically and is read-only.
+7. Choose **Validate & connect workbook**. Kashlo assigns the fresh template to your selected year and updates its tab names and dashboard dates automatically. After the empty dashboard loads, use **Manage** to add descriptions, categories, and payment names, then add your first transaction. A transaction date is required.
 
-The shared workbook contains empty journals, general description/category suggestions, dashboard/review formulas, and blank payment/group lists. It contains no personal transactions or saved owner profile. **Bundled app last updated: 19 October 2026.** Journals add space automatically as you record transactions in Kashlo. Follow the update instructions below to update an existing installation. Sheets use neutral numeric amount formatting; the app displays your selected currency. Set a currency format in Sheets separately if desired.
+The shared workbook contains empty journals, general description/category suggestions, dashboard/review formulas, and blank payment/group lists. It contains no personal transactions or saved owner profile. **Bundled app last updated: 20 October 2026.** Journals add space automatically as you record transactions in Kashlo. Follow the update instructions below to update an existing installation. Sheets use neutral numeric amount formatting; the app displays your selected currency. Set a currency format in Sheets separately if desired.
 
-This template is prepared for calendar year **2026**. Selecting another year in the profile does not create that year's tabs or formulas. Annual rollover and automatic workbook creation are planned for a later phase; prepare the corresponding sheets and update year-dependent formulas before switching years.
+**One workbook per calendar year.** The shared template has no assigned year. During first-time setup, Kashlo replaces the `{year}` tab-name placeholders and records your chosen year in **Start here → B16**, which drives the workbook's dashboard dates. Keep this cell managed by Kashlo. Once connected, the workbook stays assigned to that year.
+
+### Start another year
+
+Repeat steps 1–7 with a **fresh copy of the shared template**, create a **new private Apps Script deployment**, and choose the next year on its welcome screen. Give the workbook a name that helps you recognize its year and bookmark the new app separately. Keep your previous workbook and app for viewing historical records. Start with the empty template rather than duplicating a workbook that already contains transactions. Historical entries, descriptions, payment names, expense groups, and review statuses are not carried forward automatically.
 
 ### Alternative: install the repository files manually
 
@@ -37,7 +41,7 @@ On desktop, click the **avatar/name at the bottom of the sidebar**. On mobile, u
 - **Profile:** owner name and workspace name; initials are generated automatically. The Google account cannot be changed here.
 - **Workbook settings:** Google Sheet URL/ID, currency, locale, time zone, and year.
 
-Currency changes app formatting only, not historical amounts, exchange rates, or the sheet’s number formats. The selected time zone is applied to the workbook and used for transaction dates. A new year must already have the corresponding journal and dashboard sheets. App date handling uses the workbook's time zone; the Apps Script manifest's default time zone is separate.
+Currency changes app formatting only, not historical amounts, exchange rates, or the sheet’s number formats. The selected time zone is applied to the workbook and used for transaction dates. The year is assigned when connecting a fresh template. Changing the year of an already connected workbook is blocked; use a new copy and deployment for another year. App date handling uses the workbook's time zone; the Apps Script manifest's default time zone is separate.
 
 Settings are saved under `kashlo:workspace:v1` in Script Properties for this owner-only deployment. All financial writes carry the workspace revision from the loaded snapshot; after settings change, older tabs must refresh before writing. A copied script cannot silently reuse another owner's stored workbook settings. Settings validation failures preserve the previous connection and workbook time zone.
 
@@ -49,6 +53,7 @@ Keep journal keys `expense`, `income`, and `investment`. Customize worksheet nam
 | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
 | `sheets`                                        | Journal tab names; `{year}` is replaced using the saved profile year. The default expense tab has two spaces after the year. |
 | `lookupSheets`                                  | Expense, income, and investment master-list tabs.                                                                            |
+| `workbookYear`                                  | Template guide and assigned-year cell; keep this marker when adapting the template.                                          |
 | `dashboardSheet`                                | Dashboard tab containing monthly completeness statuses.                                                                      |
 | `groupSummarySheet`                             | Optional native expense-group summary.                                                                                       |
 | `paymentMethodsSheet`, `paymentTypesSheet`      | Reusable payment-name and custom-type storage.                                                                               |
@@ -57,7 +62,7 @@ Keep journal keys `expense`, `income`, and `investment`. Customize worksheet nam
 | `categories`, `paymentMethods`, `monthStatuses` | Shared investment category, initial payment types, and review status labels.                                                 |
 | `reviewHelp`, `layout`, `limits`                | General policy guidance, column coordinates, and validation/write limits.                                                    |
 
-New transactions always start with a blank required date. Corrections keep their recorded date. Prepare the next year's workbook before switching it in Profile & settings.
+New transactions always start with a blank required date. Corrections keep their recorded date. For another year, repeat first-time setup in a fresh template copy and new deployment.
 
 ## Share or deploy the project
 
@@ -93,7 +98,7 @@ Profile settings, master-list controls, transaction actions, review actions, and
 
 ## Expense-group setup and compatibility
 
-The browser and worksheet both use the visible label **Expense group**. In a fresh workbook, label Expense Journal cell **I1** `Expense group`, Item & Category cell **H1** `Expense groups`, and name the optional summary tab **2026 Group Summary** (using the configured year). Keep its existing expense/category pivot tables; their source is still the expense journal.
+The browser and worksheet both use the visible label **Expense group**. In a fresh workbook, label Expense Journal cell **I1** `Expense group`, Item & Category cell **H1** `Expense groups`, and name the optional summary tab **{year} Group Summary** (setup replaces `{year}` with the selected year). Keep its existing expense/category pivot tables; their source is still the expense journal.
 
 For compatibility, the internal `trip` transaction field, `trips` dropdown array, and `layout.journal.trip` / `layout.lookup.trips` configuration keys retain their original names. They now carry any expense group, not just travel. No existing financial records need migration.
 
@@ -114,7 +119,7 @@ Cash surplus/shortfall is **recorded income − recorded expenses − recorded i
 - Submission IDs and a lock protect against duplicate clicks. If a save starts but its completion is uncertain, it will not automatically replay the submission. Refresh and check the source before trying again.
 - A manual category saved through the app is stored as a value for that entry. New description mappings are learned once; existing mappings are not overwritten.
 - Flagged transactions can be corrected or deleted from Review. Corrections keep the entry in its original journal. Deletion removes the entire sheet row and shifts the rows below upward. Google Sheets adjusts remaining formula references. The changed row count invalidates older app snapshots so identical shifted duplicates cannot be changed using stale row references. Other duplicate transactions remain. Keep standalone summary tables on summary tabs instead of beside transaction rows. Unflagged entries can also be edited or deleted from Overview, Transactions, and Investments. The app cannot trade, transfer money, or make payments.
-- Run `node --test tests/config.test.cjs` to check configuration changes against in-memory server and browser adapters. The tests exercise year rollover, leap dates, owner authorization, writes, retries, review fingerprints, column changes, browser settings, correction validation, deletion confirmation, safe retries, formula preservation, and unchanged neighboring duplicates without accessing Google Sheets. Verify live reads and writes after deploying.
+- Run `node --test tests/config.test.cjs` to check configuration changes against in-memory server and browser adapters. The tests exercise fresh-year setup, single-year protection, leap dates, owner authorization, writes, retries, review fingerprints, column changes, browser settings, correction validation, deletion confirmation, safe retries, formula preservation, and unchanged neighboring duplicates without accessing Google Sheets. Verify live reads and writes after deploying.
 
 Official references: [Deploying web apps](https://developers.google.com/apps-script/guides/web) and [copying container-bound scripts](https://developers.google.com/apps-script/guides/bound).
 

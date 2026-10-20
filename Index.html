@@ -2267,7 +2267,7 @@
         return (
           '<div class="tablewrap"><table><thead><tr><th>Description</th><th>Date</th><th style="text-align:right">Amount</th><th>Category</th>' +
           (showExpenseGroup ? "<th>Expense group</th>" : "") +
-          '<th>Payment method</th><th>Bank / card / UPI app</th>' +
+          "<th>Payment method</th><th>Bank / card / UPI app</th>" +
           (editable ? "<th>Actions</th>" : "") +
           "</tr></thead><tbody>" +
           arr
@@ -3087,7 +3087,7 @@
             "Year",
             p.year,
             'type="number" required min="1900" max="9999" step="1"',
-            "January–December. Must match the workbook's journal and dashboard sheets.",
+            "One calendar year per workbook. A fresh template is prepared for this year automatically. Use a new copy and deployment for another year.",
           ) +
           '</div></section></div><datalist id="profileCurrencies">' +
           [

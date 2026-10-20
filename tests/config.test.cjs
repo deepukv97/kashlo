@@ -3340,3 +3340,201 @@ test("journal growth expands the optional native review sheet and its entry link
   assert.match(review.getRange(5, 8).getFormula(), /A5:A341,G5:G341/);
   assert.equal(review.getRange(1, 1).getValues()[0][0], "Review heading");
 });
+
+// Model the blank distributable template without rewriting an existing user's journals.
+function freshYearTemplate() {
+  const f = fixture();
+  prepareProfileWorkbook(f);
+  f.clearSetup();
+  for (const template of [
+    ...Object.values(f.config.sheets),
+    f.config.dashboardSheet,
+    f.config.groupSummarySheet,
+  ]) {
+    const old = f.resolve(template);
+    f.sheets[template] = f.sheets[old];
+    delete f.sheets[old];
+  }
+  for (const template of Object.values(f.config.sheets)) {
+    const sheet = f.sheets[template];
+    const c = f.config.layout.journal;
+    for (const column of [
+      c.description,
+      c.amount,
+      c.date,
+      c.category,
+      c.notes,
+      c.trip,
+      c.decision,
+      c.reviewNote,
+      c.paymentMethod,
+      c.paymentDetail,
+    ])
+      sheet
+        .getRange(
+          c.firstDataRow,
+          column,
+          sheet.getMaxRows() - c.firstDataRow + 1,
+          1,
+        )
+        .clearContent();
+  }
+  const guide = f.book.insertSheet(f.config.workbookYear.sheet);
+  guide.getRange(16, 1).setValue("Workbook year");
+  f.sheets["{year} Expense Summary"] = new Sheet();
+  for (const [initial, sheet] of Object.entries(f.sheets)) {
+    let name = initial;
+    sheet.getName = () => name;
+    sheet.setName = (next) => {
+      if (f.sheets[next]) throw new Error("Sheet already exists");
+      delete f.sheets[name];
+      name = next;
+      f.sheets[name] = sheet;
+      return sheet;
+    };
+  }
+  f.book.getSheets = () => Object.values(f.sheets);
+  return { ...f, guide };
+}
+for (const year of [2027, 2028, 2031]) {
+  test(`fresh template initializes for ${year} and remains a single-year workbook`, () => {
+    const f = freshYearTemplate(),
+      api = f.rawContext;
+    const input = profileInput(f, { revision: 0, year });
+    const response = api.saveWorkspaceSettings(input);
+    assert.equal(response.profile.year, year);
+    assert.equal(f.guide.getRange(16, 2).getValues()[0][0], year);
+    assert.ok(f.sheets[`${year} Expense Summary`]);
+    assert.equal(
+      Object.keys(f.sheets).some((name) => name.includes("{year}")),
+      false,
+    );
+    assert.equal(api.saveWorkspaceSettings(input).profile.year, year);
+    assert.throws(
+      () => api.saveWorkspaceSettings(profileInput(f, { year: year + 1 })),
+      /fresh Kashlo workbook/,
+    );
+    const entry = api.addTransaction({
+      requestId: `new_year_${year}`,
+      workspaceRevision: 1,
+      type: "expense",
+      description: "Known item",
+      category: "Food",
+      amount: 21,
+      date: year === 2028 ? "2028-02-29" : `${year}-02-28`,
+    });
+    assert.equal(entry.row, 2);
+    assert.equal(
+      api.getData().transactions.find((t) => t.type === "expense").date,
+      year === 2028 ? "2028-02-29" : `${year}-02-28`,
+    );
+    f.guide.getRange(16, 2).setValue(year + 1);
+    assert.throws(() => api.getData(), /workbook year does not match/);
+  });
+}
+test("fresh setup refuses entries, naming collisions, and missing formulas before changing the template", () => {
+  for (const problem of ["entries", "collision", "formulas"]) {
+    const f = freshYearTemplate(),
+      c = f.config.layout.journal;
+    if (problem === "entries")
+      f.sheets[f.config.sheets.expense].getRange(5, c.amount).setValue(12);
+    if (problem === "collision") {
+      const sheet = new Sheet();
+      sheet.getName = () => "2027 Expense Summary";
+      f.sheets["2027 Expense Summary"] = sheet;
+    }
+    if (problem === "formulas")
+      f.sheets[f.config.sheets.income]
+        .getRange(c.firstDataRow, c.duplicateIssue)
+        .clearContent();
+    const before = Object.keys(f.sheets);
+    assert.throws(
+      () =>
+        f.rawContext.saveWorkspaceSettings(
+          profileInput(f, { revision: 0, year: 2027 }),
+        ),
+      /contains entries|already exist|formulas are missing/,
+    );
+    assert.deepEqual(Object.keys(f.sheets), before);
+    assert.equal(f.guide.getRange(16, 2).getValues()[0][0], "");
+    assert.equal(f.book.getSpreadsheetTimeZone(), "Asia/Kolkata");
+    assert.equal(f.rawContext.getWorkspaceSettings().setupRequired, true);
+  }
+});
+test("fresh setup rolls back tab names, year, and time zone if saving fails", () => {
+  const f = freshYearTemplate(),
+    api = f.rawContext;
+  const original = api.PropertiesService.getScriptProperties;
+  api.PropertiesService.getScriptProperties = () => {
+    const store = original();
+    return {
+      ...store,
+      setProperty(key, value) {
+        if (key === "kashlo:workspace:v1")
+          throw new Error("Settings storage unavailable");
+        store.setProperty(key, value);
+      },
+    };
+  };
+  const before = Object.keys(f.sheets).sort();
+  assert.throws(
+    () =>
+      api.saveWorkspaceSettings(profileInput(f, { revision: 0, year: 2028 })),
+    /storage unavailable/,
+  );
+  assert.deepEqual(Object.keys(f.sheets).sort(), before);
+  assert.equal(f.guide.getRange(16, 2).getValues()[0][0], "");
+  assert.equal(f.book.getSpreadsheetTimeZone(), "Asia/Kolkata");
+});
+test("a previously assigned workbook cannot be reinterpreted after a new deployment", () => {
+  const f = freshYearTemplate(),
+    api = f.rawContext;
+  api.saveWorkspaceSettings(profileInput(f, { revision: 0, year: 2027 }));
+  f.clearSetup();
+  const before = Object.keys(f.sheets);
+  assert.throws(
+    () =>
+      api.saveWorkspaceSettings(profileInput(f, { revision: 0, year: 2028 })),
+    /belongs to 2027/,
+  );
+  assert.deepEqual(Object.keys(f.sheets), before);
+  assert.equal(f.guide.getRange(16, 2).getValues()[0][0], 2027);
+});
+
+test("fresh setup restores earlier renames if a later tab rename fails", () => {
+  const f = freshYearTemplate(),
+    api = f.rawContext;
+  const sheet = f.sheets[f.config.dashboardSheet],
+    rename = sheet.setName;
+  sheet.setName = (name) => {
+    if (name === "2028 Dashboard") throw new Error("Rename unavailable");
+    return rename(name);
+  };
+  const before = Object.keys(f.sheets).sort();
+  assert.throws(
+    () =>
+      api.saveWorkspaceSettings(profileInput(f, { revision: 0, year: 2028 })),
+    /Rename unavailable/,
+  );
+  assert.deepEqual(Object.keys(f.sheets).sort(), before);
+  assert.equal(f.guide.getRange(16, 2).getValues()[0][0], "");
+  assert.equal(f.book.getSpreadsheetTimeZone(), "Asia/Kolkata");
+  assert.equal(api.getWorkspaceSettings().setupRequired, true);
+});
+
+test("fresh setup checks edit access before assigning a year or renaming tabs", () => {
+  const f = freshYearTemplate(),
+    api = f.rawContext;
+  f.book.setSpreadsheetTimeZone = () => {
+    throw new Error("Read only");
+  };
+  const before = Object.keys(f.sheets).sort();
+  assert.throws(
+    () =>
+      api.saveWorkspaceSettings(profileInput(f, { revision: 0, year: 2028 })),
+    /must be editable/,
+  );
+  assert.deepEqual(Object.keys(f.sheets).sort(), before);
+  assert.equal(f.guide.getRange(16, 2).getValues()[0][0], "");
+  assert.equal(api.getWorkspaceSettings().setupRequired, true);
+});
