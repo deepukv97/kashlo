@@ -1944,40 +1944,50 @@
       // Config.gs is the only source of workbook-specific browser settings.
       // A local preview has no configuration and displays placeholders until connected.
       const settings = () => state.data?.config;
+      // Reuse Intl instances until regional settings change; keep caches browser-only.
+      let formatterKey = "",
+        formatterCache = {};
+      function formatter(name) {
+        const config = settings();
+        const key = JSON.stringify([config.locale, config.currency]);
+        if (key !== formatterKey) {
+          formatterKey = key;
+          formatterCache = {};
+        }
+        if (!formatterCache[name]) {
+          formatterCache[name] =
+            name === "date"
+              ? new Intl.DateTimeFormat(config.locale, {
+                  day: "numeric",
+                  month: "short",
+                  year: "numeric",
+                })
+              : new Intl.NumberFormat(config.locale, {
+                  style: "currency",
+                  currency: config.currency,
+                  ...(name === "symbol"
+                    ? { currencyDisplay: "narrowSymbol" }
+                    : name === "compact"
+                      ? { notation: "compact", maximumFractionDigits: 1 }
+                      : { maximumFractionDigits: 2 }),
+                });
+        }
+        return formatterCache[name];
+      }
       const money = (n) =>
-        settings()
-          ? new Intl.NumberFormat(settings().locale, {
-              style: "currency",
-              currency: settings().currency,
-              maximumFractionDigits: 2,
-            }).format(Number(n) || 0)
-          : "—";
+        settings() ? formatter("money").format(Number(n) || 0) : "—";
       const currencySymbol = () =>
         settings()
-          ? new Intl.NumberFormat(settings().locale, {
-              style: "currency",
-              currency: settings().currency,
-              currencyDisplay: "narrowSymbol",
-            })
+          ? formatter("symbol")
               .formatToParts(0)
               .find((part) => part.type === "currency")?.value ||
             settings().currency
           : "¤";
       // Intl selects appropriate compact units for the configured locale and currency.
-      const short = (n) =>
-        new Intl.NumberFormat(settings().locale, {
-          style: "currency",
-          currency: settings().currency,
-          notation: "compact",
-          maximumFractionDigits: 1,
-        }).format(Number(n) || 0);
+      const short = (n) => formatter("compact").format(Number(n) || 0);
       const dateLabel = (s) =>
         s
-          ? new Intl.DateTimeFormat(settings().locale, {
-              day: "numeric",
-              month: "short",
-              year: "numeric",
-            }).format(new Date(s + "T12:00:00"))
+          ? formatter("date").format(new Date(s + "T12:00:00"))
           : "Missing date";
       const monthPrefix = (month = state.month) =>
         settings()?.year + "-" + String(month + 1).padStart(2, "0");
@@ -1989,6 +1999,25 @@
         rows().filter(
           (t) => t.type === type && t.date.startsWith(monthPrefix(month)),
         );
+      // Calculate all chart series in one pass instead of scanning every journal for each month.
+      function cashFlowTotals() {
+        const months = {
+          income: Array(12).fill(0),
+          expense: Array(12).fill(0),
+          investment: Array(12).fill(0),
+        };
+        const annual = { income: 0, expense: 0, investment: 0 };
+        const prefixes = new Map(MONTHS.map((_, i) => [monthPrefix(i), i]));
+        for (const transaction of rows()) {
+          if (!Object.prototype.hasOwnProperty.call(months, transaction.type))
+            continue;
+          const amount = Number(transaction.amount) || 0;
+          annual[transaction.type] += amount;
+          const month = prefixes.get(transaction.date.slice(0, 7));
+          if (month !== undefined) months[transaction.type][month] += amount;
+        }
+        return { months, annual };
+      }
       // Aggregate amounts by a chosen property, grouping blank labels under Uncategorized.
       const group = (arr, key) =>
         arr.reduce((o, t) => {
@@ -2138,10 +2167,8 @@
       // Build an inline SVG with income, expense, and investment bars for all twelve months.
       // Series use the same vertical scale; negative values have zero bar height.
       // SVG titles expose the full month, series name, and amount for each bar.
-      function chart() {
-        const income = MONTHS.map((_, i) => sum(monthly("income", i))),
-          expense = MONTHS.map((_, i) => sum(monthly("expense", i))),
-          investment = MONTHS.map((_, i) => sum(monthly("investment", i)));
+      function chart(totals = cashFlowTotals()) {
+        const { income, expense, investment } = totals.months;
         // Keep the scale at least 1 to avoid division by zero; reserve space for axes and month labels.
         const max = Math.max(...income, ...expense, ...investment, 1),
           w = 620,
@@ -2433,9 +2460,10 @@
       // Compose selected-month metrics, completeness notice, annual chart, category bars, recent entries, and annual totals.
       function overview() {
         // Recorded cash surplus/shortfall equals income minus expenses minus investment contributions.
-        const income = sum(monthly("income")),
-          expenses = sum(monthly("expense")),
-          investments = sum(monthly("investment")),
+        const totals = cashFlowTotals(),
+          income = totals.months.income[state.month],
+          expenses = totals.months.expense[state.month],
+          investments = totals.months.investment[state.month],
           balance = income - expenses - investments,
           status = state.data?.monthStatus?.[state.month] || "Not reviewed";
         const cards =
@@ -2470,7 +2498,7 @@
           esc(settings()?.year || "—") +
           "</span></div>" +
           (loaded()
-            ? chart()
+            ? chart(totals)
             : empty(
                 "A clearer picture of your year",
                 "Monthly patterns will appear here once the sheet is connected.",
@@ -2501,34 +2529,30 @@
           "</div>" +
           recent +
           '<div class="card" style="margin-top:23px"><div class="cardhead"><h2>Year-to-date totals</h2><span class="pill">All recorded entries</span></div><div class="annual"><div>Income<strong>' +
-          (loaded()
-            ? money(sum(rows().filter((t) => t.type === "income")))
-            : "—") +
+          (loaded() ? money(totals.annual.income) : "—") +
           "</strong></div><div>Expenses<strong>" +
-          (loaded()
-            ? money(sum(rows().filter((t) => t.type === "expense")))
-            : "—") +
+          (loaded() ? money(totals.annual.expense) : "—") +
           "</strong></div><div>Investment contributions<strong>" +
-          (loaded()
-            ? money(sum(rows().filter((t) => t.type === "investment")))
-            : "—") +
+          (loaded() ? money(totals.annual.investment) : "—") +
           "</strong></div></div></div>"
         );
       }
       // Render the monthly transaction journal, or an investment-only version with contribution summaries.
       function transactions(investments = false) {
         // Apply journal, configured month, and case-insensitive description/category/trip search filters, then sort newest first.
+        const prefix = monthPrefix(),
+          search = state.search.toLowerCase();
         const filtered = rows()
           .filter(
             (t) =>
               (investments
                 ? t.type === "investment"
                 : state.type === "all" || t.type === state.type) &&
-              t.date.startsWith(monthPrefix()) &&
-              (!state.search ||
+              t.date.startsWith(prefix) &&
+              (!search ||
                 (t.description + " " + t.category + " " + t.trip)
                   .toLowerCase()
-                  .includes(state.search.toLowerCase())),
+                  .includes(search)),
           )
           .sort((a, b) => b.date.localeCompare(a.date) || b.row - a.row);
         const filter =
@@ -2705,9 +2729,10 @@
         );
       }
       function cashFlowDashboard() {
-        const income = sum(monthly("income")),
-          expenses = sum(monthly("expense")),
-          investments = sum(monthly("investment"));
+        const totals = cashFlowTotals(),
+          income = totals.months.income[state.month],
+          expenses = totals.months.expense[state.month],
+          investments = totals.months.investment[state.month];
         const balance = income - expenses - investments;
         return (
           '<div class="cards">' +
@@ -2731,7 +2756,7 @@
           esc(settings()?.year || "—") +
           "</span></div>" +
           (loaded()
-            ? chart()
+            ? chart(totals)
             : empty(
                 "Your year in view",
                 "Connect your sheet to see annual cash flow.",
@@ -2740,9 +2765,9 @@
           (loaded()
             ? '<div class="tablewrap"><table><thead><tr><th>Month</th><th>Income</th><th>Expenses</th><th>Investments</th><th>Surplus / shortfall</th><th>Record status</th></tr></thead><tbody>' +
               MONTHS.map((month, index) => {
-                const earned = sum(monthly("income", index)),
-                  spent = sum(monthly("expense", index)),
-                  invested = sum(monthly("investment", index)),
+                const earned = totals.months.income[index],
+                  spent = totals.months.expense[index],
+                  invested = totals.months.investment[index],
                   net = earned - spent - invested;
                 return (
                   "<tr><td>" +
@@ -2776,8 +2801,13 @@
         const groups = state.data?.trips || [];
         const expenses = rows().filter((entry) => entry.type === "expense");
         const grouped = expenses.filter((entry) => entry.trip);
+        const byGroup = new Map();
+        for (const entry of grouped) {
+          if (!byGroup.has(entry.trip)) byGroup.set(entry.trip, []);
+          byGroup.get(entry.trip).push(entry);
+        }
         if (state.trip) {
-          const selected = grouped.filter((entry) => entry.trip === state.trip);
+          const selected = byGroup.get(state.trip) || [];
           return (
             '<div class="cardhead"><button class="textlink" id="backTrips">← All expense groups</button><button class="button" id="addGroupExpense">+ Add expense</button></div>' +
             '<div class="notice">This group brings expenses from different categories together. Each recorded payment is counted once; avoid recording both an aggregate payment and its itemized costs.</div>' +
@@ -2802,9 +2832,7 @@
             ? '<div class="tripgrid">' +
               groups
                 .map((name) => {
-                  const entries = grouped.filter(
-                    (entry) => entry.trip === name,
-                  );
+                  const entries = byGroup.get(name) || [];
                   return (
                     '<article class="card tripcard" tabindex="0" role="button" data-trip="' +
                     esc(name) +
@@ -3323,22 +3351,28 @@
         const compare = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
         return rows()
           .filter((entry) => entry.issues.length)
+          .map((entry) => ({
+            entry,
+            description: normalize(entry.description),
+            method: normalize(entry.paymentMethod),
+            detail: normalize(entry.paymentDetail),
+          }))
           .sort(
             (a, b) =>
-              compare(a.type, b.type) ||
-              compare(normalize(a.description), normalize(b.description)) ||
-              compare(a.date, b.date) ||
-              (Number(a.amount) || 0) - (Number(b.amount) || 0) ||
-              compare(normalize(a.paymentMethod), normalize(b.paymentMethod)) ||
-              compare(normalize(a.paymentDetail), normalize(b.paymentDetail)) ||
-              a.row - b.row,
-          );
+              compare(a.entry.type, b.entry.type) ||
+              compare(a.description, b.description) ||
+              compare(a.entry.date, b.entry.date) ||
+              (Number(a.entry.amount) || 0) - (Number(b.entry.amount) || 0) ||
+              compare(a.method, b.method) ||
+              compare(a.detail, b.detail) ||
+              a.entry.row - b.entry.row,
+          )
+          .map(({ entry }) => entry);
       }
       // Render records with nonempty server-supplied issues and the twelve month-completeness controls.
       // Duplicate/check rules are evaluated by the source sheet and getData, not recalculated here.
-      function review() {
+      function review(flagged = reviewRows()) {
         // Use the shared grouped order so button indexes match the rendered entries and notes.
-        const flagged = reviewRows();
         let output =
           '<div class="notice">' +
           esc(
@@ -3503,6 +3537,7 @@
         document
           .querySelectorAll("[data-view]")
           .forEach((button) => (button.disabled = state.setupRequired));
+        const flagged = state.view === "review" ? reviewRows() : [];
         $("#content").innerHTML =
           state.view === "profile"
             ? profileView()
@@ -3516,15 +3551,15 @@
                     ? dashboards()
                     : state.view === "payments"
                       ? manage()
-                      : review();
+                      : review(flagged);
         // Force a layout read between class changes to restart the view entrance animation.
         $("#content").classList.remove("view");
         void $("#content").offsetWidth;
         $("#content").classList.add("view");
-        bindContent();
+        bindContent(flagged);
       }
       // Attach navigation, filtering, trip, review, and status handlers to the freshly rendered content.
-      function bindContent() {
+      function bindContent(flagged = reviewRows()) {
         if (state.view === "profile") bindProfile();
         document.querySelectorAll("[data-dashboard]").forEach((button) => {
           button.onclick = () => {
@@ -3775,8 +3810,7 @@
           state.trip = "";
           render();
         });
-        // Use the shared grouped order so button indexes match the rendered entries and notes.
-        const flagged = reviewRows();
+        // Use the same records and ordering as the rendered review list.
         // Handle review actions using the matching issue record, physical row, and loaded fingerprint.
         document.querySelectorAll("[data-okay]").forEach(
           (b) =>

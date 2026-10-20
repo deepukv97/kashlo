@@ -3538,3 +3538,187 @@ test("fresh setup checks edit access before assigning a year or renaming tabs", 
   assert.equal(f.guide.getRange(16, 2).getValues()[0][0], "");
   assert.equal(api.getWorkspaceSettings().setupRequired, true);
 });
+
+test("snapshot reuses lookup reads and date conversions without retaining stale data", () => {
+  const f = fixture(),
+    c = f.config.layout.journal;
+  f.context.managePaymentOption({
+    action: "add",
+    method: "UPI",
+    name: "Sample app",
+    requestId: "optimization_payment_seed",
+  });
+  f.expense.insertRowsAfter(30, 971);
+  for (let row = 2; row <= 1001; row++) {
+    f.expense.getRange(row, c.description).setValue("Synthetic entry");
+    f.expense.getRange(row, c.amount).setValue(row);
+    f.expense.getRange(row, c.date).setValue(new Date(Date.UTC(2026, 0, 4)));
+  }
+  const before = JSON.stringify(f.expense.cells);
+  const reads = new Map();
+  let metadataReads = 0,
+    dateFormats = 0;
+  for (const [name, sheet] of Object.entries(f.sheets)) {
+    const range = sheet.getRange.bind(sheet),
+      maxRows = sheet.getMaxRows.bind(sheet);
+    sheet.getMaxRows = () => {
+      metadataReads++;
+      return maxRows();
+    };
+    sheet.getRange = (...args) => {
+      const value = range(...args),
+        display = value.getDisplayValues;
+      value.getDisplayValues = () => {
+        reads.set(name, (reads.get(name) || 0) + 1);
+        return display();
+      };
+      return value;
+    };
+  }
+  const format = f.rawContext.Utilities.formatDate;
+  f.rawContext.Utilities.formatDate = (...args) => {
+    dateFormats++;
+    return format(...args);
+  };
+  const snapshot = f.context.getData();
+  assert.equal(snapshot.transactions.length, 1000);
+  assert.equal(snapshot.transactions[0].date, "2026-01-04");
+  assert.ok(dateFormats <= 2, `formatted dates ${dateFormats} times`);
+  assert.ok(metadataReads < 50, `read row metadata ${metadataReads} times`);
+  for (const name of [
+    ...Object.values(f.config.lookupSheets),
+    f.config.paymentMethodsSheet,
+    f.config.paymentTypesSheet,
+  ])
+    assert.equal(reads.get(name), 1, name);
+  assert.deepEqual(Array.from(snapshot.paymentOptions.UPI), ["Sample app"]);
+  assert.equal(JSON.stringify(f.expense.cells), before);
+  const fingerprint = snapshot.transactions[0].fingerprint;
+  f.expense.getRange(2, c.amount).setValue(987);
+  f.book.setSpreadsheetTimeZone("America/Los_Angeles");
+  const updated = f.context.getData();
+  assert.equal(updated.transactions[0].amount, 987);
+  assert.equal(updated.transactions[0].date, "2026-01-03");
+  assert.notEqual(updated.transactions[0].fingerprint, fingerprint);
+  assert.equal(JSON.stringify(snapshot.transactions[0].amount), "2");
+});
+
+async function optimizationBrowser(intl = Intl) {
+  const elements = new Map();
+  const element = (selector) => {
+    if (!elements.has(selector))
+      elements.set(selector, {
+        value: "",
+        innerHTML: "",
+        textContent: "",
+        dataset: {},
+        classList: { add() {}, remove() {}, toggle() {} },
+        addEventListener() {},
+        setAttribute() {},
+        focus() {},
+        setSelectionRange() {},
+      });
+    return elements.get(selector);
+  };
+  const browser = vm.createContext({
+    console,
+    Intl: intl,
+    Date,
+    crypto,
+    setTimeout: () => 0,
+    window: {},
+    document: {
+      querySelector: element,
+      querySelectorAll: () => [],
+      addEventListener() {},
+    },
+  });
+  vm.runInContext(browserSource, browser);
+  await new Promise((resolve) => setImmediate(resolve));
+  browser.data = JSON.parse(JSON.stringify(fixture().context.getData()));
+  vm.runInContext("state.data=data;state.month=0;", browser);
+  return browser;
+}
+
+test("browser reuses number/date formatters and responds to in-place regional setting changes", async () => {
+  let numbers = 0,
+    dates = 0;
+  const browser = await optimizationBrowser({
+    NumberFormat: function (...args) {
+      numbers++;
+      return new Intl.NumberFormat(...args);
+    },
+    DateTimeFormat: function (...args) {
+      dates++;
+      return new Intl.DateTimeFormat(...args);
+    },
+    supportedValuesOf: Intl.supportedValuesOf,
+  });
+  const formatted = vm.runInContext(
+    'Array.from({length:1000},()=>[money(1234.5),short(1234.5),currencySymbol(),dateLabel("2026-01-04")])',
+    browser,
+  );
+  assert.equal(
+    formatted[0][0],
+    new Intl.NumberFormat("en-IN", {
+      style: "currency",
+      currency: "INR",
+      maximumFractionDigits: 2,
+    }).format(1234.5),
+  );
+  assert.deepEqual(Array.from(formatted[999]), Array.from(formatted[0]));
+  assert.equal(numbers, 3);
+  assert.equal(dates, 1);
+  assert.equal(
+    vm.runInContext(
+      'state.data.config.locale="en-US";state.data.config.currency="USD";money(1234.5)',
+      browser,
+    ),
+    "$1,234.50",
+  );
+  assert.equal(numbers, 4);
+  assert.equal(
+    vm.runInContext('dateLabel("2026-01-04")', browser),
+    new Intl.DateTimeFormat("en-US", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    }).format(new Date("2026-01-04T12:00:00")),
+  );
+  assert.equal(dates, 2);
+});
+
+test("single-pass cash flow keeps monthly and all-recorded totals including refunds and missing dates", async () => {
+  const browser = await optimizationBrowser();
+  browser.entries = Array.from({ length: 2000 }, (_, i) => ({
+    type: ["expense", "income", "investment"][i % 3],
+    date:
+      i % 31 === 0
+        ? ""
+        : `${i % 37 === 0 ? 2025 : 2026}-${String((i % 12) + 1).padStart(2, "0")}-04`,
+    amount: i % 19 === 0 ? null : i % 17 === 0 ? -2.5 : 3.25,
+  }));
+  vm.runInContext("state.data.transactions=entries;", browser);
+  const totals = vm.runInContext("cashFlowTotals()", browser);
+  for (const type of ["expense", "income", "investment"]) {
+    for (let month = 0; month < 12; month++)
+      assert.equal(
+        totals.months[type][month],
+        vm.runInContext(
+          `sum(monthly(${JSON.stringify(type)},${month}))`,
+          browser,
+        ),
+      );
+    assert.equal(
+      totals.annual[type],
+      browser.entries
+        .filter((t) => t.type === type)
+        .reduce((value, t) => value + (Number(t.amount) || 0), 0),
+    );
+  }
+  const chart = vm.runInContext("chart()", browser);
+  assert.equal((chart.match(/<rect /g) || []).length, 36);
+  const before = JSON.stringify(browser.entries);
+  vm.runInContext("chart();cashFlowDashboard();overview();", browser);
+  assert.equal(JSON.stringify(browser.entries), before);
+});
