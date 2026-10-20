@@ -2265,9 +2265,9 @@
               : "Connect the app to read your journals. No sample transactions have been added.",
           );
         return (
-          '<div class="tablewrap"><table><thead><tr><th>Description</th><th>Date</th><th>Category</th>' +
+          '<div class="tablewrap"><table><thead><tr><th>Description</th><th>Date</th><th style="text-align:right">Amount</th><th>Category</th>' +
           (showExpenseGroup ? "<th>Expense group</th>" : "") +
-          '<th>Payment method</th><th>Bank / card / UPI app</th><th style="text-align:right">Amount</th>' +
+          '<th>Payment method</th><th>Bank / card / UPI app</th>' +
           (editable ? "<th>Actions</th>" : "") +
           "</tr></thead><tbody>" +
           arr
@@ -2286,6 +2286,8 @@
                 ) +
                 "</span></td><td>" +
                 esc(dateLabel(t.date)) +
+                '</td><td class="amount" style="text-align:right">' +
+                money(t.amount) +
                 '</td><td><span class="pill">' +
                 esc(t.category || "Missing category") +
                 "</span></td>" +
@@ -2298,8 +2300,6 @@
                 esc(t.paymentMethod || "Not recorded") +
                 "</td><td>" +
                 esc(visiblePaymentDetail(t)) +
-                '</td><td class="amount" style="text-align:right">' +
-                money(t.amount) +
                 "</td>" +
                 (editable
                   ? '<td><div class="transaction-actions"><button type="button" class="button light edit-transaction" data-edit-type="' +
