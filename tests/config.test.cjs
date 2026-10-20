@@ -3877,3 +3877,254 @@ test("phone navigation opens a focus-contained drawer, closes on selection, and 
   resize();
   assert.equal(panel.inert, true);
 });
+
+async function pullRefreshBrowser() {
+  const elements = new Map(),
+    listeners = new Map(),
+    changes = new Map(),
+    requests = [];
+  let drafts = [];
+  const media = {
+    matches: true,
+    addEventListener(type, callback) {
+      changes.set(type, callback);
+    },
+  };
+  const element = (selector) => {
+    if (!elements.has(selector))
+      elements.set(selector, {
+        value: "",
+        innerHTML: "",
+        textContent: "",
+        dataset: {},
+        attributes: {},
+        classList: { add() {}, remove() {}, toggle() {} },
+        addEventListener() {},
+        setAttribute(key, value) {
+          this.attributes[key] = value;
+        },
+        removeAttribute(key) {
+          delete this.attributes[key];
+        },
+        focus() {},
+        setSelectionRange() {},
+      });
+    return elements.get(selector);
+  };
+  const document = {
+    body: element("body"),
+    activeElement: null,
+    scrollingElement: { scrollTop: 0 },
+    querySelector: element,
+    querySelectorAll: (selector) =>
+      selector === "#content form input, #content form textarea" ? drafts : [],
+    addEventListener(type, callback) {
+      listeners.set(type, callback);
+    },
+  };
+  const browser = vm.createContext({
+    Intl,
+    Date,
+    crypto,
+    setTimeout: () => 0,
+    window: {},
+    matchMedia: () => media,
+    document,
+  });
+  vm.runInContext(browserSource, browser);
+  await new Promise((resolve) => setImmediate(resolve));
+  browser.data = JSON.parse(JSON.stringify(fixture().context.getData()));
+  vm.runInContext(
+    'state.data=data;state.view="transactions";state.month=4;state.search="Known";render();',
+    browser,
+  );
+  const runner = {
+    withSuccessHandler(handler) {
+      this.success = handler;
+      return this;
+    },
+    withFailureHandler(handler) {
+      this.failure = handler;
+      return this;
+    },
+    getData() {
+      requests.push({ success: this.success, failure: this.failure });
+    },
+  };
+  browser.google = { script: { run: runner } };
+  browser.window.google = browser.google;
+  const target = {
+    closest() {
+      return null;
+    },
+  };
+  const event = (x, y, extra = {}) => ({
+    target,
+    touches: [{ clientX: x, clientY: y }],
+    cancelable: true,
+    preventDefault() {
+      this.prevented = true;
+    },
+    ...extra,
+  });
+  return {
+    browser,
+    element,
+    listeners,
+    requests,
+    media,
+    document,
+    event,
+    changes,
+    setDrafts(value) {
+      drafts = value;
+    },
+  };
+}
+
+test("pull-to-refresh requests one snapshot, shows progress, and preserves page, month, and search", async () => {
+  const f = await pullRefreshBrowser();
+  f.listeners.get("touchstart")(f.event(100, 100));
+  const pull = f.event(100, 140);
+  f.listeners.get("touchmove")(pull);
+  assert.equal(pull.prevented, true);
+  assert.equal(f.element("#pullRefreshLabel").textContent, "Pull to refresh");
+  f.listeners.get("touchmove")(f.event(100, 200));
+  assert.equal(
+    f.element("#pullRefreshLabel").textContent,
+    "Release to refresh",
+  );
+  const finished = f.listeners.get("touchend")(
+    f.event(100, 200, { touches: [] }),
+  );
+  assert.equal(f.requests.length, 1);
+  assert.equal(f.element("#pullRefreshLabel").textContent, "Refreshing…");
+  assert.equal(f.element("#pullRefreshIndicator").hidden, false);
+  f.listeners.get("touchstart")(f.event(100, 100));
+  f.listeners.get("touchmove")(f.event(100, 220));
+  await f.listeners.get("touchend")(f.event(100, 220, { touches: [] }));
+  assert.equal(f.requests.length, 1);
+  const updated = JSON.parse(JSON.stringify(f.browser.data));
+  updated.transactions[0].amount = 321;
+  f.requests[0].success(updated);
+  await finished;
+  assert.equal(f.element("#pullRefreshIndicator").hidden, true);
+  assert.equal(f.element("#refreshButton").disabled, false);
+  assert.equal(
+    vm.runInContext("state.data.transactions[0].amount", f.browser),
+    321,
+  );
+  assert.equal(vm.runInContext("state.view", f.browser), "transactions");
+  assert.equal(vm.runInContext("state.month", f.browser), 4);
+  assert.equal(vm.runInContext("state.search", f.browser), "Known");
+});
+
+test("pull-to-refresh ignores short, cancelled, horizontal, nested, busy, draft, and desktop gestures", async () => {
+  const f = await pullRefreshBrowser(),
+    start = f.listeners.get("touchstart"),
+    move = f.listeners.get("touchmove"),
+    end = f.listeners.get("touchend");
+  const finish = () => end(f.event(100, 220, { touches: [] }));
+  start(f.event(100, 100));
+  move(f.event(100, 140));
+  await finish();
+  start(f.event(100, 100));
+  move(f.event(100, 220));
+  move(f.event(100, 130));
+  await finish();
+  start(f.event(100, 100));
+  move(f.event(230, 120));
+  await finish();
+  start(f.event(100, 100));
+  move(f.event(100, 220));
+  f.listeners.get("touchcancel")();
+  await finish();
+  start(f.event(100, 100));
+  move(f.event(100, 220, { cancelable: false }));
+  await finish();
+  start(f.event(100, 100, { touches: [{}, {}] }));
+  move(f.event(100, 220));
+  await finish();
+  for (const reason of [
+    "scroll",
+    "target",
+    "focus",
+    "modal",
+    "drawer",
+    "busy",
+    "loading",
+    "profile",
+    "draft",
+    "desktop",
+  ]) {
+    if (reason === "scroll") f.document.scrollingElement.scrollTop = 100;
+    if (reason === "focus")
+      f.document.activeElement = {
+        closest() {
+          return {};
+        },
+      };
+    if (reason === "modal")
+      f.element("#modalContainer").innerHTML = "<form>Draft</form>";
+    if (reason === "drawer") f.element("#mobileMenuButton").onclick();
+    if (reason === "busy") vm.runInContext("state.saveBusy=true", f.browser);
+    if (reason === "loading") vm.runInContext("state.loading=true", f.browser);
+    if (reason === "profile")
+      vm.runInContext('state.view="profile"', f.browser);
+    if (reason === "draft") {
+      vm.runInContext('state.view="payments"', f.browser);
+      f.setDrafts([{ value: "Unfinished description" }]);
+    }
+    if (reason === "desktop") f.media.matches = false;
+    const target =
+      reason === "target"
+        ? {
+            closest() {
+              return {};
+            },
+          }
+        : undefined;
+    start(f.event(100, 100, target ? { target } : {}));
+    move(f.event(100, 220));
+    await finish();
+    f.document.scrollingElement.scrollTop = 0;
+    f.document.activeElement = null;
+    f.element("#modalContainer").innerHTML = "";
+    if (reason === "drawer") f.element("#closeMobileMenu").onclick();
+    vm.runInContext(
+      'state.loading=false;state.saveBusy=false;state.view="transactions"',
+      f.browser,
+    );
+    f.setDrafts([]);
+    f.media.matches = true;
+  }
+  assert.equal(f.requests.length, 0);
+  assert.equal(f.element("#pullRefreshIndicator").hidden, true);
+});
+
+test("failed pull-to-refresh retains data, clears progress, and permits a new pull", async () => {
+  const f = await pullRefreshBrowser();
+  const pull = () => {
+    f.listeners.get("touchstart")(f.event(100, 100));
+    f.listeners.get("touchmove")(f.event(100, 220));
+    return f.listeners.get("touchend")(f.event(100, 220, { touches: [] }));
+  };
+  const failed = pull();
+  f.requests[0].failure(new Error("Synthetic connection failure"));
+  await failed;
+  assert.equal(f.element("#pullRefreshIndicator").hidden, true);
+  assert.equal(vm.runInContext("state.loading", f.browser), false);
+  assert.equal(
+    vm.runInContext("state.data.transactions[0].amount", f.browser),
+    50,
+  );
+  assert.match(
+    f.element("#toastContainer").innerHTML,
+    /Synthetic connection failure/,
+  );
+  const retry = pull();
+  assert.equal(f.requests.length, 2);
+  f.requests[1].success(f.browser.data);
+  await retry;
+  assert.equal(f.element("#pullRefreshIndicator").hidden, true);
+});

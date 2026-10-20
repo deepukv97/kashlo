@@ -254,7 +254,8 @@
       }
       .mobile-menu-toggle,
       .drawer-heading,
-      .nav-backdrop {
+      .nav-backdrop,
+      .pull-refresh {
         display: none;
       }
       .settings-grid {
@@ -1426,6 +1427,37 @@
         }
       }
       @media (max-width: 760px) {
+        html {
+          overscroll-behavior-y: contain;
+        }
+        .pull-refresh {
+          display: flex;
+          align-items: center;
+          gap: 9px;
+          position: fixed;
+          top: max(12px, env(safe-area-inset-top));
+          left: 50%;
+          transform: translateX(-50%);
+          z-index: 29;
+          max-width: calc(100vw - 32px);
+          padding: 11px 17px;
+          border: 1px solid var(--line);
+          border-radius: 999px;
+          background: #273024;
+          color: var(--green);
+          box-shadow: 0 8px 24px #0005;
+          font-size: 12px;
+          white-space: nowrap;
+          pointer-events: none;
+        }
+        .pull-refresh-icon {
+          display: inline-block;
+          font-size: 18px;
+          line-height: 1;
+        }
+        .pull-refresh.refreshing .pull-refresh-icon {
+          animation: activity-spin 0.8s linear infinite;
+        }
         .dashboard-tabs {
           display: grid;
           grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1978,6 +2010,18 @@
     </div>
     <!-- Dedicated containers for temporary dialogs and status/error notifications. -->
     <div id="modalContainer"></div>
+    <div
+      class="pull-refresh"
+      id="pullRefreshIndicator"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      hidden
+    >
+      <span class="pull-refresh-icon" id="pullRefreshIcon" aria-hidden="true"
+        >↓</span
+      ><span id="pullRefreshLabel">Pull to refresh</span>
+    </div>
     <div
       id="celebrationContainer"
       role="status"
@@ -4512,6 +4556,9 @@
       // Bind persistent sidebar and top-bar buttons, which live outside the replaceable view content.
       const mobileNavigation = globalThis.matchMedia?.("(max-width: 760px)");
       let mobileMenuOpen = false;
+      let pullStart = null,
+        pullReady = false,
+        pullRefreshing = false;
       function setMobileMenu(open, restoreFocus = true) {
         const wasOpen = mobileMenuOpen;
         const mobile = !!mobileNavigation?.matches;
@@ -4536,17 +4583,157 @@
           "aria-label",
           mobileMenuOpen ? "Close navigation" : "Open navigation",
         );
-        if (mobileMenuOpen) $("#closeMobileMenu").focus();
-        else if (wasOpen && restoreFocus && mobile) button.focus();
+        if (mobileMenuOpen) {
+          resetPullGesture();
+          $("#closeMobileMenu").focus();
+        } else if (wasOpen && restoreFocus && mobile) button.focus();
       }
       $("#mobileMenuButton").onclick = () => setMobileMenu(!mobileMenuOpen);
       $("#closeMobileMenu").onclick = () => setMobileMenu(false);
       $("#navigationBackdrop").onclick = () => setMobileMenu(false);
-      const resetMobileMenu = () => setMobileMenu(false, false);
+      const resetMobileMenu = () => {
+        setMobileMenu(false, false);
+        resetPullGesture();
+      };
       if (mobileNavigation?.addEventListener)
         mobileNavigation.addEventListener("change", resetMobileMenu);
       else mobileNavigation?.addListener?.(resetMobileMenu);
       resetMobileMenu();
+      // Refresh data without reloading the app or losing the selected view and month.
+      // Only claim a downward, one-finger gesture that begins at the page's top edge.
+      function atPageTop() {
+        return (
+          Math.max(
+            globalThis.scrollY || 0,
+            document.scrollingElement?.scrollTop || 0,
+          ) <= 0
+        );
+      }
+      function canPullRefresh(target) {
+        if (
+          !mobileNavigation?.matches ||
+          mobileMenuOpen ||
+          pullRefreshing ||
+          state.loading ||
+          state.saveBusy ||
+          pendingActivities ||
+          state.setupRequired ||
+          state.view === "profile" ||
+          $("#modalContainer").innerHTML
+        )
+          return false;
+        const controls =
+          'input, select, textarea, button, a, label, form, [contenteditable]:not([contenteditable="false"]), [role="button"], [role="dialog"], .tablewrap, .navigation-panel, .modal-backdrop';
+        if (
+          target?.closest?.(controls) ||
+          document.activeElement?.closest?.(
+            'input, select, textarea, [contenteditable]:not([contenteditable="false"])',
+          )
+        )
+          return false;
+        // Master-list forms can contain a draft even after the keyboard has been dismissed.
+        if (
+          state.view === "payments" &&
+          Array.from(
+            document.querySelectorAll(
+              "#content form input, #content form textarea",
+            ),
+          ).some((input) => input.value.trim())
+        )
+          return false;
+        return true;
+      }
+      function resetPullGesture() {
+        pullStart = null;
+        pullReady = false;
+        if (!pullRefreshing) $("#pullRefreshIndicator").hidden = true;
+      }
+      function showPullRefresh(text, icon, refreshing = false) {
+        const indicator = $("#pullRefreshIndicator"),
+          label = $("#pullRefreshLabel");
+        if (label.textContent !== text) label.textContent = text;
+        $("#pullRefreshIcon").textContent = icon;
+        indicator.classList.toggle("refreshing", refreshing);
+        indicator.hidden = false;
+      }
+      document.addEventListener(
+        "touchstart",
+        (event) => {
+          resetPullGesture();
+          if (
+            event.touches.length !== 1 ||
+            !atPageTop() ||
+            !canPullRefresh(event.target)
+          )
+            return;
+          const touch = event.touches[0];
+          pullStart = { x: touch.clientX, y: touch.clientY };
+        },
+        { passive: true },
+      );
+      document.addEventListener(
+        "touchmove",
+        (event) => {
+          if (!pullStart) return;
+          if (
+            event.touches.length !== 1 ||
+            !atPageTop() ||
+            !canPullRefresh(event.target)
+          ) {
+            resetPullGesture();
+            return;
+          }
+          const touch = event.touches[0],
+            down = touch.clientY - pullStart.y,
+            across = Math.abs(touch.clientX - pullStart.x);
+          if (down < -6 || (across > 10 && across > down)) {
+            resetPullGesture();
+            return;
+          }
+          if (down <= 0) {
+            pullReady = false;
+            $("#pullRefreshIndicator").hidden = true;
+            return;
+          }
+          if (!event.cancelable) {
+            resetPullGesture();
+            return;
+          }
+          event.preventDefault();
+          pullReady = down >= 84;
+          if (down >= 12)
+            showPullRefresh(
+              pullReady ? "Release to refresh" : "Pull to refresh",
+              pullReady ? "↻" : "↓",
+            );
+        },
+        { passive: false },
+      );
+      document.addEventListener(
+        "touchend",
+        async (event) => {
+          const refreshNow =
+            pullStart &&
+            pullReady &&
+            event.touches.length === 0 &&
+            atPageTop() &&
+            canPullRefresh(event.target);
+          resetPullGesture();
+          if (!refreshNow) return;
+          pullRefreshing = true;
+          showPullRefresh("Refreshing…", "↻", true);
+          try {
+            await refresh();
+          } finally {
+            pullRefreshing = false;
+            resetPullGesture();
+          }
+        },
+        { passive: true },
+      );
+      document.addEventListener("touchcancel", resetPullGesture, {
+        passive: true,
+      });
       document
         .querySelectorAll("[data-view]")
         .forEach((b) => (b.onclick = () => navigate(b.dataset.view)));
