@@ -1464,28 +1464,149 @@ function deleteTransaction(input) {
     throw new Error("Confirm the transaction deletion first.");
   return withWorkspaceWrite_(input, () => {
     const current = checkedTransaction_(book_(), input);
-    const c = workspaceConfig_().layout.journal;
-    const arrayCheck = /LET\(descriptions,/i.test(
-      current.sheet.getRange(c.firstDataRow, c.duplicateIssue).getFormula(),
-    );
-    const restoreDates =
-      current.row === c.firstDataRow
-        ? Object.values(c.dateDerived || {}).filter((column) =>
-            /ARRAYFORMULA/i.test(
-              current.sheet.getRange(c.firstDataRow, column).getFormula(),
-            ),
-          )
-        : [];
-    current.sheet.deleteRow(current.row);
-    if (current.sheet.getMaxRows() < c.firstDataRow)
-      current.sheet.insertRowsAfter(
-        current.sheet.getMaxRows(),
-        c.firstDataRow - current.sheet.getMaxRows(),
-      );
-    // Deleting the first entry also deletes spill anchors; restore only generated columns.
-    if (arrayCheck) installDuplicateArray_(current.sheet);
-    refreshDateArrays_(current.sheet, restoreDates);
+    deleteCheckedTransaction_(current);
     return { ok: true, type: input.type, row: current.row };
+  });
+}
+
+// Share row deletion and spill-anchor repairs between individual and bulk actions.
+function deleteCheckedTransaction_(current) {
+  const c = workspaceConfig_().layout.journal;
+  const arrayCheck = /LET\(descriptions,/i.test(
+    current.sheet.getRange(c.firstDataRow, c.duplicateIssue).getFormula(),
+  );
+  const restoreDates =
+    current.row === c.firstDataRow
+      ? Object.values(c.dateDerived || {}).filter((column) =>
+          /ARRAYFORMULA/i.test(
+            current.sheet.getRange(c.firstDataRow, column).getFormula(),
+          ),
+        )
+      : [];
+  current.sheet.deleteRow(current.row);
+  if (current.sheet.getMaxRows() < c.firstDataRow)
+    current.sheet.insertRowsAfter(
+      current.sheet.getMaxRows(),
+      c.firstDataRow - current.sheet.getMaxRows(),
+    );
+  // Deleting the first entry also deletes spill anchors; restore only generated columns.
+  if (arrayCheck) installDuplicateArray_(current.sheet);
+  refreshDateArrays_(current.sheet, restoreDates);
+}
+
+// Validate the complete loaded journal snapshot before any bulk writes. The script lock
+// prevents competing app writes; fingerprints also catch edits made directly in Sheets.
+function bulkReview(input) {
+  if (!input || !["okay", "delete"].includes(input.action))
+    throw new Error("Invalid bulk review action.");
+  if (input.action === "delete" && input.confirmed !== true)
+    throw new Error("Confirm duplicate deletion first.");
+  return withWorkspaceWrite_(input, () => {
+    const book = book_(),
+      c = workspaceConfig_().layout.journal,
+      zone = book.getSpreadsheetTimeZone(),
+      dates = new Map(),
+      entries = [];
+    Object.keys(workspaceConfig_().sheets).forEach((type) => {
+      const sheet = sheet_(book, type),
+        count = sheet.getMaxRows();
+      sheet
+        .getRange(
+          c.firstDataRow,
+          1,
+          count - c.firstDataRow + 1,
+          journalWidth_(),
+        )
+        .getValues()
+        .forEach((values, index) => {
+          if (
+            !values[c.description - 1] &&
+            values[c.amount - 1] === "" &&
+            !dateString_(values[c.date - 1], zone, dates)
+          )
+            return;
+          entries.push({
+            type,
+            sheet,
+            row: index + c.firstDataRow,
+            values,
+            fingerprint: fingerprint_(values, zone, count, dates),
+            decision: String(values[c.decision - 1] || "Pending"),
+            reviewNote: String(values[c.reviewNote - 1] || ""),
+            group: duplicateGroup_(values, type, zone, dates),
+            pending:
+              !!values[c.duplicateIssue - 1] &&
+              values[c.decision - 1] !== "Okay",
+            other: c.otherIssues.some((column) => !!values[column - 1]),
+          });
+        });
+    });
+    const signature = (items) =>
+      JSON.stringify(
+        items
+          .map((entry) => [
+            entry.type,
+            Number(entry.row),
+            entry.fingerprint,
+            entry.decision,
+            entry.reviewNote,
+            entry.group ?? entry.duplicateGroup,
+          ])
+          .sort((a, b) => a[0].localeCompare(b[0]) || a[1] - b[1]),
+      );
+    if (
+      !Array.isArray(input.entries) ||
+      signature(entries) !== signature(input.entries)
+    )
+      throw new Error(
+        "Transactions changed in the sheet. Refresh before reviewing all entries.",
+      );
+    const groups = new Set(
+      entries
+        .filter((entry) => entry.pending && entry.group)
+        .map((entry) => entry.group),
+    );
+    let affected;
+    if (input.action === "okay") {
+      affected = entries.filter(
+        (entry) => entry.pending || entry.other || groups.has(entry.group),
+      );
+      const notes = new Map(
+        input.entries.map((entry) => [
+          entry.type + ":" + entry.row,
+          entry.note,
+        ]),
+      );
+      // Validate every note before the first write; preserve notes not submitted by the UI.
+      affected.forEach((entry) => {
+        const note = notes.get(entry.type + ":" + entry.row);
+        if (
+          note !== undefined &&
+          (typeof note !== "string" ||
+            note.length > workspaceConfig_().limits.noteLength)
+        )
+          throw new Error("Review note is too long.");
+      });
+      affected.forEach((entry) => {
+        literal_(entry.sheet.getRange(entry.row, c.decision), "Okay");
+        const note = notes.get(entry.type + ":" + entry.row);
+        if (note !== undefined)
+          literal_(entry.sheet.getRange(entry.row, c.reviewNote), note);
+      });
+    } else {
+      const kept = new Set();
+      affected = entries.filter((entry) => {
+        if (!groups.has(entry.group)) return false;
+        if (kept.has(entry.group)) return true;
+        kept.add(entry.group); // Keep the earliest sheet row in each exact duplicate group.
+        return false;
+      });
+      // Descending physical rows keep later deletions from shifting an intended target.
+      affected
+        .sort((a, b) => a.type.localeCompare(b.type) || b.row - a.row)
+        .forEach(deleteCheckedTransaction_);
+    }
+    return { ok: true, count: affected.length };
   });
 }
 

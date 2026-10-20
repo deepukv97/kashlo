@@ -50,7 +50,7 @@ Names are trimmed and checked without regard to case within each journal. Existi
 
 ## Duplicate review
 
-Expense, income, and investment journals share one policy: possible duplicates match the calendar date, description, amount, and recorded payment type/name within the same journal. Text comparison ignores case and extra whitespace. Repeating a description on another day or for another amount is allowed. No investment names receive special treatment. **Okay** keeps and accepts the exact matching group; correction and confirmed deletion remain user decisions.
+Expense, income, and investment journals share one policy: possible duplicates match the calendar date, description, amount, and recorded payment type/name within the same journal. Text comparison ignores case and extra whitespace. Repeating a description on another day or for another amount is allowed. No investment names receive special treatment. **Okay** keeps and accepts the exact matching group; correction and confirmed deletion remain user decisions. At the top of Review, **Okay all** accepts the current review entries while keeping all amounts. **Delete all duplicates** asks for confirmation, shows the number of extra entries to remove, and keeps the earliest sheet row in each pending exact duplicate group. Already accepted groups are kept. Both bulk actions check for changes before writing and protect retries from repeating a deletion. As with individual Okay, missing or invalid details still need correction.
 
 ## Profile & first-time setup
 

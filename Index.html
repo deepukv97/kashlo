@@ -2245,6 +2245,7 @@
             else if (name === "createExpenseGroup")
               runner.createExpenseGroup(args);
             else if (name === "setReview") runner.setReview(args);
+            else if (name === "bulkReview") runner.bulkReview(args);
             else if (name === "setMonthStatus") runner.setMonthStatus(args);
             else reject(new Error("Unknown action."));
           });
@@ -3528,6 +3529,15 @@
           '</div><div class="card"><div class="cardhead"><div><h2>Entries to look over</h2><p>The exact date and amount, with a decision you control.</p></div><span class="pill warn">' +
           flagged.length +
           " entries</span></div>";
+        if (flagged.length)
+          output +=
+            '<div class="reviewactions" style="margin-bottom:20px"><button class="button light" id="okayAll">✓ Okay all</button><button class="button outline" id="deleteAllDuplicates" ' +
+            (flagged.some(
+              (entry) => entry.duplicateGroup && entry.decision !== "Okay",
+            )
+              ? ""
+              : "disabled") +
+            ">Delete all duplicates</button></div>";
         // Each review button stores its index into flagged; notes preserve the last saved review text.
         output += flagged.length
           ? flagged
@@ -3958,6 +3968,12 @@
         });
         // Use the same records and ordering as the rendered review list.
         // Handle review actions using the matching issue record, physical row, and loaded fingerprint.
+        $("#okayAll")?.addEventListener("click", () =>
+          openBulkReview("okay", flagged),
+        );
+        $("#deleteAllDuplicates")?.addEventListener("click", () =>
+          openBulkReview("delete", flagged),
+        );
         document.querySelectorAll("[data-okay]").forEach(
           (b) =>
             (b.onclick = async () => {
@@ -4519,6 +4535,99 @@
               " If the result is uncertain, refresh and check the sheet before starting a new deletion.";
             $("#confirmDelete").disabled = false;
             $("#confirmDelete").textContent = "Retry same deletion";
+          } finally {
+            state.saveBusy = false;
+          }
+        };
+      }
+      // Capture one immutable snapshot and request ID per confirmation, including unsaved review notes.
+      function openBulkReview(action, flagged) {
+        if (state.saveBusy || !loaded()) return;
+        const notes = new Map(
+          flagged.map((entry, i) => [
+            entry.type + ":" + entry.row,
+            $("#note_" + i).value,
+          ]),
+        );
+        const entries = rows().map((entry) => ({
+          type: entry.type,
+          row: entry.row,
+          fingerprint: entry.fingerprint,
+          decision: entry.decision,
+          reviewNote: entry.reviewNote,
+          duplicateGroup: entry.duplicateGroup,
+          note: notes.get(entry.type + ":" + entry.row),
+        }));
+        const groups = new Map();
+        const pending = new Set(
+          flagged
+            .filter(
+              (entry) => entry.duplicateGroup && entry.decision !== "Okay",
+            )
+            .map((entry) => entry.duplicateGroup),
+        );
+        rows().forEach((entry) => {
+          if (pending.has(entry.duplicateGroup))
+            groups.set(
+              entry.duplicateGroup,
+              (groups.get(entry.duplicateGroup) || 0) + 1,
+            );
+        });
+        const count = [...groups.values()].reduce(
+          (total, size) => total + Math.max(0, size - 1),
+          0,
+        );
+        if (action === "delete" && !count) return;
+        const requestId = id(),
+          deleting = action === "delete";
+        $("#modalContainer").innerHTML =
+          '<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="bulkTitle"><div class="modal-head"><h2 id="bulkTitle">' +
+          (deleting ? "Delete all duplicates?" : "Mark all as Okay?") +
+          '</h2><button class="close" aria-label="Close dialog">×</button></div><div class="notice warning">' +
+          (deleting
+            ? "Permanently delete " +
+              count +
+              " extra transaction(s) from your sheet and totals. Keep the earliest entry in each of " +
+              groups.size +
+              " matching duplicate group(s). Other entries are kept."
+            : "Accept all entries currently in Review, keeping every transaction and amount unchanged. Duplicate warnings will clear. Missing or invalid details still need correction, just as with the individual Okay button.") +
+          '</div><div class="formerror" id="bulkError"></div><div class="modal-footer"><button class="button outline" id="cancelBulk">Cancel</button><button class="button ' +
+          (deleting ? "danger" : "") +
+          '" id="confirmBulk">' +
+          (deleting ? "Delete " + count + " duplicate(s)" : "Okay all") +
+          "</button></div></section></div>";
+        const close = () => {
+          if (!state.saveBusy) $("#modalContainer").innerHTML = "";
+        };
+        $(".close").onclick = close;
+        $("#cancelBulk").onclick = close;
+        $("#cancelBulk").focus();
+        $("#confirmBulk").onclick = async () => {
+          if (state.saveBusy) return;
+          state.saveBusy = true;
+          $("#confirmBulk").disabled = true;
+          $("#bulkError").textContent = "";
+          try {
+            const result = await rpc("bulkReview", {
+              action,
+              entries,
+              requestId,
+              confirmed: true,
+            });
+            $("#modalContainer").innerHTML = "";
+            toast(
+              deleting
+                ? result.count +
+                    " duplicate(s) deleted. One entry per group kept."
+                : "Entries marked Okay. All amounts are unchanged.",
+            );
+            await refresh();
+          } catch (error) {
+            $("#bulkError").textContent =
+              error.message +
+              " If the result is uncertain, refresh and check the sheet before starting another bulk action.";
+            $("#confirmBulk").disabled = false;
+            $("#confirmBulk").textContent = "Retry same action";
           } finally {
             state.saveBusy = false;
           }

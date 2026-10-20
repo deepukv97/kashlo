@@ -345,6 +345,7 @@ function fixture(overrides = {}) {
           "updateTransaction",
           "deleteTransaction",
           "setReview",
+          "bulkReview",
           "setMonthStatus",
           "createExpenseGroup",
           "managePaymentOption",
@@ -4127,4 +4128,261 @@ test("failed pull-to-refresh retains data, clears progress, and permits a new pu
   f.requests[1].success(f.browser.data);
   await retry;
   assert.equal(f.element("#pullRefreshIndicator").hidden, true);
+});
+
+function bulkFixture() {
+  const f = fixture(),
+    api = f.context,
+    c = f.config.layout.journal;
+  for (const type of ["expense", "income", "investment"]) {
+    const sheet = f.sheets[f.resolve(f.config.sheets[type])];
+    sheet.cells[1] = [...f.expense.cells[1]];
+    sheet.cells[2] = [...sheet.cells[1]];
+    sheet.cells[3] = [...sheet.cells[1]];
+    sheet.cells[4] = [...sheet.cells[1]];
+    sheet.cells[4][c.amount - 1] = 987;
+    sheet.cells[4][c.duplicateIssue - 1] = "";
+  }
+  const entries = api
+    .getData()
+    .transactions.map(
+      ({ type, row, fingerprint, decision, reviewNote, duplicateGroup }) => ({
+        type,
+        row,
+        fingerprint,
+        decision,
+        reviewNote,
+        duplicateGroup,
+      }),
+    );
+  return { ...f, api, c, entries };
+}
+
+test("bulk Okay accepts all exact groups and preserves amounts and other validation issues", () => {
+  const f = bulkFixture();
+  f.expense.cells[4][f.c.otherIssues[0] - 1] = "Missing category";
+  f.entries = f.api
+    .getData()
+    .transactions.map(
+      ({ type, row, fingerprint, decision, reviewNote, duplicateGroup }) => ({
+        type,
+        row,
+        fingerprint,
+        decision,
+        reviewNote,
+        duplicateGroup,
+      }),
+    );
+  f.entries[0].note = "Intentional payments";
+  const before = f.api.getData().transactions.map((t) => t.amount);
+  const input = {
+    action: "okay",
+    entries: f.entries,
+    requestId: "bulk_okay_request",
+  };
+  assert.equal(f.api.bulkReview(input).count, 10);
+  assert.equal(f.api.bulkReview(input).count, 10);
+  const after = f.api.getData().transactions;
+  assert.deepEqual(
+    Array.from(after, (t) => t.amount),
+    Array.from(before),
+  );
+  assert.equal(
+    after.filter((t) => t.issues.includes("Possible duplicate")).length,
+    0,
+  );
+  assert.equal(
+    after.filter((t) => t.issues.includes("Missing category")).length,
+    1,
+  );
+  assert.equal(after[0].reviewNote, "Intentional payments");
+});
+
+test("bulk delete keeps one per group across all journals, preserves unrelated records and retries safely", () => {
+  const f = bulkFixture();
+  const input = {
+    action: "delete",
+    entries: f.entries,
+    confirmed: true,
+    requestId: "bulk_delete_request",
+  };
+  assert.equal(f.api.bulkReview(input).count, 6);
+  assert.equal(f.api.bulkReview(input).count, 6);
+  for (const type of ["expense", "income", "investment"]) {
+    const sheet = f.sheets[f.resolve(f.config.sheets[type])];
+    assert.equal(
+      sheet.cells[1][f.c.amount - 1],
+      f.expense.cells[1][f.c.amount - 1],
+    );
+    assert.equal(sheet.cells[2][f.c.amount - 1], 987);
+    assert.equal(sheet.getMaxRows(), 28);
+  }
+});
+
+test("bulk deletion validates confirmation and the entire snapshot before any deletion", () => {
+  for (const mutation of [
+    "changed",
+    "new",
+    "removed",
+    "missing",
+    "confirmation",
+    "reviewed",
+  ]) {
+    const f = bulkFixture();
+    const input = {
+      action: "delete",
+      entries: f.entries,
+      confirmed: true,
+      requestId: "bulk_guard_" + mutation,
+    };
+    if (mutation === "reviewed") f.expense.cells[2][f.c.decision - 1] = "Okay";
+    if (mutation === "changed") f.expense.cells[2][f.c.amount - 1] = 999;
+    if (mutation === "new") f.expense.cells[5] = [...f.expense.cells[1]];
+    if (mutation === "removed") f.expense.cells[2] = Array(30).fill("");
+    if (mutation === "missing") input.entries = input.entries.slice(1);
+    if (mutation === "confirmation") input.confirmed = false;
+    const before = JSON.stringify(f.expense.cells);
+    assert.throws(() => f.api.bulkReview(input), /changed|Confirm/);
+    assert.equal(JSON.stringify(f.expense.cells), before);
+    assert.equal(f.expense.getMaxRows(), 30);
+  }
+});
+
+test("bulk deletion excludes accepted groups and distinguishes payment details", () => {
+  const f = bulkFixture();
+  for (let i = 1; i <= 3; i++) f.expense.cells[i][f.c.decision - 1] = "Okay";
+  const investment = f.sheets[f.resolve(f.config.sheets.investment)];
+  investment.cells[3][f.c.paymentDetail - 1] = "Other fictional source";
+  const entries = f.api
+    .getData()
+    .transactions.map(
+      ({ type, row, fingerprint, decision, reviewNote, duplicateGroup }) => ({
+        type,
+        row,
+        fingerprint,
+        decision,
+        reviewNote,
+        duplicateGroup,
+      }),
+    );
+  assert.equal(
+    f.api.bulkReview({
+      action: "delete",
+      entries,
+      confirmed: true,
+      requestId: "bulk_scope_request",
+    }).count,
+    3,
+  );
+  assert.equal(f.expense.getMaxRows(), 30);
+  assert.equal(investment.getMaxRows(), 29);
+  assert.equal(
+    investment.cells[2][f.c.paymentDetail - 1],
+    "Other fictional source",
+  );
+});
+
+test("bulk review rejects oversized notes and wrong workspace without writing decisions", () => {
+  for (const invalid of ["note", "workspace"]) {
+    const f = bulkFixture();
+    const input = {
+      action: "okay",
+      entries: f.entries,
+      requestId: "bulk_invalid_" + invalid,
+    };
+    if (invalid === "note")
+      input.entries[0].note = "x".repeat(f.config.limits.noteLength + 1);
+    else input.workspaceRevision = 999;
+    const before = JSON.stringify(f.expense.cells);
+    assert.throws(() => f.api.bulkReview(input), /note|Workspace/);
+    assert.equal(JSON.stringify(f.expense.cells), before);
+  }
+});
+
+test("bulk Review UI confirms counts, sends notes and snapshot, and reuses request ID on retry", async () => {
+  const nodes = new Map();
+  const element = (key) => {
+    if (!nodes.has(key))
+      nodes.set(key, {
+        innerHTML: "",
+        textContent: "",
+        value: "",
+        hidden: false,
+        classList: { add() {}, remove() {}, toggle() {} },
+        addEventListener() {},
+        setAttribute() {},
+        focus() {},
+      });
+    return nodes.get(key);
+  };
+  const browser = vm.createContext({
+    console,
+    Intl,
+    Date,
+    crypto,
+    setTimeout: () => 0,
+    window: {},
+    document: {
+      querySelector: element,
+      querySelectorAll: () => [],
+      addEventListener() {},
+    },
+  });
+  vm.runInContext(browserSource, browser);
+  await new Promise((resolve) => setImmediate(resolve));
+  browser.snapshot = {
+    config: { year: 2026, locale: "en-US", currency: "USD", monthStatuses: [] },
+    transactions: [2, 3, 4].map((row) => ({
+      type: "expense",
+      row,
+      description: "Fictional snack",
+      date: "2026-01-05",
+      amount: 20,
+      category: "Food",
+      issues: ["Possible duplicate"],
+      decision: "Pending",
+      reviewNote: "",
+      duplicateGroup: "group-a",
+      fingerprint: "fp-" + row,
+    })),
+  };
+  vm.runInContext(
+    'state.data = snapshot; state.view = "review"; render(); refresh = async () => {}; var calls = []; rpc = async (name, payload) => { calls.push({name,payload}); if (calls.length === 1) throw new Error("Network failure"); return {count:2}; };',
+    browser,
+  );
+  assert.match(element("#content").innerHTML, /id="okayAll"/);
+  assert.match(element("#content").innerHTML, /id="deleteAllDuplicates"/);
+  element("#note_0").value = "Keep this review note";
+  vm.runInContext('openBulkReview("delete", reviewRows());', browser);
+  assert.match(
+    element("#modalContainer").innerHTML,
+    /Permanently delete 2 extra/,
+  );
+  assert.match(element("#modalContainer").innerHTML, /earliest entry/);
+  assert.equal(browser.calls.length, 0);
+  element("#cancelBulk").onclick();
+  assert.equal(element("#modalContainer").innerHTML, "");
+  vm.runInContext('openBulkReview("delete", reviewRows());', browser);
+  await element("#confirmBulk").onclick();
+  assert.match(element("#bulkError").textContent, /Network failure/);
+  assert.equal(element("#confirmBulk").disabled, false);
+  await element("#confirmBulk").onclick();
+  assert.equal(browser.calls[0].name, "bulkReview");
+  assert.equal(
+    browser.calls[0].payload.requestId,
+    browser.calls[1].payload.requestId,
+  );
+  assert.equal(browser.calls[1].payload.confirmed, true);
+  assert.equal(
+    browser.calls[1].payload.entries[0].note,
+    "Keep this review note",
+  );
+  assert.equal(element("#modalContainer").innerHTML, "");
+  vm.runInContext('openBulkReview("okay", reviewRows());', browser);
+  assert.match(
+    element("#modalContainer").innerHTML,
+    /every transaction and amount unchanged/,
+  );
+  await element("#confirmBulk").onclick();
+  assert.equal(browser.calls[2].payload.action, "okay");
 });
