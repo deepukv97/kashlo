@@ -941,6 +941,30 @@
       .negative {
         color: var(--red);
       }
+      .pagination {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-top: 20px;
+        padding-top: 16px;
+        border-top: 1px solid var(--line);
+      }
+      .pagination p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.7;
+      }
+      .pagination button:disabled {
+        cursor: default;
+      }
+      .pagination-controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
       .filters {
         display: flex;
         flex-wrap: wrap;
@@ -2064,6 +2088,8 @@
         manageSection: "descriptions",
         lookupType: "expense",
         search: "",
+        transactionPage: 1,
+        transactionPageScope: "",
         trip: "",
         data: null,
         profile: null,
@@ -2520,6 +2546,80 @@
             : "")
         );
       }
+      const TRANSACTION_PAGE_SIZE = 25;
+      // Filter and sort the complete snapshot before selecting the visible batch.
+      // A changed view/filter starts at page one; edits/deletions clamp an existing page.
+      function paginatedTransactions(
+        arr,
+        editable = false,
+        showExpenseGroup = true,
+      ) {
+        const scope = JSON.stringify([
+          state.view,
+          state.dashboard,
+          state.month,
+          state.type,
+          state.search,
+          state.trip,
+        ]);
+        if (state.transactionPageScope !== scope) {
+          state.transactionPageScope = scope;
+          state.transactionPage = 1;
+        }
+        const pages = Math.max(
+          1,
+          Math.ceil(arr.length / TRANSACTION_PAGE_SIZE),
+        );
+        state.transactionPage = Math.max(
+          1,
+          Math.min(pages, Number(state.transactionPage) || 1),
+        );
+        const start = (state.transactionPage - 1) * TRANSACTION_PAGE_SIZE;
+        const table = transactionTable(
+          arr.slice(start, start + TRANSACTION_PAGE_SIZE),
+          TRANSACTION_PAGE_SIZE,
+          editable,
+          showExpenseGroup,
+        );
+        if (arr.length <= TRANSACTION_PAGE_SIZE) return table;
+        const button = (label, page, disabled) =>
+          '<button type="button" class="button outline" data-transaction-page="' +
+          page +
+          '" aria-label="' +
+          label +
+          ' transaction page"' +
+          (disabled ? " disabled" : "") +
+          ">" +
+          label +
+          "</button>";
+        return (
+          table +
+          '<nav class="pagination" aria-label="Transaction pages"><p>Showing ' +
+          (start + 1) +
+          "–" +
+          Math.min(start + TRANSACTION_PAGE_SIZE, arr.length) +
+          " of " +
+          arr.length +
+          " entries <span>· Page " +
+          state.transactionPage +
+          " of " +
+          pages +
+          '</span></p><div class="pagination-controls">' +
+          button("First", 1, state.transactionPage === 1) +
+          button(
+            "Previous",
+            state.transactionPage - 1,
+            state.transactionPage === 1,
+          ) +
+          button(
+            "Next",
+            state.transactionPage + 1,
+            state.transactionPage === pages,
+          ) +
+          button("Last", pages, state.transactionPage === pages) +
+          "</div></nav>"
+        );
+      }
       function flowHero(income, expenses, investments, status) {
         const balance = income - expenses - investments;
         const hasEntries = rows().some((t) => t.date.startsWith(monthPrefix()));
@@ -2744,7 +2844,7 @@
           '</h2><span class="pill">' +
           filtered.length +
           " entries</span></div>" +
-          transactionTable(filtered, 100, true, !investments) +
+          paginatedTransactions(filtered, true, !investments) +
           "</div>"
         );
       }
@@ -2968,7 +3068,7 @@
             '</strong><p style="color:var(--muted)">Total recorded for this group · all months</p>' +
             categoryBars(selected) +
             '</div><div class="card"><div class="cardhead"><h2>Group expenses</h2></div>' +
-            transactionTable(selected) +
+            paginatedTransactions(selected) +
             "</div></div>"
           );
         }
@@ -3692,6 +3792,7 @@
           state.search,
           state.trip,
           state.dashboard,
+          state.transactionPage,
         ]);
       function captureViewContext() {
         const active = document.activeElement;
@@ -4059,11 +4160,23 @@
             openDelete(transaction);
           };
         });
+        document
+          .querySelectorAll("[data-transaction-page]")
+          .forEach((button) => {
+            button.onclick = () => {
+              if (state.saveBusy || button.disabled) return;
+              state.transactionPage = Number(button.dataset.transactionPage);
+              const context = captureViewContext();
+              render(true);
+              restoreViewContext(context);
+            };
+          });
         // Property handlers replace the previous binding on retained controls.
         const searchInput = $("#search");
         if (searchInput)
           searchInput.oninput = (e) => {
             state.search = e.target.value;
+            state.transactionPage = 1;
             const context = captureViewContext();
             render(true);
             restoreViewContext(context);

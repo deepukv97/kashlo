@@ -8,6 +8,8 @@ On phones, use the menu button beside the Kashlo logo to open the left navigatio
 
 To refresh on a phone, scroll to the top, pull down until **Release to refresh** appears, then release. **Refreshing…** stays visible while the latest sheet data loads; your selected page, month, and search stay in place. The gesture is disabled while editing forms, viewing settings, or running another operation. The **Refresh** button remains available.
 
+Transactions, Investments, and expense-group detail lists display 25 records per page, with First, Previous, Next, and Last controls. Search checks the complete selected month/type before pagination, including records on other pages. Changing the search or filters starts at page one; edits retain the current page when possible, and shrinking results moves to the last valid page. Summary totals include all matching records, not just the visible page. Overview keeps six recent entries. Pagination limits displayed rows; the app still reads the full sheet snapshot.
+
 After editing a transaction on Overview, Transactions, or Investments, Kashlo updates the changed row and affected summaries without replacing the whole view. Search focus, text selection, page scrolling, and table scrolling are preserved. Fresh sheet data still supplies totals and review checks; date or description changes update the current sorting and filters.
 
 Complete the welcome screen to set your name, workbook, currency, locale, time zone, and year. Open **Profile & settings** through the sidebar avatar/name, or the profile icon beside the logo on mobile, to update profile and display preferences later. Personal settings are stored in Apps Script Properties; [Config.gs](Config.gs) contains the shared worksheet layout and product defaults.
