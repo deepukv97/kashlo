@@ -4,7 +4,7 @@
 
 A private Google Apps Script web app for recording expenses, income, investment contributions, expense groups (events, projects, and trips), and review decisions in Google Sheets.
 
-On phones, use the menu button beside the Kashlo logo to open the left navigation drawer. Choose Overview, Transactions, Investments, Dashboards, Review, or Manage; the drawer closes after selection. Desktop navigation stays in the sidebar.
+On phones, use the menu button beside the Kashlo logo to open the left navigation drawer. Choose Overview, Transactions, Investments, Dashboards, Review, or Manage; the drawer closes after selection. Desktop navigation stays in the sidebar. On phones, transaction rows become compact cards showing description, amount, and date. Tap **Details** to reveal category, expense group where applicable, payment details, and Edit/Delete where available. Desktop transaction tables keep their existing layout.
 
 To refresh on a phone, scroll to the top, pull down until **Release to refresh** appears, then release. **Refreshing…** stays visible while the latest sheet data loads; your selected page, month, and search stay in place. The gesture is disabled while editing forms, viewing settings, or running another operation. The **Refresh** button remains available.
 

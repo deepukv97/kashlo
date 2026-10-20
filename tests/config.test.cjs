@@ -1813,7 +1813,10 @@ test("payment UI manages names and conditionally requires details without losing
       browser,
     );
     assert.doesNotMatch(element("#content").innerHTML, /Google Pay/);
-    assert.match(element("#content").innerHTML, /<td>UPI<\/td><td><\/td>/);
+    assert.match(
+      element("#content").innerHTML,
+      /id="transaction-[^"]+-method"><span class="mobile-field-label">Payment method<\/span>UPI<\/td><td[^>]+id="transaction-[^"]+-detail"><span class="mobile-field-label">Bank \/ card \/ UPI app<\/span><\/td>/,
+    );
   }
   browser.entry = JSON.parse(JSON.stringify(entry));
   vm.runInContext("openEntry(entry)", browser);
@@ -4592,4 +4595,81 @@ test("expense group records paginate while Overview keeps its six recent entries
   vm.runInContext('state.view="overview";var overviewHtml=overview();', b);
   assert.equal(tableKeys(b.overviewHtml).length, 6);
   assert.doesNotMatch(b.overviewHtml, /aria-label="Transaction pages"/);
+});
+
+test("mobile transaction details toggle only the selected record and render accessible controls", async () => {
+  const f = await pullRefreshBrowser(),
+    b = f.browser;
+  const entry = b.data.transactions[0],
+    attributes = {},
+    toggles = [];
+  const button = {
+    dataset: { detailsType: entry.type, detailsRow: String(entry.row) },
+    firstChild: { nodeValue: "Details" },
+    setAttribute: (name, value) => {
+      attributes[name] = value;
+    },
+    closest: () => ({
+      classList: { toggle: (name, open) => toggles.push([name, open]) },
+    }),
+  };
+  f.document.querySelectorAll = (selector) =>
+    selector === "[data-details-row]" ? [button] : [];
+  vm.runInContext("bindContent([])", b);
+  button.onclick();
+  assert.equal(attributes["aria-expanded"], "true");
+  assert.equal(button.firstChild.nodeValue, "Less details");
+  const expanded = vm.runInContext("transactionTable(rows(),100,true)", b);
+  assert.match(expanded, /transaction-record details-open/);
+  assert.match(
+    expanded,
+    /aria-controls="transaction-expense-2-category transaction-expense-2-group transaction-expense-2-method transaction-expense-2-detail transaction-expense-2-actions"/,
+  );
+  assert.equal((expanded.match(/data-edit-row=/g) || []).length, 1);
+  button.onclick();
+  assert.equal(attributes["aria-expanded"], "false");
+  assert.equal(button.firstChild.nodeValue, "Details");
+  assert.deepEqual(toggles, [
+    ["details-open", true],
+    ["details-open", false],
+  ]);
+  assert.doesNotMatch(
+    vm.runInContext("transactionTable(rows(),100,false)", b),
+    /data-edit-row=|data-delete-row=/,
+  );
+  assert.doesNotMatch(
+    vm.runInContext("transactionTable(rows(),100,true,false)", b),
+    /Expense group/,
+  );
+});
+
+test("mobile card expansion follows a successful edit but not shifted rows after deletion", async () => {
+  const f = await pullRefreshBrowser(),
+    b = f.browser;
+  vm.runInContext(
+    "var edited=rows()[0];expandedTransactions.add(transactionDetailKey(edited));",
+    b,
+  );
+  const task = vm.runInContext(
+    "refresh({incremental:true,editedTransaction:edited})",
+    b,
+  );
+  const updated = structuredClone(b.data);
+  updated.transactions[0].fingerprint = "after-edit";
+  updated.transactions[0].amount = 444;
+  f.requests[0].success(updated);
+  assert.equal(await task, true);
+  assert.equal(
+    vm.runInContext(
+      "expandedTransactions.has(transactionDetailKey(rows()[0]))",
+      b,
+    ),
+    true,
+  );
+  const read = vm.runInContext("refresh()", b);
+  const shifted = structuredClone(updated);
+  shifted.transactions[0].fingerprint = "after-deleting-another-row";
+  f.requests[1].success(shifted);
+  assert.equal(await read, true);
+  assert.equal(vm.runInContext("expandedTransactions.size", b), 0);
 });
