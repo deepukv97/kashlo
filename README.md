@@ -4,6 +4,8 @@
 
 A private Google Apps Script web app for recording expenses, income, investment contributions, expense groups (events, projects, and trips), and review decisions in Google Sheets.
 
+On phones, use the menu button beside the Kashlo logo to open the left navigation drawer. Choose Overview, Transactions, Investments, Dashboards, Review, or Manage; the drawer closes after selection. Desktop navigation stays in the sidebar.
+
 Complete the welcome screen to set your name, workbook, currency, locale, time zone, and year. Open **Profile & settings** through the sidebar avatar/name, or the profile icon beside the logo on mobile, to update profile and display preferences later. Personal settings are stored in Apps Script Properties; [Config.gs](Config.gs) contains the shared worksheet layout and product defaults.
 
 Start with the [Kashlo — Personal Finances](https://docs.google.com/spreadsheets/d/1DUx9pc11orQe0zhirA-l80z3VWRYEyGoILiw7znh77s/edit) workbook: **File → Make a copy**, then deploy its included Apps Script project as **Me / Only myself** and complete the welcome screen using your copied workbook URL. No code editing is needed for this template. Template access is managed by its owner.

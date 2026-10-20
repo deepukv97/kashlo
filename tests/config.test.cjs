@@ -2042,7 +2042,7 @@ test("Kashlo checkpoints and cash-flow states reflect records without changing f
     Date,
     crypto,
     document: {
-      querySelector: () => ({}),
+      querySelector: () => ({ classList: { toggle() {} }, setAttribute() {} }),
       querySelectorAll: () => [],
       addEventListener() {},
     },
@@ -2147,6 +2147,7 @@ test("Dashboards nests the existing groups and calculates spending comparisons a
         value: "",
         classList: { add() {}, remove() {}, toggle() {} },
         addEventListener() {},
+        setAttribute() {},
       });
     return elements.get(selector);
   };
@@ -3721,4 +3722,158 @@ test("single-pass cash flow keeps monthly and all-recorded totals including refu
   const before = JSON.stringify(browser.entries);
   vm.runInContext("chart();cashFlowDashboard();overview();", browser);
   assert.equal(JSON.stringify(browser.entries), before);
+});
+
+test("phone navigation opens a focus-contained drawer, closes on selection, and resets on desktop", async () => {
+  const elements = new Map(),
+    listeners = new Map();
+  let resize;
+  const media = {
+    matches: true,
+    addEventListener(type, callback) {
+      assert.equal(type, "change");
+      resize = callback;
+    },
+  };
+  let document;
+  const element = (selector) => {
+    if (!elements.has(selector)) {
+      const classes = new Set();
+      const node = {
+        value: "",
+        innerHTML: "",
+        textContent: "",
+        dataset: {},
+        attributes: {},
+        classList: {
+          add(name) {
+            classes.add(name);
+          },
+          remove(name) {
+            classes.delete(name);
+          },
+          toggle(name, on) {
+            on ? classes.add(name) : classes.delete(name);
+          },
+          contains(name) {
+            return classes.has(name);
+          },
+        },
+        addEventListener() {},
+        setAttribute(key, value) {
+          this.attributes[key] = value;
+        },
+        removeAttribute(key) {
+          delete this.attributes[key];
+        },
+        focus() {
+          document.activeElement = this;
+        },
+        setSelectionRange() {},
+      };
+      elements.set(selector, node);
+    }
+    return elements.get(selector);
+  };
+  const views = [
+    "overview",
+    "transactions",
+    "investments",
+    "dashboards",
+    "review",
+    "payments",
+  ];
+  const buttons = views.map((view) => {
+    const button = element("nav:" + view);
+    button.dataset.view = view;
+    return button;
+  });
+  element("#navigationPanel").querySelectorAll = () => [
+    element("#closeMobileMenu"),
+    ...buttons,
+  ];
+  document = {
+    body: element("body"),
+    activeElement: null,
+    querySelector: element,
+    querySelectorAll: (selector) => (selector === "[data-view]" ? buttons : []),
+    addEventListener(type, callback) {
+      listeners.set(type, callback);
+    },
+  };
+  const browser = vm.createContext({
+    Intl,
+    Date,
+    crypto,
+    setTimeout: () => 0,
+    window: {},
+    matchMedia: () => media,
+    document,
+  });
+  vm.runInContext(browserSource, browser);
+  await new Promise((resolve) => setImmediate(resolve));
+  browser.data = JSON.parse(JSON.stringify(fixture().context.getData()));
+  vm.runInContext("state.data=data;render();", browser);
+  const toggle = element("#mobileMenuButton"),
+    panel = element("#navigationPanel"),
+    backdrop = element("#navigationBackdrop");
+  assert.equal(panel.inert, true);
+  toggle.onclick();
+  assert.equal(toggle.attributes["aria-expanded"], "true");
+  assert.equal(panel.inert, false);
+  assert.equal(panel.attributes["aria-modal"], "true");
+  assert.equal(element("#mainWorkspace").inert, true);
+  assert.equal(document.body.classList.contains("mobile-menu-open"), true);
+  assert.equal(backdrop.hidden, false);
+  assert.equal(document.activeElement, element("#closeMobileMenu"));
+  let prevented = 0;
+  buttons.at(-1).focus();
+  listeners.get("keydown")({
+    key: "Tab",
+    preventDefault() {
+      prevented++;
+    },
+  });
+  assert.equal(document.activeElement, element("#closeMobileMenu"));
+  listeners.get("keydown")({
+    key: "Tab",
+    shiftKey: true,
+    preventDefault() {
+      prevented++;
+    },
+  });
+  assert.equal(document.activeElement, buttons.at(-1));
+  listeners.get("keydown")({
+    key: "Escape",
+    preventDefault() {
+      prevented++;
+    },
+  });
+  assert.equal(prevented, 3);
+  assert.equal(toggle.attributes["aria-expanded"], "false");
+  assert.equal(document.activeElement, toggle);
+  for (const [index, view] of views.entries()) {
+    toggle.onclick();
+    buttons[index].onclick();
+    assert.equal(vm.runInContext("state.view", browser), view);
+    assert.equal(toggle.attributes["aria-expanded"], "false");
+    assert.equal(element("#mainWorkspace").inert, false);
+  }
+  toggle.onclick();
+  backdrop.onclick();
+  assert.equal(backdrop.hidden, true);
+  toggle.onclick();
+  element("#closeMobileMenu").onclick();
+  assert.equal(panel.inert, true);
+  toggle.onclick();
+  media.matches = false;
+  resize();
+  assert.equal(panel.inert, false);
+  assert.equal(panel.attributes.role, undefined);
+  assert.equal(document.body.classList.contains("mobile-menu-open"), false);
+  toggle.onclick();
+  assert.equal(toggle.attributes["aria-expanded"], "false");
+  media.matches = true;
+  resize();
+  assert.equal(panel.inert, true);
 });
