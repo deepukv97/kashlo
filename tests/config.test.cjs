@@ -5370,33 +5370,78 @@ test("expanded filter controls exist only on Transactions and preserve the Inves
   ]);
 });
 
-test("custom date controls enforce end-date minimum and clear an end invalidated by a later start", async () => {
+test("phone date picker changes stay as drafts without rebuilding controls until Apply dates", async () => {
   const f = await transactionFiltersBrowser(),
     b = f.browser;
-  const from = { dataset: { transactionFilter: "from" } },
-    to = { dataset: { transactionFilter: "to" } };
+  const from = f.element("#transactionFilter-from"),
+    to = f.element("#transactionFilter-to");
+  from.dataset = { transactionFilter: "from" };
+  to.dataset = { transactionFilter: "to" };
   const original = f.document.querySelectorAll;
   f.document.querySelectorAll = (selector) =>
     selector === "[data-transaction-filter]" ? [from, to] : original(selector);
   vm.runInContext(
-    'state.transactionFilters.period="custom";state.transactionFilters.from="2026-01-15";state.transactionFilters.to="2026-01-21";bindContent([])',
+    'state.transactionFilters.period="custom";state.transactionFilters.from="2026-01-15";state.transactionFilters.to="2026-01-21";render()',
     b,
   );
-  from.onchange({ target: { value: "2026-01-22" } });
-  assert.equal(vm.runInContext("state.transactionFilters.to", b), "");
-  assert.match(
-    f.element("#content").innerHTML,
-    /id="transactionFilter-to"[^>]*min="2026-01-22"/,
+  from.value = "2026-01-15";
+  to.value = "2026-01-21";
+  const html = f.element("#content").innerHTML;
+  from.value = "2026-01-22";
+  from.onchange({ target: from });
+  assert.equal(
+    vm.runInContext("state.transactionFilters.from", b),
+    "2026-01-15",
   );
-  to.onchange({ target: { value: "2026-01-21" } });
-  assert.equal(vm.runInContext("state.transactionFilters.to", b), "");
-  to.onchange({ target: { value: "2026-01-22" } });
+  assert.equal(vm.runInContext("state.transactionDateDraft.to", b), "");
+  assert.equal(to.min, "2026-01-22");
+  assert.equal(to.value, "");
+  assert.equal(
+    f.element("#content").innerHTML,
+    html,
+    "picker controls must not be replaced during date selection",
+  );
+  to.value = "2026-01-21";
+  to.onchange({ target: to });
+  assert.equal(to.value, "");
+  to.value = "2026-01-22";
+  to.onchange({ target: to });
+  assert.equal(vm.runInContext("state.transactionFilters.to", b), "2026-01-21");
+  assert.equal(f.element("#content").innerHTML, html);
+  f.element("#applyTransactionDates").onclick();
+  assert.equal(
+    vm.runInContext("state.transactionFilters.from", b),
+    "2026-01-22",
+  );
   assert.equal(vm.runInContext("state.transactionFilters.to", b), "2026-01-22");
+  assert.equal(vm.runInContext("state.transactionDateDraft", b), null);
   assert.deepEqual(tableKeys(f.element("#content").innerHTML), ["expense:5"]);
-  assert.doesNotMatch(
-    f.element("#content").innerHTML,
-    /Select From and To dates/,
+});
+
+test("Apply dates rejects incomplete, reversed and out-of-year drafts without changing results", async () => {
+  const f = await transactionFiltersBrowser(),
+    b = f.browser;
+  vm.runInContext(
+    'state.transactionFilters.period="custom";state.transactionFilters.from="2026-01-15";state.transactionFilters.to="2026-01-21";render()',
+    b,
   );
+  const html = f.element("#content").innerHTML;
+  for (const [start, end] of [
+    ["", ""],
+    ["2026-01-22", "2026-01-21"],
+    ["2025-12-31", "2026-01-21"],
+    ["2026-01-21", "2027-01-01"],
+  ]) {
+    f.element("#transactionFilter-from").value = start;
+    f.element("#transactionFilter-to").value = end;
+    f.element("#applyTransactionDates").onclick();
+    assert.equal(f.element("#transactionDateError").hidden, false);
+    assert.equal(
+      vm.runInContext("state.transactionFilters.to", b),
+      "2026-01-21",
+    );
+    assert.equal(f.element("#content").innerHTML, html);
+  }
 });
 
 test("Transactions keeps the month selector in the filter panel and uses it to change results", async () => {

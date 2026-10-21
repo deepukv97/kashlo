@@ -1006,6 +1006,15 @@
         min-width: 0;
         align-items: end;
       }
+      .transaction-date-confirm {
+        grid-column: 1 / -1;
+      }
+      .transaction-date-confirm small {
+        display: block;
+        color: var(--muted);
+        font-size: 11px;
+        margin-top: 8px;
+      }
       .transaction-period-fields > :only-child {
         grid-column: 1 / -1;
       }
@@ -2285,6 +2294,7 @@
         lookupType: "expense",
         search: "",
         transactionFilters: defaultTransactionFilters(),
+        transactionDateDraft: null,
         transactionPage: 1,
         transactionPageScope: "",
         trip: "",
@@ -3116,6 +3126,7 @@
           ]
             .sort((a, b) => a.localeCompare(b))
             .map((value) => [value, value]);
+        const draft = state.transactionDateDraft || f;
         const date = (key, label) =>
           "<label>" +
           label +
@@ -3124,11 +3135,11 @@
           '" data-transaction-filter="' +
           key +
           '" min="' +
-          esc(key === "to" && f.from ? f.from : year + "-01-01") +
+          esc(key === "to" && draft.from ? draft.from : year + "-01-01") +
           '" max="' +
           year +
           '-12-31" value="' +
-          esc(f[key]) +
+          esc(draft[key]) +
           '"></label>';
         return (
           '<div class="transaction-filters"><div class="transaction-period-fields">' +
@@ -3167,7 +3178,7 @@
             ? '<div class="transaction-date-fields">' +
               date("from", "From") +
               date("to", "To") +
-              "</div>"
+              '<div class="transaction-date-confirm"><button type="button" class="button light" id="applyTransactionDates">✓ Apply dates</button><small>Choose both dates, then apply to update results.</small><p id="transactionDateError" class="formerror" role="status" hidden></p></div></div>'
             : "") +
           select("category", "Category", [
             ["", "All categories"],
@@ -3264,7 +3275,7 @@
               (from && to ? " warning" : "") +
               '" role="status">' +
               (!from || !to
-                ? "Select From and To dates to see matching transactions. Both dates are included."
+                ? "Select From and To dates, then Apply dates to see matching transactions. Both dates are included."
                 : "Choose a valid start and end date within " +
                   esc(settings()?.year) +
                   ". The end date must be on or after the start date.") +
@@ -4673,27 +4684,64 @@
           .forEach((control) => {
             control.onchange = (e) => {
               const key = control.dataset.transactionFilter;
-              if (key === "month") state.month = Number(e.target.value);
-              else {
-                state.transactionFilters[key] = e.target.value;
+              if (key === "from" || key === "to") {
+                // Native phone pickers emit intermediate changes before Done. Never
+                // rebuild their controls or apply those values while the picker is open.
                 const f = state.transactionFilters;
-                // A later start invalidates the previous end; equal dates remain valid.
-                if (
-                  (key === "from" || key === "to") &&
-                  f.to &&
-                  f.from &&
-                  f.to < f.from
-                )
-                  f.to = "";
+                const draft = (state.transactionDateDraft ||= {
+                  from: f.from,
+                  to: f.to,
+                });
+                draft[key] = e.target.value;
+                if (draft.to && draft.from && draft.to < draft.from)
+                  draft.to = "";
+                const end = $("#transactionFilter-to");
+                end.min = draft.from || settings().year + "-01-01";
+                if (end.value !== draft.to) end.value = draft.to;
+                return;
               }
+              if (key === "month") state.month = Number(e.target.value);
+              else state.transactionFilters[key] = e.target.value;
+              if (key === "period") state.transactionDateDraft = null;
               state.transactionPage = 1;
               render();
             };
           });
+        const applyDates = $("#applyTransactionDates");
+        if (applyDates)
+          applyDates.onclick = () => {
+            const start = $("#transactionFilter-from"),
+              end = $("#transactionFilter-to");
+            const from = start.value,
+              to = end.value,
+              year = settings().year;
+            if (
+              !from ||
+              !to ||
+              from > to ||
+              from < year + "-01-01" ||
+              to > year + "-12-31" ||
+              start.validity?.valid === false ||
+              end.validity?.valid === false
+            ) {
+              const error = $("#transactionDateError");
+              error.textContent =
+                "Choose both dates within " +
+                year +
+                ". To must be on or after From.";
+              error.hidden = false;
+              return;
+            }
+            Object.assign(state.transactionFilters, { from, to });
+            state.transactionDateDraft = null;
+            state.transactionPage = 1;
+            render();
+          };
         const clearFilters = $("#clearTransactionFilters");
         if (clearFilters)
           clearFilters.onclick = () => {
             state.transactionFilters = defaultTransactionFilters();
+            state.transactionDateDraft = null;
             state.search = "";
             state.type = "all";
             state.transactionPage = 1;
@@ -4902,6 +4950,7 @@
           if (previousYear !== data.config.year) {
             state.month = Number(data.config.defaultDate.slice(5, 7)) - 1;
             state.transactionFilters = defaultTransactionFilters();
+            state.transactionDateDraft = null;
             state.trip = "";
           }
           $("#connectionDot").classList.add("live");
