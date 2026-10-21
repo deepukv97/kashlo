@@ -5284,7 +5284,7 @@ test("transaction date presets and inclusive custom dates stay within the config
     );
     assert.match(
       html,
-      end ? /Choose a valid start and end date/ : /Select From and To dates/,
+      end ? /Choose a valid start and end date/ : /Confirm From and To/,
     );
     assert.deepEqual(tableKeys(html), []);
   }
@@ -5357,8 +5357,14 @@ test("expanded filter controls exist only on Transactions and preserve the Inves
   );
   assert.equal(f.element("#monthSelect").hidden, true);
   const html = f.element("#content").innerHTML;
-  assert.match(html, /type="date" id="transactionFilter-from"/);
-  assert.match(html, /type="date" id="transactionFilter-to"/);
+  assert.match(
+    html,
+    /id="transactionFilter-from" data-transaction-calendar="from"/,
+  );
+  assert.match(
+    html,
+    /id="transactionFilter-to" data-transaction-calendar="to"/,
+  );
   vm.runInContext('state.view="investments";state.month=3;render()', b);
   assert.equal(f.element("#monthSelect").hidden, false);
   assert.doesNotMatch(
@@ -5370,78 +5376,154 @@ test("expanded filter controls exist only on Transactions and preserve the Inves
   ]);
 });
 
-test("phone date picker changes stay as drafts without rebuilding controls until Apply dates", async () => {
-  const f = await transactionFiltersBrowser(),
-    b = f.browser;
-  const from = f.element("#transactionFilter-from"),
-    to = f.element("#transactionFilter-to");
-  from.dataset = { transactionFilter: "from" };
-  to.dataset = { transactionFilter: "to" };
+async function calendarBrowser() {
+  const f = await transactionFiltersBrowser();
   const original = f.document.querySelectorAll;
-  f.document.querySelectorAll = (selector) =>
-    selector === "[data-transaction-filter]" ? [from, to] : original(selector);
+  f.document.querySelectorAll = (selector) => {
+    if (selector !== "[data-calendar-date]") return original(selector);
+    return [
+      ...f
+        .element("#modalContainer")
+        .innerHTML.matchAll(
+          /id="(calendarDay-\d+)" data-calendar-date="([^"]+)"[^>]*>/g,
+        ),
+    ].map((match) => {
+      const button = f.element("#" + match[1]);
+      button.id = match[1];
+      button.dataset = { calendarDate: match[2] };
+      button.disabled = match[0].includes(" disabled");
+      return button;
+    });
+  };
   vm.runInContext(
-    'state.transactionFilters.period="custom";state.transactionFilters.from="2026-01-15";state.transactionFilters.to="2026-01-21";render()',
-    b,
+    'state.transactionFilters.period="custom";render()',
+    f.browser,
   );
-  from.value = "2026-01-15";
-  to.value = "2026-01-21";
-  const html = f.element("#content").innerHTML;
-  from.value = "2026-01-22";
-  from.onchange({ target: from });
+  return f;
+}
+
+test("calendar day taps remain pending until its checkmark, then both confirmed dates filter automatically", async () => {
+  const f = await calendarBrowser(),
+    b = f.browser;
+  vm.runInContext('openTransactionCalendar("from")', b);
+  assert.equal(vm.runInContext("state.transactionFilters.from", b), "");
+  assert.doesNotMatch(
+    f.element("#modalContainer").innerHTML,
+    /aria-pressed="true"/,
+  );
+  assert.doesNotMatch(
+    f.element("#content").innerHTML,
+    /Apply dates|applyTransactionDates/,
+  );
+  f.element("#calendarMonth").onchange({ target: { value: "0" } });
+  const before = f.element("#content").innerHTML;
+  f.element("#calendarDay-15").onclick();
+  assert.equal(vm.runInContext("state.transactionFilters.from", b), "");
+  assert.equal(f.element("#content").innerHTML, before);
+  assert.match(
+    f.element("#modalContainer").innerHTML,
+    /data-calendar-date="2026-01-15"[^>]*aria-pressed="true"/,
+  );
+  f.element("#confirmCalendar").onclick();
   assert.equal(
     vm.runInContext("state.transactionFilters.from", b),
     "2026-01-15",
   );
-  assert.equal(vm.runInContext("state.transactionDateDraft.to", b), "");
-  assert.equal(to.min, "2026-01-22");
-  assert.equal(to.value, "");
-  assert.equal(
-    f.element("#content").innerHTML,
-    html,
-    "picker controls must not be replaced during date selection",
-  );
-  to.value = "2026-01-21";
-  to.onchange({ target: to });
-  assert.equal(to.value, "");
-  to.value = "2026-01-22";
-  to.onchange({ target: to });
+  assert.deepEqual(tableKeys(f.element("#content").innerHTML), []);
+  vm.runInContext('openTransactionCalendar("to")', b);
+  f.element("#calendarDay-21").onclick();
+  assert.equal(vm.runInContext("state.transactionFilters.to", b), "");
+  f.element("#confirmCalendar").onclick();
   assert.equal(vm.runInContext("state.transactionFilters.to", b), "2026-01-21");
-  assert.equal(f.element("#content").innerHTML, html);
-  f.element("#applyTransactionDates").onclick();
+  assert.deepEqual(tableKeys(f.element("#content").innerHTML), [
+    "expense:4",
+    "expense:3",
+  ]);
+});
+
+test("calendar Cancel, Escape and pending Reset leave confirmed dates and results unchanged", async () => {
+  const f = await calendarBrowser(),
+    b = f.browser;
+  vm.runInContext(
+    'state.transactionFilters.from="2026-01-15";state.transactionFilters.to="2026-01-21";render();openTransactionCalendar("from")',
+    b,
+  );
+  const before = f.element("#content").innerHTML;
+  f.element("#calendarDay-22").onclick();
+  f.element("#cancelCalendar").onclick();
+  assert.equal(
+    vm.runInContext("state.transactionFilters.from", b),
+    "2026-01-15",
+  );
+  assert.equal(f.element("#content").innerHTML, before);
+  vm.runInContext('openTransactionCalendar("from")', b);
+  f.element("#resetCalendar").onclick();
+  assert.equal(
+    vm.runInContext("state.transactionFilters.from", b),
+    "2026-01-15",
+  );
+  f.element("#transactionCalendar").onkeydown({
+    key: "Escape",
+    preventDefault() {},
+    stopPropagation() {},
+  });
+  assert.equal(f.element("#modalContainer").innerHTML, "");
+  assert.equal(f.element("#content").innerHTML, before);
+  vm.runInContext('openTransactionCalendar("from")', b);
+  f.element("#resetCalendar").onclick();
+  f.element("#confirmCalendar").onclick();
+  assert.equal(vm.runInContext("state.transactionFilters.from", b), "");
+});
+
+test("calendar To limits, equal dates and configured leap year boundaries are enforced", async () => {
+  const f = await calendarBrowser(),
+    b = f.browser;
+  vm.runInContext(
+    'state.transactionFilters.from="2026-01-22";openTransactionCalendar("to")',
+    b,
+  );
+  assert.equal(f.element("#calendarDay-21").disabled, true);
+  f.element("#calendarDay-21").onclick();
+  assert.doesNotMatch(
+    f.element("#modalContainer").innerHTML,
+    /aria-pressed="true"/,
+  );
+  assert.equal(f.element("#calendarDay-22").disabled, false);
+  f.element("#calendarDay-22").onclick();
+  f.element("#confirmCalendar").onclick();
+  assert.deepEqual(tableKeys(f.element("#content").innerHTML), ["expense:5"]);
+  vm.runInContext(
+    'state.data.config.year=2028;state.transactionFilters.from="2028-02-01";state.transactionFilters.to="";openTransactionCalendar("to")',
+    b,
+  );
+  assert.match(
+    f.element("#modalContainer").innerHTML,
+    /data-calendar-date="2028-02-29"/,
+  );
+  f.element("#calendarMonth").onchange({ target: { value: "11" } });
+  assert.match(
+    f.element("#modalContainer").innerHTML,
+    /id="calendarNext"[^>]* disabled/,
+  );
+  f.element("#calendarNext").onclick();
+  assert.doesNotMatch(f.element("#modalContainer").innerHTML, /2029/);
+});
+
+test("a later From clears an invalid To only after the calendar checkmark", async () => {
+  const f = await calendarBrowser(),
+    b = f.browser;
+  vm.runInContext(
+    'state.transactionFilters.from="2026-01-15";state.transactionFilters.to="2026-01-21";render();openTransactionCalendar("from")',
+    b,
+  );
+  f.element("#calendarDay-22").onclick();
+  assert.equal(vm.runInContext("state.transactionFilters.to", b), "2026-01-21");
+  f.element("#confirmCalendar").onclick();
   assert.equal(
     vm.runInContext("state.transactionFilters.from", b),
     "2026-01-22",
   );
-  assert.equal(vm.runInContext("state.transactionFilters.to", b), "2026-01-22");
-  assert.equal(vm.runInContext("state.transactionDateDraft", b), null);
-  assert.deepEqual(tableKeys(f.element("#content").innerHTML), ["expense:5"]);
-});
-
-test("Apply dates rejects incomplete, reversed and out-of-year drafts without changing results", async () => {
-  const f = await transactionFiltersBrowser(),
-    b = f.browser;
-  vm.runInContext(
-    'state.transactionFilters.period="custom";state.transactionFilters.from="2026-01-15";state.transactionFilters.to="2026-01-21";render()',
-    b,
-  );
-  const html = f.element("#content").innerHTML;
-  for (const [start, end] of [
-    ["", ""],
-    ["2026-01-22", "2026-01-21"],
-    ["2025-12-31", "2026-01-21"],
-    ["2026-01-21", "2027-01-01"],
-  ]) {
-    f.element("#transactionFilter-from").value = start;
-    f.element("#transactionFilter-to").value = end;
-    f.element("#applyTransactionDates").onclick();
-    assert.equal(f.element("#transactionDateError").hidden, false);
-    assert.equal(
-      vm.runInContext("state.transactionFilters.to", b),
-      "2026-01-21",
-    );
-    assert.equal(f.element("#content").innerHTML, html);
-  }
+  assert.equal(vm.runInContext("state.transactionFilters.to", b), "");
 });
 
 test("Transactions keeps the month selector in the filter panel and uses it to change results", async () => {

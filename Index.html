@@ -1006,19 +1006,86 @@
         min-width: 0;
         align-items: end;
       }
-      .transaction-date-confirm {
-        grid-column: 1 / -1;
+      .transaction-calendar-trigger {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        width: 100%;
+        min-width: 0;
+        min-height: 46px;
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        color: var(--ink);
+        background: #1b201d;
+        text-align: left;
+        gap: 6px;
       }
-      .transaction-date-confirm small {
-        display: block;
+      .transaction-calendar-trigger span:first-child {
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+      .date-calendar {
+        width: 390px;
+        padding: 22px;
+      }
+      .calendar-navigation {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 18px;
+      }
+      .calendar-navigation select {
+        flex: 1;
+        min-width: 0;
+        background: var(--canvas);
+        color: var(--ink);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 10px;
+      }
+      .calendar-grid {
+        display: grid;
+        grid-template-columns: repeat(7, minmax(0, 1fr));
+        gap: 3px;
+      }
+      .calendar-grid .calendar-weekday {
+        text-align: center;
+        font-size: 10px;
         color: var(--muted);
-        font-size: 11px;
-        margin-top: 8px;
+        padding-bottom: 8px;
+      }
+      .calendar-day {
+        min-height: 44px;
+        border: 0;
+        border-radius: 50%;
+        background: transparent;
+        color: var(--ink);
+      }
+      .calendar-day[aria-pressed="true"] {
+        background: var(--green);
+        color: var(--canvas);
+        font-weight: 700;
+      }
+      .calendar-day:disabled {
+        cursor: default;
+        opacity: 0.3;
+      }
+      .calendar-footer {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+        margin-top: 22px;
+      }
+      .calendar-footer button {
+        min-height: 44px;
       }
       .transaction-period-fields > :only-child {
         grid-column: 1 / -1;
       }
-      .transaction-filters label {
+      .transaction-filters label,
+      .transaction-date-field {
         display: grid;
         gap: 7px;
         min-width: 0;
@@ -1036,14 +1103,6 @@
         border-radius: 10px;
         color: var(--ink);
         background: #1b201d;
-      }
-      .transaction-filters input[type="date"] {
-        appearance: none;
-        -webkit-appearance: none;
-      }
-      .transaction-filters input::-webkit-date-and-time-value {
-        text-align: left;
-        min-height: 1.4em;
       }
       @media (max-width: 760px) {
         .transaction-filters {
@@ -2294,7 +2353,6 @@
         lookupType: "expense",
         search: "",
         transactionFilters: defaultTransactionFilters(),
-        transactionDateDraft: null,
         transactionPage: 1,
         transactionPageScope: "",
         trip: "",
@@ -3089,6 +3147,152 @@
           ),
         ].sort((a, b) => a.localeCompare(b));
       }
+      // The calendar owns its confirmation button; tapping a day never commits it.
+      // Browser-native date inputs do not expose their Done/checkmark consistently.
+      function openTransactionCalendar(key) {
+        if (state.saveBusy || !settings() || !["from", "to"].includes(key))
+          return;
+        const f = state.transactionFilters,
+          year = settings().year;
+        const min = key === "to" && f.from ? f.from : year + "-01-01";
+        let pending = f[key] || "";
+        const initial =
+          pending ||
+          (key === "to" && f.from) ||
+          settings().defaultDate ||
+          year + "-01-01";
+        let month = Math.max(
+          Number(min.slice(5, 7)) - 1,
+          Number(initial.slice(5, 7)) - 1,
+        );
+        const close = () => {
+          $("#modalContainer").innerHTML = "";
+          $("#transactionFilter-" + key)?.focus({ preventScroll: true });
+        };
+        const draw = (focus = "#cancelCalendar") => {
+          const count = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+          const first = new Date(Date.UTC(year, month, 1)).getUTCDay();
+          const weekday = new Intl.DateTimeFormat(settings().locale, {
+            weekday: "short",
+            timeZone: "UTC",
+          });
+          let cells = Array.from(
+            { length: 7 },
+            (_, i) =>
+              '<span class="calendar-weekday">' +
+              esc(weekday.format(new Date(Date.UTC(2023, 0, 1 + i)))) +
+              "</span>",
+          ).join("");
+          cells += '<span aria-hidden="true"></span>'.repeat(first);
+          for (let day = 1; day <= count; day++) {
+            const value =
+              monthPrefix(month) + "-" + String(day).padStart(2, "0");
+            cells +=
+              '<button type="button" class="calendar-day" id="calendarDay-' +
+              day +
+              '" data-calendar-date="' +
+              value +
+              '" aria-label="' +
+              esc(dateLabel(value)) +
+              '" aria-pressed="' +
+              (value === pending) +
+              '"' +
+              (value < min ? " disabled" : "") +
+              ">" +
+              day +
+              "</button>";
+          }
+          $("#modalContainer").innerHTML =
+            '<div class="modal-backdrop"><section class="modal date-calendar" id="transactionCalendar" role="dialog" aria-modal="true" aria-labelledby="calendarTitle"><div class="modal-head"><h2 id="calendarTitle">' +
+            (key === "from" ? "From date" : "To date") +
+            '</h2><button type="button" class="close" id="cancelCalendar" aria-label="Cancel date selection">×</button></div><div class="calendar-navigation"><button type="button" class="iconbtn" id="calendarPrevious" aria-label="Previous month"' +
+            (month <= Number(min.slice(5, 7)) - 1 ? " disabled" : "") +
+            '>‹</button><select id="calendarMonth" aria-label="Calendar month">' +
+            MONTHS.map(
+              (name, i) =>
+                '<option value="' +
+                i +
+                '"' +
+                (i === month ? " selected" : "") +
+                (i < Number(min.slice(5, 7)) - 1 ? " disabled" : "") +
+                ">" +
+                esc(name + " " + year) +
+                "</option>",
+            ).join("") +
+            '</select><button type="button" class="iconbtn" id="calendarNext" aria-label="Next month"' +
+            (month === 11 ? " disabled" : "") +
+            '>›</button></div><div class="calendar-grid">' +
+            cells +
+            '</div><p class="crumb" role="status">' +
+            (pending ? esc(dateLabel(pending)) : "Choose a date") +
+            '</p><div class="calendar-footer"><button type="button" class="button outline" id="resetCalendar">Reset</button><button type="button" class="button" id="confirmCalendar" aria-label="Confirm date">✓</button></div></section></div>';
+          $("#cancelCalendar").onclick = close;
+          $("#calendarPrevious").onclick = () => {
+            if (month > Number(min.slice(5, 7)) - 1) {
+              month--;
+              draw("#calendarPrevious");
+            }
+          };
+          $("#calendarNext").onclick = () => {
+            if (month < 11) {
+              month++;
+              draw("#calendarNext");
+            }
+          };
+          $("#calendarMonth").onchange = (e) => {
+            month = Number(e.target.value);
+            draw();
+          };
+          document
+            .querySelectorAll("[data-calendar-date]")
+            .forEach((button) => {
+              button.onclick = () => {
+                if (button.disabled || button.dataset.calendarDate < min)
+                  return;
+                pending = button.dataset.calendarDate;
+                draw("#" + button.id);
+              };
+            });
+          $("#resetCalendar").onclick = () => {
+            pending = "";
+            draw("#resetCalendar");
+          };
+          $("#confirmCalendar").onclick = () => {
+            if (pending && (pending < min || pending > year + "-12-31")) return;
+            f[key] = pending;
+            if (f.to && f.from && f.to < f.from) f.to = "";
+            state.transactionPage = 1;
+            close();
+            render();
+            $("#transactionFilter-" + key)?.focus({ preventScroll: true });
+          };
+          $("#transactionCalendar").onkeydown = (event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              event.stopPropagation();
+              close();
+            }
+            if (event.key === "Tab") {
+              const controls = [
+                ...$("#transactionCalendar").querySelectorAll(
+                  "button:not(:disabled),select",
+                ),
+              ];
+              const first = controls[0],
+                last = controls[controls.length - 1];
+              if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last.focus();
+              } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first.focus();
+              }
+            }
+          };
+          $(focus)?.focus({ preventScroll: true });
+        };
+        draw();
+      }
       function transactionFilterControls() {
         const f = state.transactionFilters,
           year = settings()?.year || new Date().getFullYear();
@@ -3126,21 +3330,24 @@
           ]
             .sort((a, b) => a.localeCompare(b))
             .map((value) => [value, value]);
-        const draft = state.transactionDateDraft || f;
         const date = (key, label) =>
-          "<label>" +
+          '<div class="transaction-date-field"><span class="calendar-field-label" id="transactionDateLabel-' +
+          key +
+          '">' +
           label +
-          '<input type="date" id="transactionFilter-' +
+          '</span><button type="button" class="transaction-calendar-trigger" id="transactionFilter-' +
           key +
-          '" data-transaction-filter="' +
+          '" data-transaction-calendar="' +
           key +
-          '" min="' +
-          esc(key === "to" && draft.from ? draft.from : year + "-01-01") +
-          '" max="' +
-          year +
-          '-12-31" value="' +
-          esc(draft[key]) +
-          '"></label>';
+          '" aria-haspopup="dialog" aria-labelledby="transactionDateLabel-' +
+          key +
+          " transactionDateValue-" +
+          key +
+          '"><span id="transactionDateValue-' +
+          key +
+          '">' +
+          (f[key] ? esc(dateLabel(f[key])) : "Choose date") +
+          '</span><span aria-hidden="true">▦</span></button></div>';
         return (
           '<div class="transaction-filters"><div class="transaction-period-fields">' +
           select("period", "Date range", [
@@ -3178,7 +3385,7 @@
             ? '<div class="transaction-date-fields">' +
               date("from", "From") +
               date("to", "To") +
-              '<div class="transaction-date-confirm"><button type="button" class="button light" id="applyTransactionDates">✓ Apply dates</button><small>Choose both dates, then apply to update results.</small><p id="transactionDateError" class="formerror" role="status" hidden></p></div></div>'
+              "</div>"
             : "") +
           select("category", "Category", [
             ["", "All categories"],
@@ -3275,7 +3482,7 @@
               (from && to ? " warning" : "") +
               '" role="status">' +
               (!from || !to
-                ? "Select From and To dates, then Apply dates to see matching transactions. Both dates are included."
+                ? "Confirm From and To using the checkmark in each calendar. Both dates are included."
                 : "Choose a valid start and end date within " +
                   esc(settings()?.year) +
                   ". The end date must be on or after the start date.") +
@@ -4684,64 +4891,22 @@
           .forEach((control) => {
             control.onchange = (e) => {
               const key = control.dataset.transactionFilter;
-              if (key === "from" || key === "to") {
-                // Native phone pickers emit intermediate changes before Done. Never
-                // rebuild their controls or apply those values while the picker is open.
-                const f = state.transactionFilters;
-                const draft = (state.transactionDateDraft ||= {
-                  from: f.from,
-                  to: f.to,
-                });
-                draft[key] = e.target.value;
-                if (draft.to && draft.from && draft.to < draft.from)
-                  draft.to = "";
-                const end = $("#transactionFilter-to");
-                end.min = draft.from || settings().year + "-01-01";
-                if (end.value !== draft.to) end.value = draft.to;
-                return;
-              }
               if (key === "month") state.month = Number(e.target.value);
               else state.transactionFilters[key] = e.target.value;
-              if (key === "period") state.transactionDateDraft = null;
               state.transactionPage = 1;
               render();
             };
           });
-        const applyDates = $("#applyTransactionDates");
-        if (applyDates)
-          applyDates.onclick = () => {
-            const start = $("#transactionFilter-from"),
-              end = $("#transactionFilter-to");
-            const from = start.value,
-              to = end.value,
-              year = settings().year;
-            if (
-              !from ||
-              !to ||
-              from > to ||
-              from < year + "-01-01" ||
-              to > year + "-12-31" ||
-              start.validity?.valid === false ||
-              end.validity?.valid === false
-            ) {
-              const error = $("#transactionDateError");
-              error.textContent =
-                "Choose both dates within " +
-                year +
-                ". To must be on or after From.";
-              error.hidden = false;
-              return;
-            }
-            Object.assign(state.transactionFilters, { from, to });
-            state.transactionDateDraft = null;
-            state.transactionPage = 1;
-            render();
-          };
+        document
+          .querySelectorAll("[data-transaction-calendar]")
+          .forEach((button) => {
+            button.onclick = () =>
+              openTransactionCalendar(button.dataset.transactionCalendar);
+          });
         const clearFilters = $("#clearTransactionFilters");
         if (clearFilters)
           clearFilters.onclick = () => {
             state.transactionFilters = defaultTransactionFilters();
-            state.transactionDateDraft = null;
             state.search = "";
             state.type = "all";
             state.transactionPage = 1;
@@ -4950,7 +5115,6 @@
           if (previousYear !== data.config.year) {
             state.month = Number(data.config.defaultDate.slice(5, 7)) - 1;
             state.transactionFilters = defaultTransactionFilters();
-            state.transactionDateDraft = null;
             state.trip = "";
           }
           $("#connectionDot").classList.add("live");
