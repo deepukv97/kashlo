@@ -1566,7 +1566,7 @@ test("payment names delete and re-add without changing journal history; methods 
   assert.throws(
     () =>
       api.addTransaction({ ...payload, requestId: "reject_archived_payment" }),
-    /available payment name/,
+    /available payment account \/ app/,
   );
   manage("add", "Bank transfer", "SBI Savings");
   assert.equal(api.getData().paymentOptions["Bank transfer"][0], "SBI Savings");
@@ -1597,13 +1597,13 @@ test("payment names delete and re-add without changing journal history; methods 
         paymentDetail: "",
         requestId: "missing_upi_app_name",
       }),
-    /available payment name/,
+    /available payment account \/ app/,
   );
   assert.throws(
     () => manage("add", "Cash", "Wallet"),
-    /Choose an available payment type/,
+    /Choose an available payment method/,
   );
-  assert.throws(() => manage("add", "Card", " "), /enter a name/);
+  assert.throws(() => manage("add", "Card", " "), /enter an account \/ app name/);
   const current = api.getData().transactions.find((t) => t.row === bank.row);
   f.expense.cells[bank.row - 1][c.paymentDetail - 1] = "Changed directly";
   assert.throws(
@@ -1747,9 +1747,9 @@ test("payment UI manages names and conditionally requires details without losing
   element("#entryPaymentMethod").onchange();
   assert.equal(element("#entryPaymentMethod").value, "");
   for (const [method, label, name] of [
-    ["Bank transfer", "Which bank?", "Savings"],
-    ["Card", "Which card?", "Visa"],
-    ["UPI", "Which UPI app?", "PhonePe"],
+    ["Bank transfer", "Payment account / app", "Savings"],
+    ["Card", "Payment account / app", "Visa"],
+    ["UPI", "Payment account / app", "PhonePe"],
   ]) {
     element("#entryPaymentMethod").value = method;
     element("#entryPaymentMethod").onchange();
@@ -1876,7 +1876,7 @@ test("payment UI manages names and conditionally requires details without losing
     assert.doesNotMatch(element("#content").innerHTML, /Google Pay/);
     assert.match(
       element("#content").innerHTML,
-      /id="transaction-[^"]+-method"><span class="mobile-field-label">Payment method<\/span>UPI<\/td><td[^>]+id="transaction-[^"]+-detail"><span class="mobile-field-label">Bank \/ card \/ UPI app<\/span><\/td>/,
+      /id="transaction-[^"]+-method"><span class="mobile-field-label">Payment method<\/span>UPI<\/td><td[^>]+id="transaction-[^"]+-detail"><span class="mobile-field-label">Payment account \/ app<\/span><\/td>/,
     );
   }
   browser.entry = JSON.parse(JSON.stringify(entry));
@@ -2648,7 +2648,7 @@ test("optional payment saves in each spending journal and can be cleared on an e
           paymentDetail: "",
           requestId: "missing_name_" + type,
         }),
-      /available payment name/,
+      /available payment account \/ app/,
     );
   }
 });
@@ -2731,7 +2731,7 @@ test("custom payment types persist separately, deduplicate, and work with option
   assert.equal(api.getData().paymentOptions.Wallet.length, 0);
   assert.throws(
     () => api.addPaymentType({ name: " ", requestId: "empty_custom_type" }),
-    /Enter a payment type/,
+    /Enter a payment method/,
   );
   assert.throws(
     () =>
@@ -2739,7 +2739,7 @@ test("custom payment types persist separately, deduplicate, and work with option
         name: "X".repeat(61),
         requestId: "long_custom_type",
       }),
-    /Enter a payment type/,
+    /Enter a payment method/,
   );
   assert.throws(
     () =>
@@ -2747,7 +2747,7 @@ test("custom payment types persist separately, deduplicate, and work with option
         name: "__proto__",
         requestId: "reserved_custom_type",
       }),
-    /Enter a payment type/,
+    /Enter a payment method/,
   );
   f.setActiveEmail("other@example.test");
   assert.throws(
@@ -5851,7 +5851,7 @@ test("Manage rejects stale choices, conflicts, unsafe names and another workspac
   assert.throws(() => api.manageChoice({ kind: "paymentType", name: "UPI", action: "edit", newName: "card",
     requestId: "conflicting_type_name" }), /already exists/);
   assert.throws(() => api.manageChoice({ kind: "paymentType", name: "UPI", action: "edit", newName: "__proto__",
-    requestId: "unsafe_managed_type" }), /another payment type/);
+    requestId: "unsafe_managed_type" }), /another payment method/);
   api.manageChoice({ ...edit, previousCategory: "Food" });
   assert.throws(() => api.manageChoice({ ...edit, previousCategory: "Food", requestId: "obsolete_master_choice" }), /changed/);
   f.setActiveEmail("different@example.test");

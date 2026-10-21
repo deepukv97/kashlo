@@ -2004,7 +2004,7 @@ function addPaymentType(input) {
     name.length > 60 ||
     ["__proto__", "constructor", "prototype"].includes(normalized_(name))
   )
-    throw new Error("Enter a payment type name up to 60 characters.");
+    throw new Error("Enter a payment method name up to 60 characters.");
   return withWorkspaceWrite_(input, () => {
     const book = book_();
     const records = ensurePaymentStorage_(book);
@@ -2084,7 +2084,7 @@ function paymentValues_(book, input) {
       r[c.paymentDetail - 1] === paymentDetail;
   }
   if (!active && !retained)
-    throw new Error("Choose an available payment name.");
+    throw new Error("Choose an available payment account / app.");
   return { paymentMethod, paymentDetail };
 }
 // Delete reusable payment choices from the master sheet; journal history stays intact.
@@ -2095,19 +2095,19 @@ function managePaymentOption(input) {
     name = String(input.name || "").trim();
   if (!method || !name || name.length > 100)
     throw new Error(
-      "Choose a payment type and enter a name up to 100 characters.",
+      "Choose a payment method and enter an account / app name up to 100 characters.",
     );
   return withWorkspaceWrite_(input, () => {
     const book = book_();
     const records = ensurePaymentStorage_(book);
     if (method === "Cash" || !paymentMethods_(book).includes(method))
-      throw new Error("Choose an available payment type.");
+      throw new Error("Choose an available payment method.");
     const existing = records.find(
       (r) => r.method === method && normalized_(r.name) === normalized_(name),
     );
     if (input.action === "remove" && !existing)
       throw new Error(
-        "This payment name is no longer available. Refresh the app.",
+        "This payment account / app is no longer available. Refresh the app.",
       );
     const sheet = book.getSheetByName(workspaceConfig_().paymentMethodsSheet);
     if (input.action === "remove") {
@@ -2343,13 +2343,13 @@ function managedChoicePlan_(input) {
     throw new Error("Enter a name up to " + limit + " characters.");
   if (input.kind === "paymentType" &&
       ["__proto__", "constructor", "prototype"].includes(normalized_(newName)))
-    throw new Error("Choose another payment type name.");
+    throw new Error("Choose another payment method name.");
   const same = (a, b) => normalized_(a) === normalized_(b);
   const plan = { book, name, newName };
   if (input.kind === "paymentType" || input.kind === "paymentName") {
     const methods = paymentMethods_(book), records = paymentRecords_(book);
     const method = input.kind === "paymentType" ? name : String(input.method || "");
-    if (!methods.includes(method)) throw new Error("This payment type changed. Refresh the app.");
+    if (!methods.includes(method)) throw new Error("This payment method changed. Refresh the app.");
     const existing = input.kind === "paymentType" ? methods : records
       .filter(r => r.method === method && r.active).map(r => r.name);
     if (!existing.includes(name)) throw new Error("This choice changed. Refresh the app.");
@@ -2357,7 +2357,7 @@ function managedChoicePlan_(input) {
       throw new Error("That name already exists.");
     if (input.kind === "paymentType" && input.action === "edit" && newName === "Cash" &&
         records.some(record => record.method === method && !record.removed))
-      throw new Error("Remove this type's saved names before renaming it to Cash.");
+      throw new Error("Remove this method's saved accounts/apps before renaming it to Cash.");
     return { ...plan, methods, records, method };
   }
   if (!Object.prototype.hasOwnProperty.call(workspaceConfig_().lookupSheets, input.type))
