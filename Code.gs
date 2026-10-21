@@ -965,6 +965,13 @@ function ensureReviewCapacity_(book) {
     );
 }
 
+// Missing labels must reach Review even when a workbook's check formulas are absent.
+function missingLabelIssues_(values) {
+  const c = workspaceConfig_().layout.journal, issues = [];
+  if (!String(values[c.description - 1] || "").trim()) issues.push("Missing description");
+  if (!String(values[c.category - 1] || "").trim()) issues.push("Missing category");
+  return issues;
+}
 // Read-only endpoint used for the initial load and manual refresh.
 // Return transactions, review issues, dropdown options, mappings, month statuses, and the sheet URL.
 // Sheet column numbers are one-based; arrays returned by getValues are zero-based.
@@ -1013,8 +1020,13 @@ function dataSnapshot_() {
         issues = [];
       if (r[columns.duplicateIssue - 1] && decision !== "Okay")
         issues.push(String(r[columns.duplicateIssue - 1]));
+      const missing = missingLabelIssues_(r);
+      missing.forEach(issue => { if (!issues.includes(issue)) issues.push(issue); });
       columns.otherIssues.forEach((column) => {
-        if (r[column - 1]) issues.push(String(r[column - 1]));
+        const issue = String(r[column - 1] || "");
+        const descriptionExplainsIncomplete = issue === "Incomplete entry" && missing.includes("Missing description") &&
+          typeof r[columns.amount - 1] === "number" && !!date;
+        if (issue && !descriptionExplainsIncomplete && !issues.includes(issue)) issues.push(issue);
       });
       // Keep the physical sheet row for later review updates. Read B/C/F/G/H as
       //  description/amount/date/category/notes; read trip I only for expenses.
@@ -1078,8 +1090,7 @@ function dataSnapshot_() {
     mappings[type] = rows
       .filter(
         (r) =>
-          r[lookupColumns.description - 1].trim() &&
-          r[lookupColumns.category - 1].trim(),
+          r[lookupColumns.description - 1].trim(),
       )
       .map((r) => ({
         description: r[lookupColumns.description - 1].trim(),
@@ -1707,7 +1718,8 @@ function bulkReview(input) {
             pending:
               !!values[c.duplicateIssue - 1] &&
               values[c.decision - 1] !== "Okay",
-            other: c.otherIssues.some((column) => !!values[column - 1]),
+            other: missingLabelIssues_(values).length > 0 ||
+              c.otherIssues.some((column) => !!values[column - 1]),
           });
         });
     });
@@ -1935,13 +1947,18 @@ function ensurePaymentStorage_(book) {
     replaceChoiceColumn_(types, 1, paymentMethods_(book), 2);
     literal_(types.getRange(1, 1), "Payment type");
   }
-  // Migrate previously removed choices without touching journal history.
+  // Migrate explicit legacy removals and clear their account references.
   // Delete bottom-up so one deletion cannot change another row's position.
   const records = paymentRecords_(book);
   const removed = records
     .filter((record) => record.removed)
     .sort((a, b) => b.row - a.row);
-  removed.forEach((record) => sheet.deleteRow(record.row));
+  removed.forEach((record) => {
+    if (!records.some(other => other.active && normalized_(other.method) === normalized_(record.method) &&
+        normalized_(other.name) === normalized_(record.name)))
+      clearPaymentReferences_(paymentReferencePlan_(book, record.method, record.name), false);
+    sheet.deleteRow(record.row);
+  });
   // A deletion shifts physical row numbers; reread only when migration changed the sheet.
   return removed.length ? paymentRecords_(book) : records;
 }
@@ -2085,7 +2102,40 @@ function paymentValues_(book, input) {
     throw new Error("Choose an available payment account / app.");
   return { paymentMethod, paymentDetail };
 }
-// Delete reusable payment choices from the master sheet; journal history stays intact.
+// Read matching payment references under the write lock. A missing name means
+// the whole method is being removed; otherwise clear only that account/app field.
+function paymentReferencePlan_(book, method, name) {
+  const c = workspaceConfig_().layout.journal;
+  const firstColumn = Math.min(c.paymentMethod, c.paymentDetail);
+  const lastColumn = Math.max(c.paymentMethod, c.paymentDetail);
+  return Object.keys(workspaceConfig_().sheets).map(type => {
+    const sheet = sheet_(book, type);
+    if (sheet.getMaxColumns() < firstColumn) return { sheet, rows: [] };
+    const width = Math.min(lastColumn, sheet.getMaxColumns()) - firstColumn + 1;
+    const values = sheet.getRange(c.firstDataRow, firstColumn,
+      sheet.getMaxRows() - c.firstDataRow + 1, width).getDisplayValues();
+    const rows = values.flatMap((row, index) =>
+      normalized_(row[c.paymentMethod - firstColumn]) === normalized_(method) &&
+      (name === undefined || normalized_(row[c.paymentDetail - firstColumn]) === normalized_(name))
+        ? [c.firstDataRow + index] : []);
+    return { sheet, rows };
+  });
+}
+function clearPaymentReferences_(plan, wholeMethod) {
+  const c = workspaceConfig_().layout.journal;
+  const columns = wholeMethod ? [c.paymentMethod, c.paymentDetail] : [c.paymentDetail];
+  // Group adjacent columns only; custom layouts may have unrelated fields between them.
+  const blocks = wholeMethod && Math.abs(c.paymentMethod - c.paymentDetail) > 1
+    ? [{ start: c.paymentDetail, count: 1 }, { start: c.paymentMethod, count: 1 }]
+    : consecutiveRows_(columns);
+  // For separated fields, keep the method until its detail is cleared. A failed
+  // second write can then still find the remaining references after refresh.
+  for (const { sheet, rows } of plan)
+    for (const { start, count } of consecutiveRows_(rows))
+      for (const block of blocks)
+        sheet.getRange(start, block.start, count, block.count).clearContent();
+}
+// Remove reusable payment accounts/apps and their transaction references; keep financial rows.
 function managePaymentOption(input) {
   if (!input || !["add", "remove"].includes(input.action))
     throw new Error("Choose add or remove.");
@@ -2109,6 +2159,7 @@ function managePaymentOption(input) {
       );
     const sheet = book.getSheetByName(workspaceConfig_().paymentMethodsSheet);
     if (input.action === "remove") {
+      clearPaymentReferences_(paymentReferencePlan_(book, method, name), false);
       records
         .filter(
           (record) =>
@@ -2369,7 +2420,9 @@ function managedChoicePlan_(input) {
     if (input.kind === "paymentType" && input.action === "edit" && newName === "Cash" &&
         records.some(record => record.method === method && !record.removed))
       throw new Error("Remove this method's saved accounts/apps before renaming it to Cash.");
-    return { ...plan, methods, records, method };
+    return { ...plan, methods, records, method,
+      paymentReferences: input.action === "remove" ? paymentReferencePlan_(book, method,
+        input.kind === "paymentType" ? undefined : name) : [] };
   }
   if (!Object.prototype.hasOwnProperty.call(workspaceConfig_().lookupSheets, input.type))
     throw new Error("Choose a valid journal.");
@@ -2393,14 +2446,23 @@ function managedChoicePlan_(input) {
       if (newName !== name && aliases && options_(aliases, 1).some(value => same(value, newName)))
         throw new Error("This is a historical description. Choose another name.");
     }
-  } else if (input.action === "remove" && mappings.some(r => same(r[c.category - 1], name))) {
-    category = String(input.replacement || "").trim();
-    if (category === name || !categories.includes(category))
-      throw new Error("Choose a replacement category for descriptions using this category. Add another category first if needed.");
   }
-  return { ...plan, sheet, c, categories, mappings, category };
+  let lookupReferences = null;
+  if (input.action === "remove") {
+    const journal = sheet_(book, input.type), j = workspaceConfig_().layout.journal;
+    const target = input.kind === "description" ? j.description : j.category;
+    const values = journal.getRange(j.firstDataRow, 1,
+      journal.getMaxRows() - j.firstDataRow + 1, journalWidth_()).getValues();
+    const rows = values.flatMap((row, index) => {
+      const recorded = row[j.description - 1] || row[j.amount - 1] !== "" || row[j.date - 1];
+      return recorded && same(row[target - 1], name) ? [j.firstDataRow + index] : [];
+    });
+    lookupReferences = { journal, target, rows };
+  }
+  return { ...plan, sheet, c, categories, mappings, category, lookupReferences };
 }
-// Master choices affect future entries. Financial records are never renamed or deleted.
+// Removing a master choice clears its matching references; financial rows and amounts stay.
+// Renaming reusable choices still preserves recorded labels.
 // Read-only validation runs before the retry marker; partial writes remain protected.
 function manageChoice(input) {
   if (!input || typeof input !== "object") throw new Error("Choose a valid Manage action.");
@@ -2423,6 +2485,7 @@ function manageChoice(input) {
       const affected = records.filter(r => r.method === plan.method &&
         (input.kind === "paymentType" || normalized_(r.name) === normalized_(name)));
       if (input.action === "remove") {
+        clearPaymentReferences_(plan.paymentReferences, input.kind === "paymentType");
         affected.sort((a, b) => b.row - a.row).forEach(r => sheet.deleteRow(r.row));
       } else {
         affected.forEach(r => literal_(sheet.getRange(r.row, input.kind === "paymentType" ? 1 : 2), newName));
@@ -2439,6 +2502,11 @@ function manageChoice(input) {
         .map(row => normalized_(row[c.description - 1])));
       preserveRecordedCategories_(book, input.type, affectedDescriptions);
       if (input.type === "investment") initializeInvestmentCategories_(sheet, book);
+      if (plan.lookupReferences) {
+        const { journal, target, rows } = plan.lookupReferences;
+        for (const { start, count } of consecutiveRows_(rows))
+          journal.getRange(start, target, count, 1).clearContent();
+      }
       if (input.kind === "category") {
         replaceChoiceColumn_(sheet, c.categoryOptions, categories.flatMap(value => value === name
           ? (input.action === "remove" ? [] : [newName]) : [value]).sort());

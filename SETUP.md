@@ -116,17 +116,17 @@ For expenses and investments, payment tracking is optional. Leave **Not recorded
 
 Use **+ Add payment method** or **+ Add account / app** in the transaction form, or open **Manage → Payment methods**. Names are enough; do not enter card numbers, CVVs, passwords, or account credentials.
 
-Removing a payment account / app deletes it from the reusable list and shows that account or app as blank in the app’s past transactions. The payment method remains visible, and the original transaction record stays in the sheet.
+Removing a payment account / app deletes it from the reusable list and clears its name from matching transactions in your sheet. The payment method stays. Removing an entire payment method clears both the method and its account/app details from matching transactions. The transactions, amounts, and all other details stay unchanged.
 
 ### Organize descriptions, categories, and expense groups
 
 **Manage → Descriptions:** choose the journal, enter a description, and choose its category. For any journal, **+ Add new category** lets you create the category without leaving this section.
 
-**Manage → Categories:** add categories for expenses, income, or investments. Use **Edit** or **Remove** beside any saved description or category, including the initial choices. Editing a description lets you change its name and category. Removing a category asks for a replacement if saved descriptions use it; add another category first if needed. Confirm removals in the pop-up.
+**Manage → Categories:** add categories for expenses, income, or investments. Use **Edit** or **Remove** beside any saved description or category, including the initial choices. Editing a description lets you change its name and category. Removing a description or category clears that field from matching transactions in the selected journal. Those transactions appear in **Review** as **Missing description** or **Missing category**. Removing a category also clears it from saved description mappings, which remain available to edit. Confirm removals in the pop-up.
 
 **Manage → Payment methods:** use **Edit** or **Remove** on a payment method or saved payment account / app. You can remove initial methods such as UPI, Card, Bank transfer, or Cash. Removing a method also removes all names saved under it. Add it again later if needed.
 
-These changes update reusable choices for future entries. Existing transactions keep their recorded descriptions, categories, and payment history in the sheet. Removed payment choices display as blank in the app. Renamed payment choices are new labels for future entries; old labels remain in the transaction history and display as blank unless added again.
+Editing descriptions and categories updates reusable choices for future entries. Deleting them clears matching recorded fields and sends the affected transactions to Review for correction. Deleting payment choices also clears the corresponding payment fields in the sheet. Re-adding a deleted method or account/app does not restore cleared fields. Renaming payment choices still changes reusable labels for future entries; original labels remain in the transaction history.
 
 **Manage → Expense groups:** add a group for an event, project, or trip. All saved groups appear below the form. Click **Remove**, then confirm, to remove a group from saved choices and dashboard group cards. The group’s tag is also cleared from all matching transactions in your sheet. The transactions, amounts, and other details are kept.
 

@@ -2461,7 +2461,7 @@
           o[k] = (o[k] || 0) + (Number(t.amount) || 0);
           return o;
         }, {});
-      // Removed payment choices are blank throughout the UI; source history stays in the sheet.
+      // Deleted choices have cleared source fields; hide unavailable legacy labels too.
       const visiblePaymentMethod = (transaction) =>
         paymentMethods().includes(transaction?.paymentMethod) ? transaction.paymentMethod : "";
       const visiblePaymentDetail = (transaction) =>
@@ -3828,12 +3828,14 @@
         const editing = choice.action === "edit",
           lookup = ["description", "category"].includes(choice.kind),
           categories = state.data.categories[choice.type] || [],
-          dependent = choice.kind === "category" &&
-            (state.data.mappings[choice.type] || []).some(entry => entry.category === choice.name),
-          needsCategory = choice.kind === "description" && editing ||
-            choice.kind === "category" && !editing && dependent;
+          needsCategory = choice.kind === "description" && editing;
         const label = { paymentType: "payment method", paymentName: "payment account / app",
           description: "description", category: "category", group: "expense group" }[choice.kind];
+        const paymentNotice = editing
+          ? 'Renaming updates saved choices for future entries. Original payment labels stay in recorded transactions in the sheet.'
+          : choice.kind === "paymentType"
+            ? 'This removes the payment method and its saved accounts/apps, and clears both fields from matching transactions in your sheet. Transactions, amounts, and other details are kept.'
+            : 'This removes the account/app and clears its name from matching transactions in your sheet. The payment method, transactions, amounts, and other details are kept.';
         $("#modalContainer").innerHTML =
           '<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="manageChoiceTitle">' +
           '<div class="modal-head"><h2 id="manageChoiceTitle">' + (editing ? "Edit " : "Remove ") + label +
@@ -3841,19 +3843,21 @@
           '<div class="notice">' + (choice.kind === "group"
             ? 'This removes the group from saved choices and dashboard group cards, and clears its tag from all matching transactions in your sheet. The transactions, amounts, and other details are kept.'
             : lookup
-            ? 'Recorded transactions keep their original descriptions and categories. Changes apply to reusable choices for future entries.'
-            : 'Recorded payment history stays in the sheet. Removed or renamed choices display as blank in the app for older transactions.' +
-              (choice.kind === "paymentType" && !editing ? ' Removing a payment method also removes all saved accounts/apps under it.' : '')) +
+            ? editing
+              ? 'Edits update reusable choices for future entries. Recorded descriptions and categories stay unchanged.'
+              : 'This removes the saved choice and clears its matching ' + label + ' from transactions in this journal. Those transactions appear in Review as Missing ' + label + '. Transactions, amounts, and other details are kept.' +
+                (choice.kind === "category" ? ' Saved descriptions using this category will need a new category too.' : '')
+            : paymentNotice) +
           '</div><form id="manageChoiceForm"><div class="formgrid">' +
           (editing ? '<div class="field full"><label for="manageChoiceName">' +
             (choice.kind === "paymentType" ? "Payment method" : choice.kind === "paymentName" ? "Payment account / app" : "Name") +
             '</label><input id="manageChoiceName" required maxlength="' +
             (choice.kind === "paymentType" ? 60 : choice.kind === "paymentName" ? 100 : 180) + '" value="' + esc(choice.name) + '"></div>' : '') +
           (needsCategory ? '<div class="field full"><label for="manageChoiceCategory">' +
-            (editing ? 'Category' : 'Replacement category for saved descriptions') +
+            'Category' +
             '</label><select id="manageChoiceCategory" required><option value="">Choose a category</option>' +
-            selectOptions(categories.filter(value => editing || value !== choice.name), choice.previousCategory) +
-            '</select>' + (!editing ? '<small>Descriptions using this category move to the replacement. Add another category first if none is available.</small>' : '') + '</div>' : '') +
+            selectOptions(categories, choice.previousCategory) +
+            '</select></div>' : '') +
           '</div><p id="manageChoiceError" class="formerror" role="alert"></p><div class="modal-footer">' +
           '<button type="button" class="button outline" id="cancelManageChoice">Cancel</button>' +
           '<button class="button' + (editing ? '' : ' danger') + '" id="saveManageChoice">' +
@@ -3868,7 +3872,7 @@
           if (state.saveBusy) return;
           const payload = { ...choice, requestId, confirmed: !editing };
           if (editing) payload.newName = $("#manageChoiceName").value;
-          if (needsCategory) payload[editing ? "category" : "replacement"] = $("#manageChoiceCategory").value;
+          if (needsCategory) payload.category = $("#manageChoiceCategory").value;
           state.saveBusy = true;
           $("#saveManageChoice").disabled = true;
           $("#manageChoiceError").textContent = "";
@@ -3942,7 +3946,7 @@
           ? mappings
           : categories.map((category) => ({ category }));
         return (
-          '<div class="notice">Add, edit, or remove reusable choices for each journal. Recorded transactions keep their original descriptions and categories.</div>' +
+          '<div class="notice">Manage reusable choices for each journal. Removing a description or category clears that field from matching transactions and sends them to Review for correction. Amounts and other details stay unchanged.</div>' +
           form +
           '<div class="card" style="margin-top:23px"><div class="cardhead"><h2>' +
           (descriptions ? "Descriptions" : "Categories") +
@@ -3959,7 +3963,7 @@
                   ? "<td>" + esc(entry.description) + "</td>"
                   : "") +
                 "<td>" +
-                esc(entry.category) +
+                esc(entry.category || "Missing category") +
                 "</td><td>" + manageChoiceActions({ kind: descriptions ? "description" : "category",
                   type, name: descriptions ? entry.description : entry.category,
                   previousCategory: descriptions ? entry.category : "" }) + "</td></tr>",
@@ -4241,7 +4245,7 @@
         if (!namedPaymentMethods().includes(state.paymentOptionType))
           state.paymentOptionType = namedPaymentMethods()[0] || "";
         return (
-          '<div class="notice"><strong>Payment method</strong> means how you paid: Bank transfer, Card, UPI, Cash, or Wallet. <strong>Payment account / app</strong> means the specific account, card, or app used. For example: Bank transfer → Example Bank savings; Card → Example credit card; UPI → Example UPI app. Cash needs no account or app. Add, edit, or remove either here. Recorded payment history stays in the sheet; removed choices display as blank in the app.</div><div class="card" style="margin-bottom:23px"><h2>Add payment method</h2><div class="field">' +
+          '<div class="notice"><strong>Payment method</strong> means how you paid: Bank transfer, Card, UPI, Cash, or Wallet. <strong>Payment account / app</strong> means the specific account, card, or app used. For example: Bank transfer → Example Bank savings; Card → Example credit card; UPI → Example UPI app. Cash needs no account or app. Add, edit, or remove either here. Removing a choice clears its matching payment fields in your sheet; transactions and amounts are kept.</div><div class="card" style="margin-bottom:23px"><h2>Add payment method</h2><div class="field">' +
           paymentTypeFields("manage") +
           '</div></div><div class="card"><form id="paymentOptionForm"><div class="formgrid"><div class="field"><label for="paymentOptionType">Payment method</label><select id="paymentOptionType">' +
           selectOptions(namedPaymentMethods(), state.paymentOptionType) +
@@ -5268,7 +5272,7 @@
           $("#entryDate").value = transaction.date;
           $("#entryDescription").value = transaction.description;
           $("#entryAmount").value = transaction.amount ?? "";
-          if (!(state.data?.categories?.[transaction.type] || []).includes(transaction.category))
+          if (transaction.category && !(state.data?.categories?.[transaction.type] || []).includes(transaction.category))
             $("#entryCategory").innerHTML += selectOptions([transaction.category], transaction.category);
           $("#entryCategory").value = transaction.category;
           $("#entryTrip").value = transaction.trip;
