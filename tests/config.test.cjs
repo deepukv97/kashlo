@@ -5180,3 +5180,406 @@ test("native Review source ranges follow growth without changing its decision lo
   );
   assert.equal(review.getRange(5, 8).getValues()[0][0], "Preserve action");
 });
+
+async function transactionFiltersBrowser() {
+  const f = await paginationBrowser();
+  f.browser.data.paymentOptions = {
+    UPI: ["Example Pay"],
+    "Bank transfer": ["Example Bank"],
+  };
+  f.browser.data.transactions = [
+    [
+      2,
+      "2026-01-14",
+      "expense",
+      "Food",
+      "Journey",
+      "UPI",
+      "Example Pay",
+      "Before range",
+    ],
+    [
+      3,
+      "2026-01-15",
+      "expense",
+      "Food",
+      "Journey",
+      "UPI",
+      "Example Pay",
+      "Platform snack",
+    ],
+    [
+      4,
+      "2026-01-21",
+      "expense",
+      "Food",
+      "Journey",
+      "Bank transfer",
+      "Example Bank",
+      "Water",
+      "Fictional note",
+    ],
+    [5, "2026-01-22", "expense", "Travel", "Journey", "Cash", "", "Train"],
+    [6, "2026-03-31", "income", "Salary", "", "", "", "Salary"],
+    [7, "2026-04-01", "investment", "Investments", "", "", "", "Fund"],
+    [8, "2026-12-31", "expense", "Home", "", "", "Removed name", "Lamp"],
+    [9, "2025-12-31", "expense", "Food", "", "", "", "Old year"],
+    [10, "2027-01-01", "expense", "Food", "", "", "", "Next year"],
+  ].map(
+    ([
+      row,
+      date,
+      type,
+      category,
+      trip,
+      paymentMethod,
+      paymentDetail,
+      description,
+      notes,
+    ]) => ({
+      row,
+      date,
+      type,
+      category,
+      trip,
+      paymentMethod,
+      paymentDetail,
+      description,
+      notes,
+      amount: 10,
+      issues: [],
+      fingerprint: "filter-" + row,
+    }),
+  );
+  return f;
+}
+
+test("transaction date presets and inclusive custom dates stay within the configured year", async () => {
+  const f = await transactionFiltersBrowser(),
+    b = f.browser;
+  const keys = (code) =>
+    tableKeys(vm.runInContext(code + ";transactions()", b));
+  assert.equal(keys('state.transactionFilters.period="year"').length, 7);
+  assert.deepEqual(
+    keys(
+      'state.transactionFilters.period="quarter";state.transactionFilters.quarter="2"',
+    ),
+    ["investment:7"],
+  );
+  assert.equal(keys('state.transactionFilters.quarter="1"').length, 5);
+  assert.deepEqual(
+    keys(
+      'state.transactionFilters.period="custom";state.transactionFilters.from="2026-01-15";state.transactionFilters.to="2026-01-21"',
+    ),
+    ["expense:4", "expense:3"],
+  );
+  assert.deepEqual(keys('state.transactionFilters.to="2026-01-15"'), [
+    "expense:3",
+  ]);
+  for (const end of ["", "2026-01-14", "2027-01-01"]) {
+    b.testEnd = end;
+    const html = vm.runInContext(
+      "state.transactionFilters.to=testEnd;transactions()",
+      b,
+    );
+    assert.match(
+      html,
+      end ? /Choose a valid start and end date/ : /Confirm From and To/,
+    );
+    assert.deepEqual(tableKeys(html), []);
+  }
+  vm.runInContext(
+    'state.data.config.year=2028;state.month=1;state.transactionFilters.period="month";var leapRange=transactionDateRange()',
+    b,
+  );
+  assert.deepEqual(Array.from(b.leapRange), ["2028-02-01", "2028-02-29"]);
+});
+
+test("transaction search covers visible payments, notes, groups, categories, dates and journal types", async () => {
+  const f = await transactionFiltersBrowser(),
+    b = f.browser;
+  vm.runInContext('state.transactionFilters.period="year"', b);
+  for (const [query, expected] of [
+    ["UPI", 2],
+    ["bank transfer", 1],
+    ["Example Bank", 1],
+    ["EXAMPLE PAY", 2],
+    ["Fictional note", 1],
+    ["Journey", 4],
+    ["Food", 3],
+    ["2026-01-21", 1],
+    ["income", 1],
+    ["Removed name", 0],
+  ]) {
+    b.query = query;
+    assert.equal(
+      tableKeys(vm.runInContext("state.search=query;transactions()", b)).length,
+      expected,
+      query,
+    );
+  }
+});
+
+test("transaction filters combine with search, reset pagination, retain all choices, and clear together", async () => {
+  const f = await transactionFiltersBrowser(),
+    b = f.browser;
+  vm.runInContext(
+    'state.transactionFilters.period="year";state.transactionFilters.category="Food";state.transactionFilters.method="UPI";state.transactionFilters.group="Journey";state.search="snack";state.transactionPage=6;var html=transactions()',
+    b,
+  );
+  assert.deepEqual(tableKeys(b.html), ["expense:3"]);
+  assert.equal(vm.runInContext("state.transactionPage", b), 1);
+  assert.match(b.html, /<option value="Home">Home/);
+  assert.match(b.html, /<option value="Cash">Cash/);
+  vm.runInContext(
+    'state.search="";state.transactionFilters.category="";state.transactionFilters.method="__blank__";state.transactionFilters.group="__blank__";var blanks=transactions()',
+    b,
+  );
+  assert.deepEqual(tableKeys(b.blanks), [
+    "expense:8",
+    "investment:7",
+    "income:6",
+  ]);
+  vm.runInContext("bindContent([])", b);
+  f.element("#clearTransactionFilters").onclick();
+  assert.equal(vm.runInContext("state.transactionFilters.period", b), "month");
+  assert.equal(vm.runInContext("state.transactionFilters.method", b), "");
+  assert.equal(vm.runInContext("state.search", b), "");
+  assert.equal(vm.runInContext("state.type", b), "all");
+});
+
+test("expanded filter controls exist only on Transactions and preserve the Investment month", async () => {
+  const f = await transactionFiltersBrowser(),
+    b = f.browser;
+  vm.runInContext(
+    'state.transactionFilters.period="custom";state.transactionFilters.from="2026-01-15";state.transactionFilters.to="2026-01-21";render()',
+    b,
+  );
+  assert.equal(f.element("#monthSelect").hidden, true);
+  const html = f.element("#content").innerHTML;
+  assert.match(
+    html,
+    /id="transactionFilter-from" data-transaction-calendar="from"/,
+  );
+  assert.match(
+    html,
+    /id="transactionFilter-to" data-transaction-calendar="to"/,
+  );
+  vm.runInContext('state.view="investments";state.month=3;render()', b);
+  assert.equal(f.element("#monthSelect").hidden, false);
+  assert.doesNotMatch(
+    f.element("#content").innerHTML,
+    /data-transaction-filter=/,
+  );
+  assert.deepEqual(tableKeys(f.element("#content").innerHTML), [
+    "investment:7",
+  ]);
+});
+
+async function calendarBrowser() {
+  const f = await transactionFiltersBrowser();
+  const original = f.document.querySelectorAll;
+  f.document.querySelectorAll = (selector) => {
+    if (selector !== "[data-calendar-date]") return original(selector);
+    return [
+      ...f
+        .element("#modalContainer")
+        .innerHTML.matchAll(
+          /id="(calendarDay-\d+)" data-calendar-date="([^"]+)"[^>]*>/g,
+        ),
+    ].map((match) => {
+      const button = f.element("#" + match[1]);
+      button.id = match[1];
+      button.dataset = { calendarDate: match[2] };
+      button.disabled = match[0].includes(" disabled");
+      return button;
+    });
+  };
+  vm.runInContext(
+    'state.transactionFilters.period="custom";render()',
+    f.browser,
+  );
+  return f;
+}
+
+test("calendar day taps remain pending until its checkmark, then both confirmed dates filter automatically", async () => {
+  const f = await calendarBrowser(),
+    b = f.browser;
+  vm.runInContext('openTransactionCalendar("from")', b);
+  assert.equal(vm.runInContext("state.transactionFilters.from", b), "");
+  assert.doesNotMatch(
+    f.element("#modalContainer").innerHTML,
+    /aria-pressed="true"/,
+  );
+  assert.doesNotMatch(
+    f.element("#content").innerHTML,
+    /Apply dates|applyTransactionDates/,
+  );
+  f.element("#calendarMonth").onchange({ target: { value: "0" } });
+  const before = f.element("#content").innerHTML;
+  f.element("#calendarDay-15").onclick();
+  assert.equal(vm.runInContext("state.transactionFilters.from", b), "");
+  assert.equal(f.element("#content").innerHTML, before);
+  assert.match(
+    f.element("#modalContainer").innerHTML,
+    /data-calendar-date="2026-01-15"[^>]*aria-pressed="true"/,
+  );
+  f.element("#confirmCalendar").onclick();
+  assert.equal(
+    vm.runInContext("state.transactionFilters.from", b),
+    "2026-01-15",
+  );
+  assert.deepEqual(tableKeys(f.element("#content").innerHTML), []);
+  vm.runInContext('openTransactionCalendar("to")', b);
+  f.element("#calendarDay-21").onclick();
+  assert.equal(vm.runInContext("state.transactionFilters.to", b), "");
+  f.element("#confirmCalendar").onclick();
+  assert.equal(vm.runInContext("state.transactionFilters.to", b), "2026-01-21");
+  assert.deepEqual(tableKeys(f.element("#content").innerHTML), [
+    "expense:4",
+    "expense:3",
+  ]);
+});
+
+test("calendar Cancel, Escape and pending Reset leave confirmed dates and results unchanged", async () => {
+  const f = await calendarBrowser(),
+    b = f.browser;
+  vm.runInContext(
+    'state.transactionFilters.from="2026-01-15";state.transactionFilters.to="2026-01-21";render();openTransactionCalendar("from")',
+    b,
+  );
+  const before = f.element("#content").innerHTML;
+  f.element("#calendarDay-22").onclick();
+  f.element("#cancelCalendar").onclick();
+  assert.equal(
+    vm.runInContext("state.transactionFilters.from", b),
+    "2026-01-15",
+  );
+  assert.equal(f.element("#content").innerHTML, before);
+  vm.runInContext('openTransactionCalendar("from")', b);
+  f.element("#resetCalendar").onclick();
+  assert.equal(
+    vm.runInContext("state.transactionFilters.from", b),
+    "2026-01-15",
+  );
+  f.element("#transactionCalendar").onkeydown({
+    key: "Escape",
+    preventDefault() {},
+    stopPropagation() {},
+  });
+  assert.equal(f.element("#modalContainer").innerHTML, "");
+  assert.equal(f.element("#content").innerHTML, before);
+  vm.runInContext('openTransactionCalendar("from")', b);
+  f.element("#resetCalendar").onclick();
+  f.element("#confirmCalendar").onclick();
+  assert.equal(vm.runInContext("state.transactionFilters.from", b), "");
+});
+
+test("calendar To limits, equal dates and configured leap year boundaries are enforced", async () => {
+  const f = await calendarBrowser(),
+    b = f.browser;
+  vm.runInContext(
+    'state.transactionFilters.from="2026-01-22";openTransactionCalendar("to")',
+    b,
+  );
+  assert.equal(f.element("#calendarDay-21").disabled, true);
+  f.element("#calendarDay-21").onclick();
+  assert.doesNotMatch(
+    f.element("#modalContainer").innerHTML,
+    /aria-pressed="true"/,
+  );
+  assert.equal(f.element("#calendarDay-22").disabled, false);
+  f.element("#calendarDay-22").onclick();
+  f.element("#confirmCalendar").onclick();
+  assert.deepEqual(tableKeys(f.element("#content").innerHTML), ["expense:5"]);
+  vm.runInContext(
+    'state.data.config.year=2028;state.transactionFilters.from="2028-02-01";state.transactionFilters.to="";openTransactionCalendar("to")',
+    b,
+  );
+  assert.match(
+    f.element("#modalContainer").innerHTML,
+    /data-calendar-date="2028-02-29"/,
+  );
+  f.element("#calendarMonth").onchange({ target: { value: "11" } });
+  assert.match(
+    f.element("#modalContainer").innerHTML,
+    /id="calendarNext"[^>]* disabled/,
+  );
+  f.element("#calendarNext").onclick();
+  assert.doesNotMatch(f.element("#modalContainer").innerHTML, /2029/);
+});
+
+test("a later From clears an invalid To only after the calendar checkmark", async () => {
+  const f = await calendarBrowser(),
+    b = f.browser;
+  vm.runInContext(
+    'state.transactionFilters.from="2026-01-15";state.transactionFilters.to="2026-01-21";render();openTransactionCalendar("from")',
+    b,
+  );
+  f.element("#calendarDay-22").onclick();
+  assert.equal(vm.runInContext("state.transactionFilters.to", b), "2026-01-21");
+  f.element("#confirmCalendar").onclick();
+  assert.equal(
+    vm.runInContext("state.transactionFilters.from", b),
+    "2026-01-22",
+  );
+  assert.equal(vm.runInContext("state.transactionFilters.to", b), "");
+});
+
+test("Transactions keeps the month selector in the filter panel and uses it to change results", async () => {
+  const f = await transactionFiltersBrowser(),
+    b = f.browser;
+  const month = { dataset: { transactionFilter: "month" } };
+  const original = f.document.querySelectorAll;
+  f.document.querySelectorAll = (selector) =>
+    selector === "[data-transaction-filter]" ? [month] : original(selector);
+  vm.runInContext("render()", b);
+  assert.equal(f.element("#monthSelect").hidden, true);
+  assert.match(
+    f.element("#content").innerHTML,
+    /class="transaction-period-fields">[\s\S]*id="transactionFilter-period"[\s\S]*id="transactionFilter-month"/,
+  );
+  month.onchange({ target: { value: "3" } });
+  assert.equal(vm.runInContext("state.month", b), 3);
+  assert.deepEqual(tableKeys(f.element("#content").innerHTML), [
+    "investment:7",
+  ]);
+  vm.runInContext('state.view="overview";render()', b);
+  assert.equal(f.element("#monthSelect").hidden, false);
+});
+
+test("category options follow journal type, include unused configured categories, and retain All", async () => {
+  const f = await transactionFiltersBrowser(),
+    b = f.browser;
+  b.data.categories = {
+    expense: ["Food", "Travel", "Unused expense"],
+    income: ["Salary", "Unused income"],
+    investment: ["Investments"],
+  };
+  vm.runInContext(
+    'state.transactionFilters.period="year";state.transactionFilters.category="Food";bindContent([])',
+    b,
+  );
+  f.element("#typeFilter").onchange({ target: { value: "income" } });
+  assert.equal(vm.runInContext("state.transactionFilters.category", b), "");
+  const categoryOptions = () =>
+    f
+      .element("#content")
+      .innerHTML.match(
+        /id="transactionFilter-category"[^>]*>([\s\S]*?)<\/select>/,
+      )[1];
+  assert.match(categoryOptions(), /All categories/);
+  assert.match(categoryOptions(), /Unused income/);
+  assert.doesNotMatch(categoryOptions(), /Food|Investments/);
+  assert.deepEqual(tableKeys(f.element("#content").innerHTML), ["income:6"]);
+  f.element("#typeFilter").onchange({ target: { value: "investment" } });
+  assert.match(categoryOptions(), /Investments/);
+  assert.doesNotMatch(categoryOptions(), /Salary|Food/);
+  f.element("#typeFilter").onchange({ target: { value: "expense" } });
+  assert.match(categoryOptions(), /Unused expense/);
+  assert.doesNotMatch(categoryOptions(), /Salary|Investments/);
+  f.element("#typeFilter").onchange({ target: { value: "all" } });
+  assert.match(categoryOptions(), /Salary/);
+  assert.match(categoryOptions(), /Investments/);
+  assert.match(categoryOptions(), /Food/);
+});

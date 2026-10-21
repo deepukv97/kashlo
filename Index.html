@@ -990,6 +990,135 @@
         flex: 1;
         min-width: 180px;
       }
+      .transaction-filters {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 14px;
+        margin-bottom: 20px;
+        align-items: end;
+      }
+      .transaction-period-fields,
+      .transaction-date-fields {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-column: span 2;
+        gap: 14px;
+        min-width: 0;
+        align-items: end;
+      }
+      .transaction-calendar-trigger {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        width: 100%;
+        min-width: 0;
+        min-height: 46px;
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        color: var(--ink);
+        background: #1b201d;
+        text-align: left;
+        gap: 6px;
+      }
+      .transaction-calendar-trigger span:first-child {
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+      .date-calendar {
+        width: 390px;
+        padding: 22px;
+      }
+      .calendar-navigation {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 18px;
+      }
+      .calendar-navigation select {
+        flex: 1;
+        min-width: 0;
+        background: var(--canvas);
+        color: var(--ink);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 10px;
+      }
+      .calendar-grid {
+        display: grid;
+        grid-template-columns: repeat(7, minmax(0, 1fr));
+        gap: 3px;
+      }
+      .calendar-grid .calendar-weekday {
+        text-align: center;
+        font-size: 10px;
+        color: var(--muted);
+        padding-bottom: 8px;
+      }
+      .calendar-day {
+        min-height: 44px;
+        border: 0;
+        border-radius: 50%;
+        background: transparent;
+        color: var(--ink);
+      }
+      .calendar-day[aria-pressed="true"] {
+        background: var(--green);
+        color: var(--canvas);
+        font-weight: 700;
+      }
+      .calendar-day:disabled {
+        cursor: default;
+        opacity: 0.3;
+      }
+      .calendar-footer {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+        margin-top: 22px;
+      }
+      .calendar-footer button {
+        min-height: 44px;
+      }
+      .transaction-period-fields > :only-child {
+        grid-column: 1 / -1;
+      }
+      .transaction-filters label,
+      .transaction-date-field {
+        display: grid;
+        gap: 7px;
+        min-width: 0;
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .transaction-filters input,
+      .transaction-filters select {
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        min-height: 46px;
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        color: var(--ink);
+        background: #1b201d;
+      }
+      @media (max-width: 760px) {
+        .transaction-filters {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 12px;
+        }
+        .transaction-period-fields,
+        .transaction-date-fields {
+          gap: 12px;
+        }
+        .transaction-filters input,
+        .transaction-filters select {
+          font-size: 16px;
+          padding: 10px;
+        }
+      }
       input::placeholder,
       textarea::placeholder {
         color: #7d8977;
@@ -2205,6 +2334,15 @@
       ];
       // Shared interface state. The server supplies the configured year and initial month after loading.
       // loading prevents overlapping refreshes; saveBusy prevents concurrent entry/review actions in this page.
+      const defaultTransactionFilters = () => ({
+        period: "month",
+        quarter: "",
+        from: "",
+        to: "",
+        category: "",
+        method: "",
+        group: "",
+      });
       let state = {
         view: "overview",
         dashboard: "groups",
@@ -2214,6 +2352,7 @@
         manageSection: "descriptions",
         lookupType: "expense",
         search: "",
+        transactionFilters: defaultTransactionFilters(),
         transactionPage: 1,
         transactionPageScope: "",
         trip: "",
@@ -2751,6 +2890,7 @@
           state.type,
           state.search,
           state.trip,
+          state.view === "transactions" ? state.transactionFilters : null,
         ]);
         if (state.transactionPageScope !== scope) {
           state.transactionPageScope = scope;
@@ -2975,26 +3115,356 @@
           "</strong></div></div></div>"
         );
       }
-      // Render the monthly transaction journal, or an investment-only version with contribution summaries.
+      // Date comparisons use workbook ISO dates, avoiding browser time-zone shifts.
+      function transactionDateRange() {
+        const f = state.transactionFilters,
+          year = settings()?.year || new Date().getFullYear();
+        if (f.period === "custom") return [f.from, f.to];
+        if (f.period === "year") return [year + "-01-01", year + "-12-31"];
+        const first =
+          f.period === "quarter"
+            ? (Number(f.quarter || Math.floor(state.month / 3) + 1) - 1) * 3
+            : state.month;
+        const last = first + (f.period === "quarter" ? 2 : 0);
+        const days = new Date(Date.UTC(year, last + 1, 0)).getUTCDate();
+        return [monthPrefix(first) + "-01", monthPrefix(last) + "-" + days];
+      }
+      function transactionCategoryChoices() {
+        const journals =
+          state.type === "all"
+            ? ["expense", "income", "investment"]
+            : [state.type];
+        return [
+          ...new Set(
+            [
+              ...journals.flatMap(
+                (type) => state.data?.categories?.[type] || [],
+              ),
+              ...rows()
+                .filter((t) => journals.includes(t.type))
+                .map((t) => t.category),
+            ].filter(Boolean),
+          ),
+        ].sort((a, b) => a.localeCompare(b));
+      }
+      // The calendar owns its confirmation button; tapping a day never commits it.
+      // Browser-native date inputs do not expose their Done/checkmark consistently.
+      function openTransactionCalendar(key) {
+        if (state.saveBusy || !settings() || !["from", "to"].includes(key))
+          return;
+        const f = state.transactionFilters,
+          year = settings().year;
+        const min = key === "to" && f.from ? f.from : year + "-01-01";
+        let pending = f[key] || "";
+        const initial =
+          pending ||
+          (key === "to" && f.from) ||
+          settings().defaultDate ||
+          year + "-01-01";
+        let month = Math.max(
+          Number(min.slice(5, 7)) - 1,
+          Number(initial.slice(5, 7)) - 1,
+        );
+        const close = () => {
+          $("#modalContainer").innerHTML = "";
+          $("#transactionFilter-" + key)?.focus({ preventScroll: true });
+        };
+        const draw = (focus = "#cancelCalendar") => {
+          const count = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+          const first = new Date(Date.UTC(year, month, 1)).getUTCDay();
+          const weekday = new Intl.DateTimeFormat(settings().locale, {
+            weekday: "short",
+            timeZone: "UTC",
+          });
+          let cells = Array.from(
+            { length: 7 },
+            (_, i) =>
+              '<span class="calendar-weekday">' +
+              esc(weekday.format(new Date(Date.UTC(2023, 0, 1 + i)))) +
+              "</span>",
+          ).join("");
+          cells += '<span aria-hidden="true"></span>'.repeat(first);
+          for (let day = 1; day <= count; day++) {
+            const value =
+              monthPrefix(month) + "-" + String(day).padStart(2, "0");
+            cells +=
+              '<button type="button" class="calendar-day" id="calendarDay-' +
+              day +
+              '" data-calendar-date="' +
+              value +
+              '" aria-label="' +
+              esc(dateLabel(value)) +
+              '" aria-pressed="' +
+              (value === pending) +
+              '"' +
+              (value < min ? " disabled" : "") +
+              ">" +
+              day +
+              "</button>";
+          }
+          $("#modalContainer").innerHTML =
+            '<div class="modal-backdrop"><section class="modal date-calendar" id="transactionCalendar" role="dialog" aria-modal="true" aria-labelledby="calendarTitle"><div class="modal-head"><h2 id="calendarTitle">' +
+            (key === "from" ? "From date" : "To date") +
+            '</h2><button type="button" class="close" id="cancelCalendar" aria-label="Cancel date selection">×</button></div><div class="calendar-navigation"><button type="button" class="iconbtn" id="calendarPrevious" aria-label="Previous month"' +
+            (month <= Number(min.slice(5, 7)) - 1 ? " disabled" : "") +
+            '>‹</button><select id="calendarMonth" aria-label="Calendar month">' +
+            MONTHS.map(
+              (name, i) =>
+                '<option value="' +
+                i +
+                '"' +
+                (i === month ? " selected" : "") +
+                (i < Number(min.slice(5, 7)) - 1 ? " disabled" : "") +
+                ">" +
+                esc(name + " " + year) +
+                "</option>",
+            ).join("") +
+            '</select><button type="button" class="iconbtn" id="calendarNext" aria-label="Next month"' +
+            (month === 11 ? " disabled" : "") +
+            '>›</button></div><div class="calendar-grid">' +
+            cells +
+            '</div><p class="crumb" role="status">' +
+            (pending ? esc(dateLabel(pending)) : "Choose a date") +
+            '</p><div class="calendar-footer"><button type="button" class="button outline" id="resetCalendar">Reset</button><button type="button" class="button" id="confirmCalendar" aria-label="Confirm date">✓</button></div></section></div>';
+          $("#cancelCalendar").onclick = close;
+          $("#calendarPrevious").onclick = () => {
+            if (month > Number(min.slice(5, 7)) - 1) {
+              month--;
+              draw("#calendarPrevious");
+            }
+          };
+          $("#calendarNext").onclick = () => {
+            if (month < 11) {
+              month++;
+              draw("#calendarNext");
+            }
+          };
+          $("#calendarMonth").onchange = (e) => {
+            month = Number(e.target.value);
+            draw();
+          };
+          document
+            .querySelectorAll("[data-calendar-date]")
+            .forEach((button) => {
+              button.onclick = () => {
+                if (button.disabled || button.dataset.calendarDate < min)
+                  return;
+                pending = button.dataset.calendarDate;
+                draw("#" + button.id);
+              };
+            });
+          $("#resetCalendar").onclick = () => {
+            pending = "";
+            draw("#resetCalendar");
+          };
+          $("#confirmCalendar").onclick = () => {
+            if (pending && (pending < min || pending > year + "-12-31")) return;
+            f[key] = pending;
+            if (f.to && f.from && f.to < f.from) f.to = "";
+            state.transactionPage = 1;
+            close();
+            render();
+            $("#transactionFilter-" + key)?.focus({ preventScroll: true });
+          };
+          $("#transactionCalendar").onkeydown = (event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              event.stopPropagation();
+              close();
+            }
+            if (event.key === "Tab") {
+              const controls = [
+                ...$("#transactionCalendar").querySelectorAll(
+                  "button:not(:disabled),select",
+                ),
+              ];
+              const first = controls[0],
+                last = controls[controls.length - 1];
+              if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last.focus();
+              } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first.focus();
+              }
+            }
+          };
+          $(focus)?.focus({ preventScroll: true });
+        };
+        draw();
+      }
+      function transactionFilterControls() {
+        const f = state.transactionFilters,
+          year = settings()?.year || new Date().getFullYear();
+        const options = (pairs, selected) =>
+          pairs
+            .map(
+              ([value, label]) =>
+                '<option value="' +
+                esc(value) +
+                '"' +
+                (value === selected ? " selected" : "") +
+                ">" +
+                esc(label) +
+                "</option>",
+            )
+            .join("");
+        const select = (key, label, pairs, selected = f[key]) =>
+          "<label>" +
+          label +
+          '<select id="transactionFilter-' +
+          key +
+          '" data-transaction-filter="' +
+          key +
+          '">' +
+          options(pairs, selected) +
+          "</select></label>";
+        // Options come from the full journal, so other active filters never hide choices.
+        const choices = (key) =>
+          [
+            ...new Set(
+              rows()
+                .map((t) => t[key])
+                .filter(Boolean),
+            ),
+          ]
+            .sort((a, b) => a.localeCompare(b))
+            .map((value) => [value, value]);
+        const date = (key, label) =>
+          '<div class="transaction-date-field"><span class="calendar-field-label" id="transactionDateLabel-' +
+          key +
+          '">' +
+          label +
+          '</span><button type="button" class="transaction-calendar-trigger" id="transactionFilter-' +
+          key +
+          '" data-transaction-calendar="' +
+          key +
+          '" aria-haspopup="dialog" aria-labelledby="transactionDateLabel-' +
+          key +
+          " transactionDateValue-" +
+          key +
+          '"><span id="transactionDateValue-' +
+          key +
+          '">' +
+          (f[key] ? esc(dateLabel(f[key])) : "Choose date") +
+          '</span><span aria-hidden="true">▦</span></button></div>';
+        return (
+          '<div class="transaction-filters"><div class="transaction-period-fields">' +
+          select("period", "Date range", [
+            ["month", "Selected month"],
+            ["quarter", "Quarter"],
+            ["year", "Entire year"],
+            ["custom", "Custom dates"],
+          ]) +
+          (f.period === "month"
+            ? select(
+                "month",
+                "Month",
+                MONTHS.map((name, i) => [String(i), name + " " + year]),
+                String(state.month),
+              )
+            : "") +
+          (f.period === "quarter"
+            ? select(
+                "quarter",
+                "Quarter",
+                [1, 2, 3, 4].map((q) => [
+                  String(q),
+                  "Q" +
+                    q +
+                    " · " +
+                    MONTHS[(q - 1) * 3] +
+                    "–" +
+                    MONTHS[q * 3 - 1],
+                ]),
+                f.quarter || String(Math.floor(state.month / 3) + 1),
+              )
+            : "") +
+          "</div>" +
+          (f.period === "custom"
+            ? '<div class="transaction-date-fields">' +
+              date("from", "From") +
+              date("to", "To") +
+              "</div>"
+            : "") +
+          select("category", "Category", [
+            ["", "All categories"],
+            ...transactionCategoryChoices().map((value) => [value, value]),
+          ]) +
+          select("method", "Payment method", [
+            ["", "All payment methods"],
+            ["__blank__", "Not recorded"],
+            ...choices("paymentMethod"),
+          ]) +
+          select("group", "Expense group", [
+            ["", "All expense groups"],
+            ["__blank__", "No expense group"],
+            ...choices("trip"),
+          ]) +
+          '<button type="button" class="button outline" id="clearTransactionFilters">Clear filters</button></div>'
+        );
+      }
+      // Expanded filters apply only to Transactions; Investments retains its monthly journal.
       function transactions(investments = false) {
-        // Apply journal, configured month, and case-insensitive description/category/trip search filters, then sort newest first.
-        const prefix = monthPrefix(),
-          search = state.search.toLowerCase();
+        const f = state.transactionFilters,
+          search = state.search.trim().toLowerCase();
+        const [from, to] = investments ? ["", ""] : transactionDateRange();
+        const invalid =
+          !investments &&
+          f.period === "custom" &&
+          (!from ||
+            !to ||
+            from > to ||
+            from < settings()?.year + "-01-01" ||
+            to > settings()?.year + "-12-31");
         const filtered = rows()
-          .filter(
-            (t) =>
-              (investments
-                ? t.type === "investment"
-                : state.type === "all" || t.type === state.type) &&
-              t.date.startsWith(prefix) &&
+          .filter((t) => {
+            if (investments)
+              return (
+                t.type === "investment" &&
+                t.date.startsWith(monthPrefix()) &&
+                (!search ||
+                  [t.description, t.category, t.trip]
+                    .join(" ")
+                    .toLowerCase()
+                    .includes(search))
+              );
+            return (
+              !invalid &&
+              (state.type === "all" || t.type === state.type) &&
+              t.date >= from &&
+              t.date <= to &&
+              (!f.category || t.category === f.category) &&
+              (!f.method ||
+                (f.method === "__blank__"
+                  ? !t.paymentMethod
+                  : t.paymentMethod === f.method)) &&
+              (!f.group ||
+                (f.group === "__blank__" ? !t.trip : t.trip === f.group)) &&
               (!search ||
-                (t.description + " " + t.category + " " + t.trip)
+                [
+                  t.description,
+                  t.date,
+                  t.type,
+                  t.amount,
+                  t.category,
+                  t.trip,
+                  t.paymentMethod,
+                  visiblePaymentDetail(t),
+                  t.notes,
+                ]
+                  .join(" ")
                   .toLowerCase()
-                  .includes(search)),
-          )
+                  .includes(search))
+            );
+          })
           .sort((a, b) => b.date.localeCompare(a.date) || b.row - a.row);
         const filter =
-          '<div class="filters"><input id="search" aria-label="Search transactions" placeholder="Search description, category or group…" value="' +
+          '<div class="filters"><input id="search" aria-label="Search transactions" placeholder="' +
+          (investments
+            ? "Search description or category…"
+            : "Search description, category, group, UPI, bank, notes…") +
+          '" value="' +
           esc(state.search) +
           '">' +
           (investments
@@ -3005,7 +3475,19 @@
                 state.type,
               ) +
               "</select>") +
-          "</div>";
+          "</div>" +
+          (investments ? "" : transactionFilterControls()) +
+          (invalid
+            ? '<p class="notice' +
+              (from && to ? " warning" : "") +
+              '" role="status">' +
+              (!from || !to
+                ? "Confirm From and To using the checkmark in each calendar. Both dates are included."
+                : "Choose a valid start and end date within " +
+                  esc(settings()?.year) +
+                  ". The end date must be on or after the start date.") +
+              "</p>"
+            : "");
         // Investment monthly contributions use the filtered list; annual contributions use all investment entries.
         const head = investments
           ? investmentJourney() +
@@ -3982,6 +4464,7 @@
           state.search,
           state.trip,
           state.dashboard,
+          state.transactionFilters,
           state.transactionPage,
         ]);
       function captureViewContext() {
@@ -4111,6 +4594,7 @@
               : state.view[0].toUpperCase() + state.view.slice(1);
         $("#monthSelect").hidden =
           ["review", "payments", "profile"].includes(state.view) ||
+          state.view === "transactions" ||
           isGroupDashboard();
         // The badge counts records with issues rather than individual issues.
         $("#reviewBadge").textContent = loaded()
@@ -4393,6 +4877,39 @@
         if (typeFilter)
           typeFilter.onchange = (e) => {
             state.type = e.target.value;
+            if (
+              state.view === "transactions" &&
+              !transactionCategoryChoices().includes(
+                state.transactionFilters.category,
+              )
+            )
+              state.transactionFilters.category = "";
+            render();
+          };
+        document
+          .querySelectorAll("[data-transaction-filter]")
+          .forEach((control) => {
+            control.onchange = (e) => {
+              const key = control.dataset.transactionFilter;
+              if (key === "month") state.month = Number(e.target.value);
+              else state.transactionFilters[key] = e.target.value;
+              state.transactionPage = 1;
+              render();
+            };
+          });
+        document
+          .querySelectorAll("[data-transaction-calendar]")
+          .forEach((button) => {
+            button.onclick = () =>
+              openTransactionCalendar(button.dataset.transactionCalendar);
+          });
+        const clearFilters = $("#clearTransactionFilters");
+        if (clearFilters)
+          clearFilters.onclick = () => {
+            state.transactionFilters = defaultTransactionFilters();
+            state.search = "";
+            state.type = "all";
+            state.transactionPage = 1;
             render();
           };
         // Support both pointer activation and Enter/Space on the keyboard-accessible trip cards.
@@ -4597,6 +5114,7 @@
           state.setupRequired = false;
           if (previousYear !== data.config.year) {
             state.month = Number(data.config.defaultDate.slice(5, 7)) - 1;
+            state.transactionFilters = defaultTransactionFilters();
             state.trip = "";
           }
           $("#connectionDot").classList.add("live");
