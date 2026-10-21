@@ -33,7 +33,7 @@ Keep **Only myself** selected. Your friend should create their own private app r
 ### 4. Authorize and open the app
 
 1. Click **Authorize access** and choose the same Google account used for your sheet copy.
-2. If Google shows **Google hasn’t verified this app**, open **Advanced → Go to [your project name] (unsafe)** only for the Kashlo copy you just created. This notice can appear for personal apps that Google has not verified. Check the requested permissions, then click **Allow** if you want to grant them.
+2. If Google shows **Google hasn’t verified this app**, open **Advanced → Go to [your project name] (unsafe)** for the Kashlo copy you just created. This is a normal warning for personal Google Apps Script projects that have not gone through Google’s verification process. Continue only for your own Kashlo copy. Review the requested permissions and grant all permissions Kashlo requests, then click **Allow**. This authorization is required to complete setup and let Kashlo read and update your workbook. [Learn about Google’s verification warning](https://developers.google.com/apps-script/guides/client-verification).
 3. If Google says the app is blocked or offers no way to continue, see [Help](#if-something-goes-wrong).
 4. After deployment, copy the **Web app URL** ending in `/exec`. Open it in a new tab and bookmark it. This is the app you will use every day.
 
