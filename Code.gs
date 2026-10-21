@@ -1054,7 +1054,7 @@ function dataSnapshot_() {
   const mappings = {},
     lookupRows = new Map(),
     lookupColumns = workspaceConfig_().layout.lookup;
-  // Each journal has its own descriptions; investments retain their fixed category.
+  // Each journal has independent reusable descriptions and categories.
   [
     ["expense", mapping],
     ["income", incomeMapping],
@@ -1063,7 +1063,7 @@ function dataSnapshot_() {
     const width = Math.max(
       lookupColumns.description,
       lookupColumns.category,
-      type !== "investment" ? lookupColumns.categoryOptions : 0,
+      lookupColumns.categoryOptions,
       type === "expense" ? lookupColumns.trips : 0,
     );
     const rows = sheet
@@ -1106,7 +1106,7 @@ function dataSnapshot_() {
         workspaceConfig_().layout.lookup.categoryOptions,
         lookupRows.get(incomeMapping),
       ),
-      investment: [workspaceConfig_().categories.investment],
+      investment: lookupCategories_(investmentMapping, "investment", lookupRows.get(investmentMapping)),
     },
     mappings,
     paymentOptions: paymentOptions_(book, paymentMethods, paymentRecords),
@@ -1250,24 +1250,23 @@ function transactionValues_(book, input) {
     lookupColumns.categoryOptions,
     ...(input.type === "expense" ? [lookupColumns.trips] : []),
   ]);
-  const allowed =
-    input.type === "investment"
-      ? [workspaceConfig_().categories.investment]
-      : options_(lookup, lookupColumns.categoryOptions, mappings);
+  const allowed = lookupCategories_(lookup, input.type, mappings);
   // Find an existing description without regard to case or surrounding spaces.
   const match = mappings.find(
     (r) =>
       normalized_(r[lookupColumns.description - 1]) ===
       normalized_(description),
   );
-  // Use the supplied category, otherwise the known mapping; investments use the configured fixed category.
-  const category =
-    input.type === "investment"
-      ? workspaceConfig_().categories.investment
-      : String(
-          input.category || (match && match[lookupColumns.category - 1]) || "",
-        ).trim();
-  if (!allowed.includes(category)) throw new Error("Choose a valid category.");
+  // Removed master choices may be retained only on the same existing transaction.
+  const category = String(input.category ||
+    (match && match[lookupColumns.category - 1]) ||
+    (input.type === "investment" ? allowed[0] : "") || "").trim();
+  if (!allowed.includes(category)) {
+    const current = input.row && input.fingerprint && checkedTransaction_(book, input);
+    if (!current || current.sheet.getRange(current.row, workspaceConfig_().layout.journal.category)
+      .getDisplayValues()[0][0] !== category)
+      throw new Error("Choose a valid category.");
+  }
   // The legacy trip field stores any expense group, including events and projects.
   let trip = input.type === "expense" ? String(input.trip || "").trim() : "";
   if (trip && !options_(lookup, lookupColumns.trips, mappings).includes(trip))
@@ -1931,6 +1930,13 @@ function ensurePaymentStorage_(book) {
     types.setFrozenRows(1);
     types.setColumnWidth(1, 240);
   }
+  // Once initialized, column A is authoritative, even when every type is removed.
+  // Older workbooks stored only custom types; migrate defaults once, then allow removal.
+  const types = book.getSheetByName(workspaceConfig_().paymentTypesSheet);
+  if (types.getRange(1, 1).getDisplayValues()[0][0] !== "Payment type") {
+    replaceChoiceColumn_(types, 1, paymentMethods_(book), 2);
+    literal_(types.getRange(1, 1), "Payment type");
+  }
   // Migrate previously removed choices without touching journal history.
   // Delete bottom-up so one deletion cannot change another row's position.
   const records = paymentRecords_(book);
@@ -1956,18 +1962,14 @@ function paymentRecords_(book) {
     }))
     .filter((r) => r.name);
 }
-// Defaults remain available; custom types persist even before a named account is added.
+// Legacy custom-only lists include defaults until their one-time migration.
 function paymentMethods_(book) {
   const sheet = book.getSheetByName(workspaceConfig_().paymentTypesSheet);
-  const custom =
-    sheet && sheet.getMaxRows() > 1
-      ? sheet
-          .getRange(2, 1, sheet.getMaxRows() - 1, 1)
-          .getDisplayValues()
-          .flat()
-      : [];
+  const values = sheet ? sheet.getRange(1, 1, sheet.getMaxRows(), 1)
+    .getDisplayValues().flat() : [];
+  const custom = values.slice(1);
   const seen = new Set();
-  return [...workspaceConfig_().paymentMethods, ...custom]
+  return [...(values[0] === "Payment type" ? [] : workspaceConfig_().paymentMethods), ...custom]
     .map((value) => String(value).trim())
     .filter((value) => {
       const key = normalized_(value);
@@ -2154,23 +2156,16 @@ function addLookupOption(input) {
         workspaceConfig_().limits.descriptionLength +
         " characters.",
     );
-  if (input.kind === "category" && input.type === "investment")
-    throw new Error("Investment entries use the Investments category.");
   return withWorkspaceWrite_(input, () => {
     const book = book_(),
       sheet = requiredSheet_(book, workspaceConfig_().lookupSheets[input.type]),
       c = workspaceConfig_().layout.lookup;
-    const categories =
-      input.type === "investment"
-        ? [workspaceConfig_().categories.investment]
-        : options_(sheet, c.categoryOptions);
+    const categories = lookupCategories_(sheet, input.type);
     const categoryName = String(input.newCategory || "").trim();
     if (categoryName.length > workspaceConfig_().limits.descriptionLength)
       throw new Error("The category name is too long.");
-    const requestedCategory =
-      input.type === "investment"
-        ? workspaceConfig_().categories.investment
-        : categoryName || String(input.category || "").trim();
+    const requestedCategory = categoryName || String(input.category || "").trim() ||
+      (input.type === "investment" ? categories[0] : "");
     const category =
       categories.find(
         (value) => normalized_(value) === normalized_(requestedCategory),
@@ -2227,6 +2222,7 @@ function addLookupOption(input) {
       literal_(sheet.getRange(row, column), value);
       return row;
     };
+    if (input.type === "investment") initializeInvestmentCategories_(sheet, book);
     if (input.kind === "category") {
       const existingCategory = categories.find(
         (value) => normalized_(value) === normalized_(name),
@@ -2262,4 +2258,180 @@ function addLookupOption(input) {
     }
     return { ok: true, created: true, name };
   });
+}
+
+// Replace only one independent master column. Literal writes prevent formula injection;
+// neighboring descriptions, categories, groups, formatting, and validation stay in place.
+function replaceChoiceColumn_(sheet, column, values, first = workspaceConfig_().layout.lookup.firstDataRow) {
+  const current = sheet.getMaxRows() >= first
+    ? sheet.getRange(first, column, sheet.getMaxRows() - first + 1, 1).getDisplayValues() : [];
+  let used = 0;
+  current.forEach((row, i) => { if (row[0]) used = i + 1; });
+  const height = Math.max(used, values.length);
+  if (!height) return;
+  if (first + height - 1 > sheet.getMaxRows())
+    sheet.insertRowsAfter(sheet.getMaxRows(), first + height - 1 - sheet.getMaxRows());
+  sheet.getRange(first, column, height, 1).setRichTextValues(
+    Array.from({ length: height }, (_, i) => [SpreadsheetApp.newRichTextValue()
+      .setText(String(values[i] || "")).build()]),
+  );
+}
+function lookupCategories_(sheet, type, rows) {
+  const c = workspaceConfig_().layout.lookup;
+  const categories = options_(sheet, c.categoryOptions, rows);
+  // Older copies treated investments as fixed. The header marks an editable master,
+  // so an intentionally empty list cannot silently resurrect the original default.
+  if (type !== "investment" || categories.length ||
+      sheet.getRange(1, c.categoryOptions).getDisplayValues()[0][0] === "Categories")
+    return categories;
+  const mapped = options_(sheet, c.category, rows);
+  return mapped.length ? mapped : [workspaceConfig_().categories.investment];
+}
+function initializeInvestmentCategories_(sheet, book) {
+  const c = workspaceConfig_().layout.lookup;
+  if (sheet.getRange(1, c.categoryOptions).getDisplayValues()[0][0] === "Categories") return;
+  replaceChoiceColumn_(sheet, c.categoryOptions, lookupCategories_(sheet, "investment"));
+  // Older investment journals returned the fixed default category. Future native
+  // entries now look up the chosen description; recorded results stay unchanged.
+  const journal = sheet_(book, "investment"), j = workspaceConfig_().layout.journal;
+  const height = journal.getMaxRows() - j.firstDataRow + 1;
+  const inputs = journal.getRange(j.firstDataRow, 1, height, journalWidth_()).getValues();
+  const formulas = journal.getRange(j.firstDataRow, j.category, height, 1).getFormulas();
+  const lookupName = sheetName_(workspaceConfig_().lookupSheets.investment).replace(/'/g, "''");
+  const descriptions = "'" + lookupName + "'!$" + columnA1_(c.description) + "$" + c.firstDataRow + ":$" + columnA1_(c.description);
+  const categories = "'" + lookupName + "'!$" + columnA1_(c.category) + "$" + c.firstDataRow + ":$" + columnA1_(c.category);
+  const updates = new Map();
+  inputs.forEach((row, i) => {
+    if (!formulas[i][0]) return;
+    const index = j.firstDataRow + i;
+    if (row[j.description - 1] || row[j.amount - 1] !== "" || row[j.date - 1]) {
+      literal_(journal.getRange(index, j.category), row[j.category - 1]);
+    } else {
+      const description = columnA1_(j.description) + index;
+      updates.set(index, '=IF(' + description + '="","",XLOOKUP(TRIM(' + description +
+        '),ARRAYFORMULA(TRIM(' + descriptions + ')),' + categories + ',"",0))');
+    }
+  });
+  for (const { start, count } of consecutiveRows_([...updates.keys()]))
+    journal.getRange(start, j.category, count, 1).setFormulas(
+      Array.from({ length: count }, (_, i) => [updates.get(start + i)]));
+  literal_(sheet.getRange(1, c.categoryOptions), "Categories");
+}
+// Native-sheet entries may derive G from the reusable description mapping. Freeze
+// those recorded results before changing that mapping; future rows keep their formulas.
+function preserveRecordedCategories_(book, type, descriptions) {
+  const sheet = sheet_(book, type), c = workspaceConfig_().layout.journal;
+  const height = sheet.getMaxRows() - c.firstDataRow + 1;
+  const inputs = sheet.getRange(c.firstDataRow, 1, height, journalWidth_()).getValues();
+  const formulas = sheet.getRange(c.firstDataRow, c.category, height, 1).getFormulas();
+  inputs.forEach((row, i) => {
+    if (formulas[i][0] && descriptions.has(normalized_(row[c.description - 1])))
+      literal_(sheet.getRange(c.firstDataRow + i, c.category), row[c.category - 1]);
+  });
+}
+function managedChoicePlan_(input) {
+  if (!input || !["edit", "remove"].includes(input.action) ||
+      !["paymentType", "paymentName", "description", "category"].includes(input.kind))
+    throw new Error("Choose a valid Manage action.");
+  if (input.action === "remove" && input.confirmed !== true)
+    throw new Error("Confirm removal first.");
+  const book = book_(), name = String(input.name || "").trim();
+  const newName = input.action === "edit" ? String(input.newName || "").trim() : "";
+  const limit = input.kind === "paymentType" ? 60 : input.kind === "paymentName" ? 100 :
+    workspaceConfig_().limits.descriptionLength;
+  if (!name || (input.action === "edit" && (!newName || newName.length > limit)))
+    throw new Error("Enter a name up to " + limit + " characters.");
+  if (input.kind === "paymentType" &&
+      ["__proto__", "constructor", "prototype"].includes(normalized_(newName)))
+    throw new Error("Choose another payment type name.");
+  const same = (a, b) => normalized_(a) === normalized_(b);
+  const plan = { book, name, newName };
+  if (input.kind === "paymentType" || input.kind === "paymentName") {
+    const methods = paymentMethods_(book), records = paymentRecords_(book);
+    const method = input.kind === "paymentType" ? name : String(input.method || "");
+    if (!methods.includes(method)) throw new Error("This payment type changed. Refresh the app.");
+    const existing = input.kind === "paymentType" ? methods : records
+      .filter(r => r.method === method && r.active).map(r => r.name);
+    if (!existing.includes(name)) throw new Error("This choice changed. Refresh the app.");
+    if (input.action === "edit" && existing.some(value => value !== name && same(value, newName)))
+      throw new Error("That name already exists.");
+    if (input.kind === "paymentType" && input.action === "edit" && newName === "Cash" &&
+        records.some(record => record.method === method && !record.removed))
+      throw new Error("Remove this type's saved names before renaming it to Cash.");
+    return { ...plan, methods, records, method };
+  }
+  if (!Object.prototype.hasOwnProperty.call(workspaceConfig_().lookupSheets, input.type))
+    throw new Error("Choose a valid journal.");
+  const sheet = requiredSheet_(book, workspaceConfig_().lookupSheets[input.type]);
+  const c = workspaceConfig_().layout.lookup;
+  const categories = lookupCategories_(sheet, input.type);
+  const mappings = mappingRows_(sheet).filter(row => row[c.description - 1].trim());
+  const existing = input.kind === "category" ? categories : mappings.map(r => r[c.description - 1].trim());
+  if (!existing.includes(name)) throw new Error("This choice changed. Refresh the app.");
+  if (input.action === "edit" && existing.some(value => value !== name && same(value, newName)))
+    throw new Error("That name already exists.");
+  let category = "";
+  if (input.kind === "description") {
+    const matches = mappings.filter(r => same(r[c.description - 1], name));
+    if (matches.some(r => r[c.category - 1].trim() !== input.previousCategory))
+      throw new Error("This description changed. Refresh the app.");
+    if (input.action === "edit") {
+      category = String(input.category || "").trim();
+      if (!categories.includes(category)) throw new Error("Choose a valid category.");
+      const aliases = input.type === "expense" && book.getSheetByName(workspaceConfig_().legacyItemAliasesSheet);
+      if (newName !== name && aliases && options_(aliases, 1).some(value => same(value, newName)))
+        throw new Error("This is a historical description. Choose another name.");
+    }
+  } else if (input.action === "remove" && mappings.some(r => same(r[c.category - 1], name))) {
+    category = String(input.replacement || "").trim();
+    if (category === name || !categories.includes(category))
+      throw new Error("Choose a replacement category for descriptions using this category. Add another category first if needed.");
+  }
+  return { ...plan, sheet, c, categories, mappings, category };
+}
+// Master choices affect future entries. Financial records are never renamed or deleted.
+// Read-only validation runs before the retry marker; partial writes remain protected.
+function manageChoice(input) {
+  if (!input || typeof input !== "object") throw new Error("Choose a valid Manage action.");
+  return withWorkspaceWrite_(input, plan => {
+    const { book, name, newName } = plan;
+    if (input.kind === "paymentType" || input.kind === "paymentName") {
+      ensurePaymentStorage_(book);
+      const records = paymentRecords_(book);
+      const sheet = book.getSheetByName(workspaceConfig_().paymentMethodsSheet);
+      const affected = records.filter(r => r.method === plan.method &&
+        (input.kind === "paymentType" || normalized_(r.name) === normalized_(name)));
+      if (input.action === "remove") {
+        affected.sort((a, b) => b.row - a.row).forEach(r => sheet.deleteRow(r.row));
+      } else {
+        affected.forEach(r => literal_(sheet.getRange(r.row, input.kind === "paymentType" ? 1 : 2), newName));
+      }
+      if (input.kind === "paymentType") {
+        replaceChoiceColumn_(book.getSheetByName(workspaceConfig_().paymentTypesSheet), 1,
+          plan.methods.flatMap(value => value === name ? (input.action === "remove" ? [] : [newName]) : [value]), 2);
+      }
+    } else {
+      const { sheet, c, mappings, categories, category } = plan;
+      const affectedDescriptions = new Set(mappings.filter(row => input.kind === "description"
+        ? normalized_(row[c.description - 1]) === normalized_(name)
+        : normalized_(row[c.category - 1]) === normalized_(name))
+        .map(row => normalized_(row[c.description - 1])));
+      preserveRecordedCategories_(book, input.type, affectedDescriptions);
+      if (input.type === "investment") initializeInvestmentCategories_(sheet, book);
+      if (input.kind === "category") {
+        replaceChoiceColumn_(sheet, c.categoryOptions, categories.flatMap(value => value === name
+          ? (input.action === "remove" ? [] : [newName]) : [value]).sort());
+      }
+      const next = mappings.flatMap(row => {
+        const description = row[c.description - 1].trim(), oldCategory = row[c.category - 1].trim();
+        if (input.kind === "description" && normalized_(description) === normalized_(name))
+          return input.action === "remove" ? [] : [{ description: newName, category }];
+        return [{ description, category: input.kind === "category" && normalized_(oldCategory) === normalized_(name)
+          ? (input.action === "edit" ? newName : category) : oldCategory }];
+      }).sort((a, b) => a.category.localeCompare(b.category) || a.description.localeCompare(b.description));
+      replaceChoiceColumn_(sheet, c.description, next.map(row => row.description));
+      replaceChoiceColumn_(sheet, c.category, next.map(row => row.category));
+    }
+    return { ok: true };
+  }, () => managedChoicePlan_(input));
 }

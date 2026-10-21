@@ -118,9 +118,13 @@ Removing a payment name deletes it from the reusable list and shows its name as 
 
 ### Organize descriptions, categories, and expense groups
 
-**Manage → Descriptions:** choose the journal, enter a description, and choose its category. For expenses or income, **+ Add new category** lets you create the category without leaving this section.
+**Manage → Descriptions:** choose the journal, enter a description, and choose its category. For any journal, **+ Add new category** lets you create the category without leaving this section.
 
-**Manage → Categories:** add expense or income categories directly. Investment descriptions use the fixed **Investments** category. Existing descriptions cannot be reassigned or deleted through these controls.
+**Manage → Categories:** add categories for expenses, income, or investments. Use **Edit** or **Remove** beside any saved description or category, including the initial choices. Editing a description lets you change its name and category. Removing a category asks for a replacement if saved descriptions use it; add another category first if needed. Confirm removals in the pop-up.
+
+**Manage → Payment methods:** use **Edit** or **Remove** on a payment type or saved payment name. You can remove initial types such as UPI, Card, Bank transfer, or Cash. Removing a type also removes all names saved under it. Add it again later if needed.
+
+These changes update reusable choices for future entries. Existing transactions keep their recorded descriptions, categories, and payment history in the sheet. Removed payment choices display as blank in the app. Renamed payment choices are new labels for future entries; old labels remain in the transaction history and display as blank unless added again.
 
 **Dashboards → Expense groups → New group:** create a group for an event, project, or trip. You can also create one from the transaction form. A group combines expenses across categories and months; creating its name does not add an expense. Income and investments do not use expense groups.
 

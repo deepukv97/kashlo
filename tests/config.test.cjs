@@ -412,6 +412,7 @@ function fixture(overrides = {}) {
           "managePaymentOption",
           "addPaymentType",
           "addLookupOption",
+          "manageChoice",
         ];
         if (writes.includes(key))
           return (input) =>
@@ -1653,6 +1654,7 @@ test("payment UI manages names and conditionally requires details without losing
   for (const name of [
     "getData",
     "managePaymentOption",
+    "manageChoice",
     "addPaymentType",
     "addTransaction",
     "updateTransaction",
@@ -1677,15 +1679,9 @@ test("payment UI manages names and conditionally requires details without losing
       querySelector: element,
       addEventListener() {},
       querySelectorAll(selector) {
-        if (selector !== "[data-remove-payment-name]") return [];
-        removeButtons = Array.from(
-          element("#content").innerHTML.matchAll(
-            /data-remove-payment-method="([^"]+)" data-remove-payment-name="([^"]+)"/g,
-          ),
-          (m) => ({
-            dataset: { removePaymentMethod: m[1], removePaymentName: m[2] },
-          }),
-        );
+        if (selector !== "[data-manage-choice]") return [];
+        removeButtons = Array.from(element("#content").innerHTML.matchAll(/data-manage-choice="([^"]+)"/g),
+          m => ({ dataset: { manageChoice: m[1].replaceAll("&quot;", '\"') } }));
         return removeButtons;
       },
     },
@@ -1862,8 +1858,12 @@ test("payment UI manages names and conditionally requires details without losing
     browser,
   );
   await removeButtons
-    .find((b) => b.dataset.removePaymentName === "Google Pay")
-    .onclick();
+    .find((b) => {
+      const choice = JSON.parse(b.dataset.manageChoice);
+      return choice.kind === "paymentName" && choice.name === "Google Pay" && choice.action === "remove";
+    }).onclick();
+  assert.ok(f.context.getData().paymentOptions.UPI.includes("Google Pay"));
+  await element("#manageChoiceForm").onsubmit({ preventDefault() {} });
   assert.equal(
     f.context.getData().paymentOptions.UPI.includes("Google Pay"),
     false,
@@ -1958,7 +1958,7 @@ test("payment storage expands trimmed journals without moving existing cells and
       description: "Paid in cash",
       amount: "25",
       date: "2026-10-15",
-      category: "Food",
+      category: type === "investment" ? "Investments" : "Food",
       paymentMethod: "Cash",
       paymentDetail: "",
       requestId: `cash_journal_${type}`,
@@ -2505,16 +2505,9 @@ test("Manage adds journal-specific choices, rejects remapping, and preserves adj
       }),
     /valid category/,
   );
-  assert.throws(
-    () =>
-      api.addLookupOption({
-        kind: "category",
-        type: "investment",
-        name: "Stocks",
-        requestId: "manage_investment_category",
-      }),
-    /Investments category/,
-  );
+  assert.equal(api.addLookupOption({ kind: "category", type: "investment", name: "Stocks",
+    requestId: "manage_investment_category" }).created, true);
+  assert.ok(api.getData().categories.investment.includes("Stocks"));
   assert.throws(
     () =>
       api.addLookupOption({
@@ -3656,7 +3649,7 @@ test("snapshot reuses lookup reads and date conversions without retaining stale 
     f.config.paymentMethodsSheet,
     f.config.paymentTypesSheet,
   ])
-    assert.equal(reads.get(name), 1, name);
+    assert.equal(reads.get(name), name === f.config.paymentTypesSheet ? 2 : 1, name);
   assert.deepEqual(Array.from(snapshot.paymentOptions.UPI), ["Sample app"]);
   assert.equal(JSON.stringify(f.expense.cells), before);
   const fingerprint = snapshot.transactions[0].fingerprint;
@@ -5768,4 +5761,241 @@ test("new-entry and edit forms require a positive amount with the decimal keyboa
     f.element("#modalContainer").innerHTML,
     /id="entryAmount" type="number" inputmode="decimal" min="0\.01" step="0\.01"[^>]*required/,
   );
+});
+
+for (const type of ["expense", "income", "investment"]) {
+  test(`${type}: Manage edits and removes descriptions and categories without altering records or adjacent lists`, () => {
+    const f = fixture(), api = f.context, c = f.config.layout.lookup;
+    api.getData();
+    const master = f.sheets[f.config.lookupSheets[type]],
+      original = type === "investment" ? "Investments" : "Food";
+    const journals = Object.values(f.config.sheets).map(name => JSON.stringify(f.sheets[f.resolve(name)].cells));
+    const groups = master.cells.map(row => row[c.trips - 1]);
+    let n = 0;
+    const manage = input => api.manageChoice({ type, ...input, requestId: `master_${type}_${++n}` });
+    api.addLookupOption({ kind: "category", type, name: "Other", requestId: `other_category_${type}` });
+    const renamed = { kind: "description", type, action: "edit", name: "Known item", newName: "Updated item",
+      previousCategory: original, category: "Other", requestId: `rename_description_${type}` };
+    assert.equal(api.manageChoice(renamed).ok, true);
+    assert.equal(api.manageChoice(renamed).ok, true); // Completed request replay.
+    assert.equal(api.getData().mappings[type][0].description, "Updated item");
+    assert.equal(api.getData().mappings[type][0].category, "Other");
+    manage({ kind: "category", action: "edit", name: "Other", newName: "General" });
+    assert.equal(api.getData().mappings[type][0].category, "General");
+    // Validation happens before the retry marker, so a replacement can be corrected.
+    const removal = { kind: "category", type, action: "remove", name: "General", confirmed: true,
+      requestId: `remove_category_${type}` };
+    assert.throws(() => api.manageChoice(removal), /replacement category/);
+    assert.equal(f.properties[`request:${removal.requestId}`], undefined);
+    api.manageChoice({ ...removal, replacement: original });
+    assert.equal(api.getData().categories[type].includes("General"), false);
+    assert.equal(api.getData().mappings[type][0].category, original);
+    assert.throws(() => manage({ kind: "description", action: "remove", name: "Updated item",
+      previousCategory: original }), /Confirm/);
+    manage({ kind: "description", action: "remove", name: "Updated item", previousCategory: original, confirmed: true });
+    manage({ kind: "category", action: "remove", name: original, confirmed: true });
+    assert.equal(api.getData().mappings[type].length, 0);
+    assert.equal(api.getData().categories[type].length, 0);
+    assert.equal(api.getData().categories[type].length, 0); // No default resurrection on refresh.
+    assert.deepEqual(master.cells.map(row => row[c.trips - 1]), groups);
+    assert.deepEqual(Object.values(f.config.sheets).map(name => JSON.stringify(f.sheets[f.resolve(name)].cells)), journals);
+  });
+}
+
+test("payment types migrate once, allow default/name edits, delete dependent names and never resurrect", () => {
+  const f = fixture(), api = f.context;
+  const types = f.sheets[f.config.paymentTypesSheet] = new Sheet();
+  types.cells[0][0] = "Custom payment type";
+  types.cells[1][0] = "Wallet";
+  let data = api.getData();
+  assert.deepEqual(Array.from(data.config.paymentMethods), ["Bank transfer", "Card", "UPI", "Cash", "Wallet"]);
+  api.managePaymentOption({ action: "add", method: "UPI", name: "Example app", requestId: "add_app_for_master_edit" });
+  api.addTransaction({ type: "expense", description: "Known item", amount: 20, date: "2026-10-21",
+    category: "Food", paymentMethod: "UPI", paymentDetail: "Example app", requestId: "master_payment_history" });
+  const history = JSON.stringify(f.expense.cells);
+  const rename = { kind: "paymentType", action: "edit", name: "UPI", newName: "Mobile payment",
+    requestId: "rename_default_payment_type" };
+  api.manageChoice(rename);
+  api.manageChoice(rename);
+  data = api.getData();
+  assert.equal(data.config.paymentMethods.includes("UPI"), false);
+  assert.deepEqual(Array.from(data.paymentOptions["Mobile payment"]), ["Example app"]);
+  api.manageChoice({ kind: "paymentName", action: "edit", method: "Mobile payment", name: "Example app",
+    newName: '=literal "name"', requestId: "rename_payment_name_literal" });
+  assert.deepEqual(Array.from(api.getData().paymentOptions["Mobile payment"]), ['=literal "name"']);
+  const remove = { kind: "paymentType", action: "remove", name: "Mobile payment", confirmed: true,
+    requestId: "remove_default_payment_type" };
+  api.manageChoice(remove);
+  api.manageChoice(remove);
+  assert.equal(api.paymentRecords_(f.book).length, 0);
+  for (const name of Array.from(api.getData().config.paymentMethods))
+    api.manageChoice({ kind: "paymentType", action: "remove", name, confirmed: true,
+      requestId: "remove_all_types_" + name.replaceAll(" ", "_") });
+  assert.equal(api.getData().config.paymentMethods.length, 0);
+  assert.equal(api.getData().config.paymentMethods.length, 0);
+  assert.equal(JSON.stringify(f.expense.cells), history);
+  api.addPaymentType({ name: "UPI", requestId: "recreate_removed_default" });
+  assert.deepEqual(Array.from(api.getData().config.paymentMethods), ["UPI"]);
+});
+
+test("Manage rejects stale choices, conflicts, unsafe names and another workspace before writing", () => {
+  const f = fixture(), api = f.context;
+  api.getData();
+  const original = JSON.stringify(f.sheets[f.config.lookupSheets.expense].cells);
+  const edit = { kind: "description", type: "expense", name: "Known item", action: "edit",
+    previousCategory: "Wrong", newName: "Changed", category: "Food", requestId: "stale_master_choice" };
+  assert.throws(() => api.manageChoice(edit), /changed/);
+  assert.equal(f.properties["request:stale_master_choice"], undefined);
+  assert.throws(() => api.manageChoice({ ...edit, previousCategory: "Food", workspaceRevision: 99 }), /settings changed/);
+  assert.equal(JSON.stringify(f.sheets[f.config.lookupSheets.expense].cells), original);
+  assert.throws(() => api.manageChoice({ kind: "paymentType", name: "UPI", action: "edit", newName: "card",
+    requestId: "conflicting_type_name" }), /already exists/);
+  assert.throws(() => api.manageChoice({ kind: "paymentType", name: "UPI", action: "edit", newName: "__proto__",
+    requestId: "unsafe_managed_type" }), /another payment type/);
+  api.manageChoice({ ...edit, previousCategory: "Food" });
+  assert.throws(() => api.manageChoice({ ...edit, previousCategory: "Food", requestId: "obsolete_master_choice" }), /changed/);
+  f.setActiveEmail("different@example.test");
+  assert.throws(() => api.manageChoice({ kind: "paymentType", name: "UPI", action: "remove", confirmed: true,
+    requestId: "unauthorized_master_edit" }), /private/);
+});
+
+test("master removal preserves computed native categories and allows editing historical categories", () => {
+  const f = fixture(), api = f.context, c = f.config.layout.journal;
+  api.getData();
+  const sheet = f.expense, getRange = sheet.getRange.bind(sheet);
+  sheet.getRange(2, c.category).setFormula('=VLOOKUP(B2,\'Item & Category\'!A:B,2,FALSE)');
+  // Emulate Sheets' evaluated result, while getFormulas still exposes the real formula.
+  sheet.getRange = (...args) => {
+    const range = getRange(...args), values = range.getValues;
+    range.getValues = () => values().map(row => row.map(value =>
+      typeof value === "string" && value.startsWith("=VLOOKUP") ? "Food" : value));
+    return range;
+  };
+  api.manageChoice({ kind: "category", type: "expense", action: "edit", name: "Food", newName: "Meals",
+    requestId: "freeze_native_history_category" });
+  assert.equal(sheet.cells[1][c.category - 1], "Food");
+  const entry = api.getData().transactions[0];
+  api.updateTransaction({ type: "expense", row: entry.row, fingerprint: entry.fingerprint,
+    description: entry.description, category: "Food", amount: 65, date: "2026-01-04",
+    requestId: "edit_retained_historical_category" });
+  assert.equal(api.getData().transactions[0].category, "Food");
+  assert.throws(() => api.addTransaction({ type: "expense", description: "New entry", category: "Food", amount: 1,
+    date: "2026-10-21", requestId: "reject_new_removed_category" }), /valid category/);
+});
+
+test("partial master deletion cannot replay after a lost or failed write", () => {
+  const f = fixture(), api = f.context;
+  api.getData();
+  for (const name of ["First app", "Second app"])
+    api.managePaymentOption({ action: "add", method: "UPI", name, requestId: "partial_master_" + name.replaceAll(" ", "_") });
+  const sheet = f.sheets[f.config.paymentMethodsSheet], remove = sheet.deleteRow.bind(sheet);
+  let calls = 0;
+  sheet.deleteRow = row => { if (++calls === 2) throw new Error("Connection lost"); return remove(row); };
+  const payload = { kind: "paymentType", action: "remove", name: "UPI", confirmed: true,
+    requestId: "partial_delete_payment_type" };
+  assert.throws(() => api.manageChoice(payload), /Connection lost/);
+  assert.throws(() => api.manageChoice(payload), /may already have started/);
+  assert.equal(calls, 2);
+});
+
+test("Manage UI confirms removals, edits every choice, refreshes selectors and escapes master names", async () => {
+  const f = fixture(), elements = new Map();
+  const element = selector => {
+    if (!elements.has(selector)) elements.set(selector, {
+      value: selector === "#entryType" ? "expense" : "", innerHTML: "", textContent: "",
+      classList: { add() {}, remove() {}, toggle() {} }, addEventListener() {},
+      setAttribute() {}, focus() {},
+    });
+    return elements.get(selector);
+  };
+  let buttons = [], calls = 0;
+  const decode = value => value.replaceAll("&quot;", '"').replaceAll("&#39;", "'")
+    .replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&amp;", "&");
+  const runner = {
+    withSuccessHandler(fn) { this.success = fn; return this; },
+    withFailureHandler(fn) { this.failure = fn; return this; },
+  };
+  for (const name of ["getData", "manageChoice", "addLookupOption", "addPaymentType"])
+    runner[name] = function(input) {
+      if (name === "manageChoice") calls++;
+      try { this.success(JSON.parse(JSON.stringify(f.context[name](input)))); }
+      catch (error) { this.failure(error); }
+    };
+  const google = { script: { run: runner } };
+  const browser = vm.createContext({ console, Intl, Date, crypto, google, setTimeout: () => 0,
+    window: { google }, document: { querySelector: element, addEventListener() {},
+      querySelectorAll(selector) {
+        if (selector !== "[data-manage-choice]") return [];
+        buttons = Array.from(element("#content").innerHTML.matchAll(/data-manage-choice="([^"]+)"/g),
+          match => ({ dataset: { manageChoice: decode(match[1]) } }));
+        return buttons;
+      },
+    },
+  });
+  vm.runInContext(browserSource, browser);
+  await new Promise(resolve => setImmediate(resolve));
+  const open = (kind, name, action) => buttons.find(button => {
+    const choice = JSON.parse(button.dataset.manageChoice);
+    return choice.kind === kind && choice.name === name && choice.action === action;
+  }).onclick();
+  vm.runInContext('state.manageSection="payments"; navigate("payments")', browser);
+  for (const name of ["UPI", "Cash", "Card", "Bank transfer"])
+    assert.ok(buttons.some(button => { const choice = JSON.parse(button.dataset.manageChoice);
+      return choice.kind === "paymentType" && choice.name === name && choice.action === "remove"; }));
+  open("paymentType", "UPI", "remove");
+  assert.match(element("#modalContainer").innerHTML, /Confirm removal/);
+  assert.equal(calls, 0);
+  element("#cancelManageChoice").onclick();
+  assert.equal(calls, 0);
+  open("paymentType", "UPI", "remove");
+  await element("#manageChoiceForm").onsubmit({ preventDefault() {} });
+  assert.equal(f.context.getData().config.paymentMethods.includes("UPI"), false);
+  browser.removed = { paymentMethod: "UPI", paymentDetail: "Old name" };
+  assert.equal(vm.runInContext("visiblePaymentMethod(removed)", browser), "");
+  open("paymentType", "Cash", "edit");
+  element("#manageChoiceName").value = 'Wallet "<sample>"';
+  await element("#manageChoiceForm").onsubmit({ preventDefault() {} });
+  assert.doesNotMatch(element("#content").innerHTML, /<sample>/);
+  assert.ok(f.context.getData().config.paymentMethods.includes('Wallet "<sample>"'));
+  for (const type of ["expense", "income", "investment"]) {
+    browser.journal = type;
+    vm.runInContext('state.lookupType=journal; state.manageSection="descriptions"; navigate("payments")', browser);
+    open("description", "Known item", "edit");
+    element("#manageChoiceName").value = "Updated " + type;
+    element("#manageChoiceCategory").value = type === "investment" ? "Investments" : "Food";
+    await element("#manageChoiceForm").onsubmit({ preventDefault() {} });
+    assert.equal(f.context.getData().mappings[type][0].description, "Updated " + type);
+    open("description", "Updated " + type, "remove");
+    await element("#manageChoiceForm").onsubmit({ preventDefault() {} });
+    assert.equal(f.context.getData().mappings[type].length, 0);
+    vm.runInContext('state.manageSection="categories"; render()', browser);
+    open("category", type === "investment" ? "Investments" : "Food", "edit");
+    element("#manageChoiceName").value = "Custom category";
+    await element("#manageChoiceForm").onsubmit({ preventDefault() {} });
+    assert.deepEqual(Array.from(f.context.getData().categories[type]), ["Custom category"]);
+    open("category", "Custom category", "remove");
+    await element("#manageChoiceForm").onsubmit({ preventDefault() {} });
+    assert.equal(f.context.getData().categories[type].length, 0);
+  }
+  assert.equal(element("#modalContainer").innerHTML, "");
+});
+
+test("investment master migration updates only prepared future formulas and accepts custom categories", () => {
+  const f = fixture(), api = f.context, c = f.config.layout.journal;
+  api.getData();
+  const sheet = f.sheets[f.resolve(f.config.sheets.investment)];
+  sheet.getRange(3, c.category).setFormula('=IF(B3="","","Investments")');
+  sheet.getRange(4, c.category).setFormula('=IF(B4="","","Investments")');
+  sheet.getRange(5, c.category).setValue("Keep manual value");
+  api.addLookupOption({ kind: "category", type: "investment", name: "Funds", requestId: "initialize_custom_investments" });
+  assert.match(sheet.getRange(3, c.category).getFormula(), /XLOOKUP\(TRIM\(B3\)/);
+  assert.match(sheet.getRange(3, c.category).getFormula(), /'Investment Items'!\$A\$2:\$A/);
+  assert.match(sheet.getRange(4, c.category).getFormula(), /TRIM\(B4\)/);
+  assert.equal(sheet.getRange(5, c.category).getValues()[0][0], "Keep manual value");
+  const oldFormula = sheet.getRange(3, c.category).getFormula();
+  api.addLookupOption({ kind: "category", type: "investment", name: "Bonds", requestId: "add_another_investment_category" });
+  assert.equal(sheet.getRange(3, c.category).getFormula(), oldFormula);
+  api.addTransaction({ type: "investment", description: "Index fund", amount: 100, date: "2026-10-21",
+    category: "Funds", requestId: "save_custom_investment_category" });
+  assert.ok(api.getData().transactions.some(entry => entry.type === "investment" && entry.category === "Funds"));
 });

@@ -2461,7 +2461,9 @@
           o[k] = (o[k] || 0) + (Number(t.amount) || 0);
           return o;
         }, {});
-      // Removed payment names are blank throughout the UI; source history stays in the sheet.
+      // Removed payment choices are blank throughout the UI; source history stays in the sheet.
+      const visiblePaymentMethod = (transaction) =>
+        paymentMethods().includes(transaction?.paymentMethod) ? transaction.paymentMethod : "";
       const visiblePaymentDetail = (transaction) =>
         state.data?.paymentOptions?.[transaction?.paymentMethod]?.includes(
           transaction?.paymentDetail,
@@ -2525,6 +2527,7 @@
             else if (name === "saveWorkspaceSettings")
               runner.saveWorkspaceSettings(args);
             else if (name === "addLookupOption") runner.addLookupOption(args);
+            else if (name === "manageChoice") runner.manageChoice(args);
             else if (name === "addPaymentType") runner.addPaymentType(args);
             else if (name === "managePaymentOption")
               runner.managePaymentOption(args);
@@ -2798,7 +2801,7 @@
                   t,
                   "method",
                   "Payment method",
-                  esc(t.paymentMethod || "Not recorded"),
+                  esc(visiblePaymentMethod(t) || "Not recorded"),
                 ) +
                 transactionField(
                   t,
@@ -3324,7 +3327,7 @@
           [
             ...new Set(
               rows()
-                .map((t) => t[key])
+                .map((t) => key === "paymentMethod" ? visiblePaymentMethod(t) : t[key])
                 .filter(Boolean),
             ),
           ]
@@ -3437,8 +3440,8 @@
               (!f.category || t.category === f.category) &&
               (!f.method ||
                 (f.method === "__blank__"
-                  ? !t.paymentMethod
-                  : t.paymentMethod === f.method)) &&
+                  ? !visiblePaymentMethod(t)
+                  : visiblePaymentMethod(t) === f.method)) &&
               (!f.group ||
                 (f.group === "__blank__" ? !t.trip : t.trip === f.group)) &&
               (!search ||
@@ -3449,7 +3452,7 @@
                   t.amount,
                   t.category,
                   t.trip,
-                  t.paymentMethod,
+                  visiblePaymentMethod(t),
                   visiblePaymentDetail(t),
                   t.notes,
                 ]
@@ -3837,6 +3840,70 @@
         $("#groupName").focus();
       }
       // Keep reusable lists together, with the selected section and journal preserved on refresh.
+      function manageChoiceActions(choice) {
+        return '<div class="reviewactions">' + ["edit", "remove"].map(action =>
+          '<button type="button" class="button outline" data-manage-choice="' +
+          esc(JSON.stringify({ ...choice, action })) + '" aria-label="' +
+          esc((action === "edit" ? "Edit " : "Remove ") + choice.name) + '">' +
+          (action === "edit" ? "Edit" : "Remove") + '</button>').join("") + '</div>';
+      }
+      function openManageChoice(choice) {
+        if (state.saveBusy || !loaded()) return;
+        const editing = choice.action === "edit",
+          lookup = ["description", "category"].includes(choice.kind),
+          categories = state.data.categories[choice.type] || [],
+          dependent = choice.kind === "category" &&
+            (state.data.mappings[choice.type] || []).some(entry => entry.category === choice.name),
+          needsCategory = choice.kind === "description" && editing ||
+            choice.kind === "category" && !editing && dependent;
+        const label = { paymentType: "payment type", paymentName: "payment name",
+          description: "description", category: "category" }[choice.kind];
+        $("#modalContainer").innerHTML =
+          '<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="manageChoiceTitle">' +
+          '<div class="modal-head"><h2 id="manageChoiceTitle">' + (editing ? "Edit " : "Remove ") + label +
+          '</h2><button class="close" aria-label="Close dialog">×</button></div><p>' + esc(choice.name) + '</p>' +
+          '<div class="notice">' + (lookup
+            ? 'Recorded transactions keep their original descriptions and categories. Changes apply to reusable choices for future entries.'
+            : 'Recorded payment history stays in the sheet. Removed choices display as blank in the app.' +
+              (choice.kind === "paymentType" && !editing ? ' Removing a type also removes all saved names under it.' : '')) +
+          '</div><form id="manageChoiceForm"><div class="formgrid">' +
+          (editing ? '<div class="field full"><label for="manageChoiceName">Name</label><input id="manageChoiceName" required maxlength="' +
+            (choice.kind === "paymentType" ? 60 : choice.kind === "paymentName" ? 100 : 180) + '" value="' + esc(choice.name) + '"></div>' : '') +
+          (needsCategory ? '<div class="field full"><label for="manageChoiceCategory">' +
+            (editing ? 'Category' : 'Replacement category for saved descriptions') +
+            '</label><select id="manageChoiceCategory" required><option value="">Choose a category</option>' +
+            selectOptions(categories.filter(value => editing || value !== choice.name), choice.previousCategory) +
+            '</select>' + (!editing ? '<small>Descriptions using this category move to the replacement. Add another category first if none is available.</small>' : '') + '</div>' : '') +
+          '</div><p id="manageChoiceError" class="formerror" role="alert"></p><div class="modal-footer">' +
+          '<button type="button" class="button outline" id="cancelManageChoice">Cancel</button>' +
+          '<button class="button' + (editing ? '' : ' danger') + '" id="saveManageChoice">' +
+          (editing ? 'Save changes' : 'Confirm removal') + '</button></div></form></section></div>';
+        const close = () => { if (!state.saveBusy) $("#modalContainer").innerHTML = ""; };
+        $(".close").onclick = close;
+        $("#cancelManageChoice").onclick = close;
+        (editing ? $("#manageChoiceName") : $("#cancelManageChoice")).focus();
+        const requestId = id();
+        $("#manageChoiceForm").onsubmit = async event => {
+          event.preventDefault();
+          if (state.saveBusy) return;
+          const payload = { ...choice, requestId, confirmed: !editing };
+          if (editing) payload.newName = $("#manageChoiceName").value;
+          if (needsCategory) payload[editing ? "category" : "replacement"] = $("#manageChoiceCategory").value;
+          state.saveBusy = true;
+          $("#saveManageChoice").disabled = true;
+          $("#manageChoiceError").textContent = "";
+          try {
+            await rpc("manageChoice", payload);
+            $("#modalContainer").innerHTML = "";
+            await refresh();
+            toast(editing ? "Saved choice updated." : "Saved choice removed.");
+          } catch (error) {
+            $("#manageChoiceError").textContent = error.message +
+              " If the result is uncertain, refresh and check before starting again.";
+            $("#saveManageChoice").disabled = false;
+          } finally { state.saveBusy = false; }
+        };
+      }
       function manage() {
         const tabs =
           '<div class="tabs" style="flex-wrap:wrap" role="group" aria-label="Manage section">' +
@@ -3868,54 +3935,31 @@
         const type = state.lookupType,
           descriptions = state.manageSection === "descriptions",
           categories = state.data?.categories?.[type] || [],
-          mappings = state.data?.mappings?.[type] || [],
-          fixed = type === "investment";
+          mappings = state.data?.mappings?.[type] || [];
         const journal =
           '<div class="field"><label for="lookupType">Journal</label><select id="lookupType">' +
           selectOptions(["expense", "income", "investment"], type) +
           "</select></div>";
         const categoryField = descriptions
-          ? '<div class="field"><label for="lookupCategory">Category</label><select id="lookupCategory" ' +
-            (fixed ? "disabled" : "required") +
-            ">" +
-            (fixed
-              ? selectOptions(categories, settings()?.categories.investment)
-              : '<option value="">Choose a category</option>' +
-                selectOptions(categories, "") +
-                '<option value="__new__">+ Add a category</option>') +
-            "</select>" +
-            (fixed
-              ? ""
-              : '<button type="button" class="textlink" id="addLookupCategory" aria-controls="newLookupCategoryField" aria-expanded="false" style="margin-top:10px">+ Add new category</button>') +
+          ? '<div class="field"><label for="lookupCategory">Category</label><select id="lookupCategory" required>' +
+            '<option value="">Choose a category</option>' + selectOptions(categories, "") +
+            '<option value="__new__">+ Add a category</option></select>' +
+            '<button type="button" class="textlink" id="addLookupCategory" aria-controls="newLookupCategoryField" aria-expanded="false" style="margin-top:10px">+ Add new category</button>' +
             '</div><div class="field full" id="newLookupCategoryField" hidden><label for="newLookupCategory">New category</label><input id="newLookupCategory" maxlength="180"><small>The category and description will be saved together.</small></div>'
           : "";
         const form =
-          '<div class="card"><form id="lookupForm"><div class="formgrid">' +
-          journal +
-          (!descriptions && fixed
-            ? '<div class="notice">Investment entries use the Investments category. Add investment descriptions in Descriptions.</div>'
-            : '<div class="field"><label for="lookupName">' +
-              (descriptions ? "Description" : "Category name") +
-              '</label><input id="lookupName" required maxlength="180" placeholder="' +
-              (descriptions
-                ? "For example, Freelance work"
-                : "For example, Education") +
-              '"></div>' +
-              categoryField) +
-          "</div>" +
-          (!descriptions && fixed
-            ? ""
-            : '<div class="modal-footer"><button class="button" id="saveLookup" ' +
-              (!loaded() ? "disabled" : "") +
-              ">Add " +
-              (descriptions ? "description" : "category") +
-              "</button></div>") +
-          '<p class="formerror" id="lookupError" role="alert"></p></form></div>';
+          '<div class="card"><form id="lookupForm"><div class="formgrid">' + journal +
+          '<div class="field"><label for="lookupName">' + (descriptions ? "Description" : "Category name") +
+          '</label><input id="lookupName" required maxlength="180" placeholder="' +
+          (descriptions ? "For example, Freelance work" : "For example, Education") +
+          '"></div>' + categoryField + '</div><div class="modal-footer"><button class="button" id="saveLookup" ' +
+          (!loaded() ? "disabled" : "") + '>Add ' + (descriptions ? "description" : "category") +
+          '</button></div><p class="formerror" id="lookupError" role="alert"></p></form></div>';
         const entries = descriptions
           ? mappings
           : categories.map((category) => ({ category }));
         return (
-          '<div class="notice">Save reusable choices for each journal. Existing transaction records and mappings are kept. Investments use a fixed category.</div>' +
+          '<div class="notice">Add, edit, or remove reusable choices for each journal. Recorded transactions keep their original descriptions and categories.</div>' +
           form +
           '<div class="card" style="margin-top:23px"><div class="cardhead"><h2>' +
           (descriptions ? "Descriptions" : "Categories") +
@@ -3923,7 +3967,7 @@
           entries.length +
           ' saved</span></div><div class="tablewrap" style="max-height:420px"><table><thead><tr>' +
           (descriptions ? "<th>Description</th>" : "") +
-          "<th>Category</th></tr></thead><tbody>" +
+          "<th>Category</th><th>Actions</th></tr></thead><tbody>" +
           entries
             .map(
               (entry) =>
@@ -3933,7 +3977,9 @@
                   : "") +
                 "<td>" +
                 esc(entry.category) +
-                "</td></tr>",
+                "</td><td>" + manageChoiceActions({ kind: descriptions ? "description" : "category",
+                  type, name: descriptions ? entry.description : entry.category,
+                  previousCategory: descriptions ? entry.category : "" }) + "</td></tr>",
             )
             .join("") +
           "</tbody></table></div>" +
@@ -4209,15 +4255,17 @@
         };
       }
       function payments() {
+        if (!namedPaymentMethods().includes(state.paymentOptionType))
+          state.paymentOptionType = namedPaymentMethods()[0] || "";
         return (
-          '<div class="notice">Create payment types such as Wallet or Cheque, or add names under any type. Cash needs no name. Removing a name leaves its details blank across the app.</div><div class="card" style="margin-bottom:23px"><h2>Add payment type</h2><div class="field">' +
+          '<div class="notice">Add, edit, or remove payment types and their saved names. Cash needs no name. Recorded payment history stays in the sheet; removed choices display as blank in the app.</div><div class="card" style="margin-bottom:23px"><h2>Add payment type</h2><div class="field">' +
           paymentTypeFields("manage") +
           '</div></div><div class="card"><form id="paymentOptionForm"><div class="formgrid"><div class="field"><label for="paymentOptionType">Type</label><select id="paymentOptionType">' +
           selectOptions(namedPaymentMethods(), state.paymentOptionType) +
           '</select></div><div class="field"><label for="paymentOptionName">Name</label><input id="paymentOptionName" required maxlength="100" placeholder="For example, SBI Savings"></div></div><div class="modal-footer"><button class="button" id="addPaymentOption" ' +
-          (!loaded() ? "disabled" : "") +
+          (!loaded() || !namedPaymentMethods().length ? "disabled" : "") +
           '>Add name</button></div><p class="formerror" id="paymentOptionError"></p></form></div><div class="tripgrid" style="margin-top:23px">' +
-          namedPaymentMethods()
+          paymentMethods()
             .map(
               (method) =>
                 '<div class="card"><h2>' +
@@ -4230,19 +4278,15 @@
                         ? "UPI apps"
                         : method,
                 ) +
-                "</h2>" +
+                "</h2>" + manageChoiceActions({ kind: "paymentType", name: method }) +
                 ((state.data?.paymentOptions?.[method] || [])
                   .map(
                     (name) =>
                       '<div class="reviewitem"><span>' +
                       esc(name) +
-                      '</span><button class="button outline" data-remove-payment-method="' +
-                      esc(method) +
-                      '" data-remove-payment-name="' +
-                      esc(name) +
-                      '">Remove</button></div>',
+                      '</span>' + manageChoiceActions({ kind: "paymentName", method, name }) + '</div>',
                   )
-                  .join("") || "<p>No names added yet.</p>") +
+                  .join("") || (method === "Cash" ? "<p>No payment name needed.</p>" : "<p>No names added yet.</p>")) +
                 "</div>",
             )
             .join("") +
@@ -4329,9 +4373,9 @@
                   esc(t.type) +
                   " · " +
                   esc(t.category || "Missing category") +
-                  (t.paymentMethod
+                  (visiblePaymentMethod(t)
                     ? " · " +
-                      esc(t.paymentMethod) +
+                      esc(visiblePaymentMethod(t)) +
                       (visiblePaymentDetail(t)
                         ? " · " + esc(visiblePaymentDetail(t))
                         : "")
@@ -4636,6 +4680,9 @@
         document
           .querySelectorAll("[data-nav]")
           .forEach((b) => (b.onclick = () => navigate(b.dataset.nav)));
+        document.querySelectorAll("[data-manage-choice]").forEach(button => {
+          button.onclick = () => openManageChoice(JSON.parse(button.dataset.manageChoice));
+        });
         document.querySelectorAll("[data-manage]").forEach((button) => {
           button.onclick = () => {
             if (state.saveBusy) return;
@@ -4663,24 +4710,16 @@
                 String(creating),
               );
             };
-            if (state.lookupType !== "investment") {
-              $("#addLookupCategory").onclick = () => {
-                if (state.saveBusy) return;
-                $("#lookupCategory").value = "__new__";
-                $("#lookupCategory").onchange();
-                $("#newLookupCategory").focus();
-              };
-            }
+            $("#addLookupCategory").onclick = () => {
+              if (state.saveBusy) return;
+              $("#lookupCategory").value = "__new__";
+              $("#lookupCategory").onchange();
+              $("#newLookupCategory").focus();
+            };
           }
           $("#lookupForm").onsubmit = async (event) => {
             event.preventDefault();
-            if (
-              state.saveBusy ||
-              !loaded() ||
-              (state.lookupType === "investment" &&
-                state.manageSection === "categories")
-            )
-              return;
+            if (state.saveBusy || !loaded()) return;
             const descriptions = state.manageSection === "descriptions";
             const payload = {
               kind: descriptions ? "description" : "category",
@@ -4769,33 +4808,6 @@
             }
           };
         }
-        document
-          .querySelectorAll("[data-remove-payment-name]")
-          .forEach((button) => {
-            const requestId = id();
-            button.onclick = async () => {
-              if (state.saveBusy) return;
-              state.saveBusy = true;
-              button.disabled = true;
-              try {
-                await savePaymentOption(
-                  "remove",
-                  button.dataset.removePaymentMethod,
-                  button.dataset.removePaymentName,
-                  requestId,
-                );
-                render();
-                toast(
-                  "Name removed. Its details now display as blank across the app.",
-                );
-              } catch (error) {
-                toast(error.message, true);
-              } finally {
-                state.saveBusy = false;
-                button.disabled = false;
-              }
-            };
-          });
         // Identify records by journal and physical row rather than display index,
         // so sorting, searching, and the Overview limit cannot target a different entry.
         document.querySelectorAll("[data-edit-row]").forEach((button) => {
@@ -5225,7 +5237,7 @@
                   .join("")
               : "";
         }
-        // Refresh categories, known descriptions, and trips when the journal changes; investments use a fixed category.
+        // Refresh reusable choices when the journal changes.
         function populate() {
           const type = $("#entryType").value;
           $("#entryCategory").innerHTML =
@@ -5237,7 +5249,7 @@
             '<option value="">No expense group</option>' +
             selectOptions(state.data?.trips || [], "");
           if (type === "investment")
-            $("#entryCategory").value = settings()?.categories.investment || "";
+            $("#entryCategory").value = (state.data?.categories?.investment || [])[0] || "";
         }
         $("#entryType").onchange = () => {
           populate();
@@ -5251,6 +5263,8 @@
           $("#entryDate").value = transaction.date;
           $("#entryDescription").value = transaction.description;
           $("#entryAmount").value = transaction.amount ?? "";
+          if (!(state.data?.categories?.[transaction.type] || []).includes(transaction.category))
+            $("#entryCategory").innerHTML += selectOptions([transaction.category], transaction.category);
           $("#entryCategory").value = transaction.category;
           $("#entryTrip").value = transaction.trip;
           $("#entryNotes").value = transaction.notes;
@@ -5258,8 +5272,8 @@
         }
         $("#entryPaymentMethod").innerHTML =
           '<option value="">Not recorded</option>' +
-          selectOptions(paymentMethods(), transaction?.paymentMethod || "");
-        $("#entryPaymentMethod").value = transaction?.paymentMethod || "";
+          selectOptions(paymentMethods(), visiblePaymentMethod(transaction));
+        $("#entryPaymentMethod").value = visiblePaymentMethod(transaction);
         function populatePayment() {
           const income = $("#entryType").value === "income";
           $("#paymentMethodField").hidden = income;
