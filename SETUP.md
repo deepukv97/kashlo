@@ -69,7 +69,7 @@ Choose **Validate & connect workbook**. Kashlo prepares the template’s tab nam
 1. Click **Add transaction**.
 2. Choose **expense**, **income**, or **investment**.
 3. Choose the transaction’s date. It starts blank so you can enter the correct day.
-4. Enter a description and amount, then choose the category. Known descriptions suggest their category automatically.
+4. Enter a description and an amount greater than zero, then choose the category. This applies to expenses, income, and investments. Known descriptions suggest their category automatically.
 5. For an expense, optionally choose an **expense group**. For an expense or investment, optionally record how you paid.
 6. Click **Save to Google Sheet**. Wait for the operation to finish, then find the entry under its recorded month.
 

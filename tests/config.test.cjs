@@ -507,7 +507,7 @@ for (const year of [2026, 2027, 2028]) {
       ...input,
       requestId: `income_request_${year}`,
       type: "income",
-      amount: -10,
+      amount: 10,
       trip: "",
     });
     api.setReview({
@@ -5582,4 +5582,190 @@ test("category options follow journal type, include unused configured categories
   assert.match(categoryOptions(), /Salary/);
   assert.match(categoryOptions(), /Investments/);
   assert.match(categoryOptions(), /Food/);
+});
+
+for (const type of ["expense", "income", "investment"]) {
+  test(`${type} rejects nonpositive amounts without consuming the submission, then saves corrected input once`, () => {
+    const f = fixture(),
+      api = f.context;
+    const input = {
+      requestId: "correct_invalid_amount_" + type,
+      type,
+      description: "Known item",
+      amount: 10,
+      date: "2026-01-05",
+      category: type === "investment" ? f.config.categories.investment : "Food",
+      trip: "",
+      notes: "",
+    };
+    const before = JSON.stringify(
+      Object.values(f.sheets).map((sheet) => sheet.cells),
+    );
+    for (const amount of [
+      0,
+      -1,
+      "",
+      null,
+      "not a number",
+      Infinity,
+      f.config.limits.maximumAmount + 1,
+    ]) {
+      assert.throws(
+        () => api.addTransaction({ ...input, amount }),
+        /positive amount greater than 0/,
+      );
+      assert.equal(f.properties["request:" + input.requestId], undefined);
+      assert.equal(
+        JSON.stringify(Object.values(f.sheets).map((sheet) => sheet.cells)),
+        before,
+      );
+      assert.equal(f.getLockCount(), 0);
+    }
+    const result = api.addTransaction(input);
+    const replay = api.addTransaction({ ...input, amount: 20 });
+    assert.equal(replay.row, result.row);
+    assert.equal(
+      f.sheets[f.resolve(f.config.sheets[type])].cells[result.row - 1][
+        f.config.layout.journal.amount - 1
+      ],
+      10,
+    );
+    assert.equal(
+      api
+        .getData()
+        .transactions.filter(
+          (entry) => entry.type === type && entry.amount === 10,
+        ).length,
+      1,
+    );
+  });
+
+  test(`${type} corrections can retry a rejected amount using the same request and fingerprint`, () => {
+    const f = fixture(),
+      api = f.context;
+    const base = {
+      type,
+      description: "Known item",
+      amount: 50,
+      date: "2026-01-05",
+      category: type === "investment" ? f.config.categories.investment : "Food",
+      trip: "",
+      notes: "",
+    };
+    const added = api.addTransaction({
+      ...base,
+      requestId: "seed_edit_retry_" + type,
+    });
+    const entry = api
+      .getData()
+      .transactions.find((t) => t.type === type && t.row === added.row);
+    const input = {
+      ...base,
+      row: entry.row,
+      fingerprint: entry.fingerprint,
+      requestId: "edit_amount_retry_" + type,
+    };
+    assert.throws(
+      () => api.updateTransaction({ ...input, amount: -10 }),
+      /positive amount greater than 0/,
+    );
+    assert.equal(f.properties["request:" + input.requestId], undefined);
+    assert.equal(
+      api
+        .getData()
+        .transactions.find((t) => t.type === type && t.row === entry.row)
+        .amount,
+      50,
+    );
+    api.updateTransaction({ ...input, amount: 10 });
+    api.updateTransaction({ ...input, amount: 20 });
+    assert.equal(
+      api
+        .getData()
+        .transactions.find((t) => t.type === type && t.row === entry.row)
+        .amount,
+      10,
+    );
+  });
+}
+
+test("transaction preflight lets users correct date, description, category, group and payment validation errors", () => {
+  const f = fixture(),
+    api = f.context;
+  const base = {
+    requestId: "correct_all_validation_fields",
+    type: "expense",
+    description: "Known item",
+    amount: 10,
+    date: "2026-01-05",
+    category: "Food",
+    trip: "",
+    notes: "",
+  };
+  for (const invalid of [
+    { date: "" },
+    { description: "" },
+    { category: "Missing category" },
+    { trip: "Missing group" },
+    { paymentMethod: "UPI", paymentDetail: "" },
+  ]) {
+    assert.throws(() => api.addTransaction({ ...base, ...invalid }));
+    assert.equal(f.properties["request:" + base.requestId], undefined);
+  }
+  assert.equal(api.addTransaction(base).ok, true);
+});
+
+test("transaction retries remain blocked once a write starts, including partial add and edit failures", () => {
+  for (const action of ["addTransaction", "updateTransaction"]) {
+    const f = fixture(),
+      api = f.context;
+    const entry = api.getData().transactions[0];
+    const input = {
+      requestId: "partial_positive_write_" + action,
+      type: "expense",
+      description: "Known item",
+      amount: 10,
+      date: "2026-01-05",
+      category: "Food",
+      trip: "",
+      notes: "",
+      ...(action === "updateTransaction"
+        ? { row: entry.row, fingerprint: entry.fingerprint }
+        : {}),
+    };
+    let writes = 0;
+    f.rawContext.writeTransaction_ = (sheet, row, values) => {
+      writes++;
+      sheet
+        .getRange(row, f.config.layout.journal.amount)
+        .setValue(values.amount);
+      throw new Error("Simulated partial write");
+    };
+    assert.throws(() => api[action](input), /Simulated partial write/);
+    assert.equal(
+      JSON.parse(f.properties["request:" + input.requestId]).status,
+      "started",
+    );
+    assert.throws(
+      () => api[action]({ ...input, amount: 20 }),
+      /may already have started/,
+    );
+    assert.equal(writes, 1);
+    assert.equal(f.getLockCount(), 0);
+  }
+});
+
+test("new-entry and edit forms require a positive amount with the decimal keyboard", async () => {
+  const f = await pullRefreshBrowser(),
+    b = f.browser;
+  vm.runInContext("openEntry()", b);
+  assert.match(
+    f.element("#modalContainer").innerHTML,
+    /id="entryAmount" type="number" inputmode="decimal" min="0\.01" step="0\.01"[^>]*required/,
+  );
+  vm.runInContext("openEntry(rows()[0])", b);
+  assert.match(
+    f.element("#modalContainer").innerHTML,
+    /id="entryAmount" type="number" inputmode="decimal" min="0\.01" step="0\.01"[^>]*required/,
+  );
 });
