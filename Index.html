@@ -992,26 +992,64 @@
       }
       .transaction-filters {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-        gap: 12px;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 14px;
         margin-bottom: 20px;
         align-items: end;
+      }
+      .transaction-period-fields,
+      .transaction-date-fields {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-column: span 2;
+        gap: 14px;
+        min-width: 0;
+        align-items: end;
+      }
+      .transaction-period-fields > :only-child {
+        grid-column: 1 / -1;
       }
       .transaction-filters label {
         display: grid;
         gap: 7px;
+        min-width: 0;
         font-size: 11px;
         color: var(--muted);
       }
       .transaction-filters input,
       .transaction-filters select {
         width: 100%;
+        max-width: 100%;
         min-width: 0;
+        min-height: 46px;
         padding: 12px;
         border: 1px solid var(--line);
         border-radius: 10px;
         color: var(--ink);
         background: #1b201d;
+      }
+      .transaction-filters input[type="date"] {
+        appearance: none;
+        -webkit-appearance: none;
+      }
+      .transaction-filters input::-webkit-date-and-time-value {
+        text-align: left;
+        min-height: 1.4em;
+      }
+      @media (max-width: 760px) {
+        .transaction-filters {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 12px;
+        }
+        .transaction-period-fields,
+        .transaction-date-fields {
+          gap: 12px;
+        }
+        .transaction-filters input,
+        .transaction-filters select {
+          font-size: 16px;
+          padding: 10px;
+        }
       }
       input::placeholder,
       textarea::placeholder {
@@ -3023,6 +3061,24 @@
         const days = new Date(Date.UTC(year, last + 1, 0)).getUTCDate();
         return [monthPrefix(first) + "-01", monthPrefix(last) + "-" + days];
       }
+      function transactionCategoryChoices() {
+        const journals =
+          state.type === "all"
+            ? ["expense", "income", "investment"]
+            : [state.type];
+        return [
+          ...new Set(
+            [
+              ...journals.flatMap(
+                (type) => state.data?.categories?.[type] || [],
+              ),
+              ...rows()
+                .filter((t) => journals.includes(t.type))
+                .map((t) => t.category),
+            ].filter(Boolean),
+          ),
+        ].sort((a, b) => a.localeCompare(b));
+      }
       function transactionFilterControls() {
         const f = state.transactionFilters,
           year = settings()?.year || new Date().getFullYear();
@@ -3068,20 +3124,28 @@
           '" data-transaction-filter="' +
           key +
           '" min="' +
-          year +
-          '-01-01" max="' +
+          esc(key === "to" && f.from ? f.from : year + "-01-01") +
+          '" max="' +
           year +
           '-12-31" value="' +
           esc(f[key]) +
           '"></label>';
         return (
-          '<div class="transaction-filters">' +
+          '<div class="transaction-filters"><div class="transaction-period-fields">' +
           select("period", "Date range", [
             ["month", "Selected month"],
             ["quarter", "Quarter"],
             ["year", "Entire year"],
             ["custom", "Custom dates"],
           ]) +
+          (f.period === "month"
+            ? select(
+                "month",
+                "Month",
+                MONTHS.map((name, i) => [String(i), name + " " + year]),
+                String(state.month),
+              )
+            : "") +
           (f.period === "quarter"
             ? select(
                 "quarter",
@@ -3098,12 +3162,16 @@
                 f.quarter || String(Math.floor(state.month / 3) + 1),
               )
             : "") +
+          "</div>" +
           (f.period === "custom"
-            ? date("from", "From (inclusive)") + date("to", "To (inclusive)")
+            ? '<div class="transaction-date-fields">' +
+              date("from", "From") +
+              date("to", "To") +
+              "</div>"
             : "") +
           select("category", "Category", [
             ["", "All categories"],
-            ...choices("category"),
+            ...transactionCategoryChoices().map((value) => [value, value]),
           ]) +
           select("method", "Payment method", [
             ["", "All payment methods"],
@@ -3192,9 +3260,15 @@
           "</div>" +
           (investments ? "" : transactionFilterControls()) +
           (invalid
-            ? '<p class="notice warning" role="status">Choose a valid start and end date within ' +
-              esc(settings()?.year) +
-              ". The end date must be on or after the start date.</p>"
+            ? '<p class="notice' +
+              (from && to ? " warning" : "") +
+              '" role="status">' +
+              (!from || !to
+                ? "Select From and To dates to see matching transactions. Both dates are included."
+                : "Choose a valid start and end date within " +
+                  esc(settings()?.year) +
+                  ". The end date must be on or after the start date.") +
+              "</p>"
             : "");
         // Investment monthly contributions use the filtered list; annual contributions use all investment entries.
         const head = investments
@@ -4302,8 +4376,7 @@
               : state.view[0].toUpperCase() + state.view.slice(1);
         $("#monthSelect").hidden =
           ["review", "payments", "profile"].includes(state.view) ||
-          (state.view === "transactions" &&
-            state.transactionFilters.period !== "month") ||
+          state.view === "transactions" ||
           isGroupDashboard();
         // The badge counts records with issues rather than individual issues.
         $("#reviewBadge").textContent = loaded()
@@ -4586,14 +4659,33 @@
         if (typeFilter)
           typeFilter.onchange = (e) => {
             state.type = e.target.value;
+            if (
+              state.view === "transactions" &&
+              !transactionCategoryChoices().includes(
+                state.transactionFilters.category,
+              )
+            )
+              state.transactionFilters.category = "";
             render();
           };
         document
           .querySelectorAll("[data-transaction-filter]")
           .forEach((control) => {
             control.onchange = (e) => {
-              state.transactionFilters[control.dataset.transactionFilter] =
-                e.target.value;
+              const key = control.dataset.transactionFilter;
+              if (key === "month") state.month = Number(e.target.value);
+              else {
+                state.transactionFilters[key] = e.target.value;
+                const f = state.transactionFilters;
+                // A later start invalidates the previous end; equal dates remain valid.
+                if (
+                  (key === "from" || key === "to") &&
+                  f.to &&
+                  f.from &&
+                  f.to < f.from
+                )
+                  f.to = "";
+              }
               state.transactionPage = 1;
               render();
             };

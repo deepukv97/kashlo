@@ -5282,7 +5282,10 @@ test("transaction date presets and inclusive custom dates stay within the config
       "state.transactionFilters.to=testEnd;transactions()",
       b,
     );
-    assert.match(html, /Choose a valid start and end date/);
+    assert.match(
+      html,
+      end ? /Choose a valid start and end date/ : /Select From and To dates/,
+    );
     assert.deepEqual(tableKeys(html), []);
   }
   vm.runInContext(
@@ -5365,4 +5368,91 @@ test("expanded filter controls exist only on Transactions and preserve the Inves
   assert.deepEqual(tableKeys(f.element("#content").innerHTML), [
     "investment:7",
   ]);
+});
+
+test("custom date controls enforce end-date minimum and clear an end invalidated by a later start", async () => {
+  const f = await transactionFiltersBrowser(),
+    b = f.browser;
+  const from = { dataset: { transactionFilter: "from" } },
+    to = { dataset: { transactionFilter: "to" } };
+  const original = f.document.querySelectorAll;
+  f.document.querySelectorAll = (selector) =>
+    selector === "[data-transaction-filter]" ? [from, to] : original(selector);
+  vm.runInContext(
+    'state.transactionFilters.period="custom";state.transactionFilters.from="2026-01-15";state.transactionFilters.to="2026-01-21";bindContent([])',
+    b,
+  );
+  from.onchange({ target: { value: "2026-01-22" } });
+  assert.equal(vm.runInContext("state.transactionFilters.to", b), "");
+  assert.match(
+    f.element("#content").innerHTML,
+    /id="transactionFilter-to"[^>]*min="2026-01-22"/,
+  );
+  to.onchange({ target: { value: "2026-01-21" } });
+  assert.equal(vm.runInContext("state.transactionFilters.to", b), "");
+  to.onchange({ target: { value: "2026-01-22" } });
+  assert.equal(vm.runInContext("state.transactionFilters.to", b), "2026-01-22");
+  assert.deepEqual(tableKeys(f.element("#content").innerHTML), ["expense:5"]);
+  assert.doesNotMatch(
+    f.element("#content").innerHTML,
+    /Select From and To dates/,
+  );
+});
+
+test("Transactions keeps the month selector in the filter panel and uses it to change results", async () => {
+  const f = await transactionFiltersBrowser(),
+    b = f.browser;
+  const month = { dataset: { transactionFilter: "month" } };
+  const original = f.document.querySelectorAll;
+  f.document.querySelectorAll = (selector) =>
+    selector === "[data-transaction-filter]" ? [month] : original(selector);
+  vm.runInContext("render()", b);
+  assert.equal(f.element("#monthSelect").hidden, true);
+  assert.match(
+    f.element("#content").innerHTML,
+    /class="transaction-period-fields">[\s\S]*id="transactionFilter-period"[\s\S]*id="transactionFilter-month"/,
+  );
+  month.onchange({ target: { value: "3" } });
+  assert.equal(vm.runInContext("state.month", b), 3);
+  assert.deepEqual(tableKeys(f.element("#content").innerHTML), [
+    "investment:7",
+  ]);
+  vm.runInContext('state.view="overview";render()', b);
+  assert.equal(f.element("#monthSelect").hidden, false);
+});
+
+test("category options follow journal type, include unused configured categories, and retain All", async () => {
+  const f = await transactionFiltersBrowser(),
+    b = f.browser;
+  b.data.categories = {
+    expense: ["Food", "Travel", "Unused expense"],
+    income: ["Salary", "Unused income"],
+    investment: ["Investments"],
+  };
+  vm.runInContext(
+    'state.transactionFilters.period="year";state.transactionFilters.category="Food";bindContent([])',
+    b,
+  );
+  f.element("#typeFilter").onchange({ target: { value: "income" } });
+  assert.equal(vm.runInContext("state.transactionFilters.category", b), "");
+  const categoryOptions = () =>
+    f
+      .element("#content")
+      .innerHTML.match(
+        /id="transactionFilter-category"[^>]*>([\s\S]*?)<\/select>/,
+      )[1];
+  assert.match(categoryOptions(), /All categories/);
+  assert.match(categoryOptions(), /Unused income/);
+  assert.doesNotMatch(categoryOptions(), /Food|Investments/);
+  assert.deepEqual(tableKeys(f.element("#content").innerHTML), ["income:6"]);
+  f.element("#typeFilter").onchange({ target: { value: "investment" } });
+  assert.match(categoryOptions(), /Investments/);
+  assert.doesNotMatch(categoryOptions(), /Salary|Food/);
+  f.element("#typeFilter").onchange({ target: { value: "expense" } });
+  assert.match(categoryOptions(), /Unused expense/);
+  assert.doesNotMatch(categoryOptions(), /Salary|Investments/);
+  f.element("#typeFilter").onchange({ target: { value: "all" } });
+  assert.match(categoryOptions(), /Salary/);
+  assert.match(categoryOptions(), /Investments/);
+  assert.match(categoryOptions(), /Food/);
 });
