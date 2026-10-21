@@ -1390,7 +1390,7 @@ test("expense groups use configured lookup coordinates and expand master/summary
   assert.ok(summary.getMaxColumns() >= 10);
 });
 
-test("Manage owns group creation and confirmed removal while expenses retain their history", async () => {
+test("Manage owns group creation and confirmed removal clears tags while keeping expenses", async () => {
   const f = fixture();
   const elements = new Map();
   const element = (selector) => {
@@ -1505,10 +1505,10 @@ test("Manage owns group creation and confirmed removal while expenses retain the
   remove();
   await element("#manageChoiceForm").onsubmit({ preventDefault() {} });
   assert.equal(f.context.getData().trips.includes("Wedding"), false);
-  assert.equal(f.context.getData().transactions.find(t => t.description === "Flowers").trip, "Wedding");
-  browser.saved = JSON.parse(JSON.stringify(saved));
+  assert.equal(f.context.getData().transactions.find(t => t.description === "Flowers").trip, "");
+  browser.saved = JSON.parse(JSON.stringify(f.context.getData().transactions.find(t => t.description === "Flowers")));
   vm.runInContext("openEntry(saved)", browser);
-  assert.equal(element("#entryTrip").value, "Wedding");
+  assert.equal(element("#entryTrip").value, "");
   vm.runInContext("openEntry()", browser);
   assert.doesNotMatch(element("#entryTrip").innerHTML, /Wedding/);
 });
@@ -6016,7 +6016,7 @@ test("investment master migration updates only prepared future formulas and acce
   assert.ok(api.getData().transactions.some(entry => entry.type === "investment" && entry.category === "Funds"));
 });
 
-test("removing an expense group requires confirmation and changes only its master column", () => {
+test("removing an expense group clears matching tags and preserves all other financial data", () => {
   const f = fixture(), api = f.context, c = f.config.layout.lookup;
   api.getData();
   api.createExpenseGroup({ name: "Wedding", requestId: "new_group_to_preserve" });
@@ -6032,22 +6032,63 @@ test("removing an expense group requires confirmation and changes only its maste
   master.cells.forEach((row, index) => row.forEach((value, column) => {
     if (column !== c.trips - 1) assert.equal(value, before[index][column]);
   }));
-  assert.deepEqual(Object.values(f.config.sheets).map(name => JSON.stringify(f.sheets[f.resolve(name)].cells)), journalBefore);
+  const expected = journalBefore.map(text => JSON.parse(text));
+  expected[0][1][f.config.layout.journal.trip - 1] = "";
+  assert.deepEqual(Object.values(f.config.sheets).map(name => JSON.stringify(f.sheets[f.resolve(name)].cells)), expected.map(rows => JSON.stringify(rows)));
   assert.throws(() => api.manageChoice({ ...input, confirmed: true, requestId: "stale_removed_group" }), /changed/);
   api.createExpenseGroup({ name: "2026 Holiday", requestId: "readd_removed_group" });
   assert.ok(api.getData().trips.includes("2026 Holiday"));
 });
 
-test("old expenses retain a removed group during corrections but new entries cannot select it", () => {
+test("group removal invalidates stale corrections and removed tags cannot be restored", () => {
   const f = fixture(), api = f.context;
   const entry = api.getData().transactions[0];
   api.manageChoice({ kind: "group", action: "remove", name: entry.trip, confirmed: true, requestId: "remove_used_expense_group" });
   const input = { type: "expense", description: entry.description, amount: 20, date: entry.date,
     category: entry.category, trip: entry.trip };
   assert.throws(() => api.addTransaction({ ...input, requestId: "new_removed_expense_group" }), /Manage → Expense groups/);
-  api.updateTransaction({ ...input, row: entry.row, fingerprint: entry.fingerprint, requestId: "retain_historical_expense_group" });
-  assert.equal(api.getData().transactions[0].trip, entry.trip);
+  assert.throws(() => api.updateTransaction({ ...input, row: entry.row, fingerprint: entry.fingerprint,
+    requestId: "stale_historical_expense_group" }), /changed/);
+  const current = api.getData().transactions[0];
+  assert.equal(current.trip, "");
+  assert.throws(() => api.updateTransaction({ ...input, row: current.row, fingerprint: current.fingerprint,
+    requestId: "restore_removed_expense_group" }), /Manage → Expense groups/);
+  api.updateTransaction({ ...input, trip: "", row: current.row, fingerprint: current.fingerprint,
+    requestId: "edit_ungrouped_transaction" });
   assert.equal(api.getData().transactions[0].amount, 20);
-  assert.throws(() => api.manageChoice({ kind: "group", action: "edit", name: entry.trip,
-    newName: "Other", requestId: "unsupported_group_action" }), /Choose Remove/);
+  assert.equal(api.getData().transactions[0].trip, "");
+});
+
+test("group removal batches only matching tags, preserves other groups and blocks partial replay", () => {
+  const f = fixture(), api = f.context, c = f.config.layout.journal;
+  api.getData();
+  api.createExpenseGroup({ name: "Other group", requestId: "other_group_for_tag_clear" });
+  f.expense.getRange(3, c.trip).setValue("Other group");
+  f.expense.getRange(4, c.trip).setValue(" 2026 HOLIDAY ");
+  f.expense.getRange(5, c.trip).setValue("2026 Holiday");
+  const before = JSON.stringify(f.expense.cells), original = f.expense.getRange.bind(f.expense);
+  let calls = [];
+  f.expense.getRange = (...args) => {
+    const range = original(...args), clear = range.clearContent;
+    range.clearContent = () => {
+      calls.push({ row: range.row, height: range.height, col: range.col, width: range.width });
+      if (calls.length === 2) throw new Error("Connection lost");
+      return clear();
+    };
+    return range;
+  };
+  const input = { kind: "group", action: "remove", name: "2026 Holiday", confirmed: true,
+    requestId: "partial_group_tag_clear" };
+  assert.throws(() => api.manageChoice(input), /Connection lost/);
+  assert.throws(() => api.manageChoice(input), /may already have started/);
+  assert.deepEqual(calls, [{ row: 2, height: 1, col: c.trip, width: 1 },
+    { row: 4, height: 2, col: c.trip, width: 1 }]);
+  assert.ok(api.getData().trips.includes("2026 Holiday"));
+  f.expense.getRange = original;
+  api.manageChoice({ ...input, requestId: "reconciled_group_tag_clear" });
+  const expected = JSON.parse(before);
+  for (const row of [2, 4, 5]) expected[row - 1][c.trip - 1] = "";
+  assert.equal(JSON.stringify(f.expense.cells), JSON.stringify(expected));
+  assert.equal(f.expense.cells[2][c.trip - 1], "Other group");
+  assert.equal(api.getData().trips.includes("2026 Holiday"), false);
 });

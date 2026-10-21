@@ -1269,12 +1269,8 @@ function transactionValues_(book, input) {
   }
   // The legacy trip field stores any expense group, including events and projects.
   let trip = input.type === "expense" ? String(input.trip || "").trim() : "";
-  if (trip && !options_(lookup, lookupColumns.trips, mappings).includes(trip)) {
-    const current = input.row && input.fingerprint && checkedTransaction_(book, input);
-    if (!current || current.sheet.getRange(current.row, workspaceConfig_().layout.journal.trip)
-      .getDisplayValues()[0][0] !== trip)
-      throw new Error("Choose an existing expense group, or add one in Manage → Expense groups first.");
-  }
+  if (trip && !options_(lookup, lookupColumns.trips, mappings).includes(trip))
+    throw new Error("Choose an existing expense group, or add one in Manage → Expense groups first.");
   const payment = paymentValues_(book, input);
   const aliases =
     input.type === "expense" && !match
@@ -2354,7 +2350,12 @@ function managedChoicePlan_(input) {
     const column = workspaceConfig_().layout.lookup.trips;
     const groups = options_(sheet, column);
     if (!groups.includes(name)) throw new Error("This expense group changed. Refresh the app.");
-    return { ...plan, sheet, column, groups };
+    const journal = sheet_(book, "expense"), j = workspaceConfig_().layout.journal;
+    const tags = journal.getRange(j.firstDataRow, j.trip,
+      journal.getMaxRows() - j.firstDataRow + 1, 1).getDisplayValues();
+    const taggedRows = tags.flatMap((row, index) =>
+      same(row[0], name) ? [j.firstDataRow + index] : []);
+    return { ...plan, sheet, column, groups, journal, taggedRows };
   }
   if (input.kind === "paymentType" || input.kind === "paymentName") {
     const methods = paymentMethods_(book), records = paymentRecords_(book);
@@ -2406,6 +2407,11 @@ function manageChoice(input) {
   return withWorkspaceWrite_(input, plan => {
     const { book, name, newName } = plan;
     if (input.kind === "group") {
+      // Clear only matching group cells, never entire transaction rows. Keep the
+      // master name until tags are cleared so partial failures can be reconciled.
+      for (const { start, count } of consecutiveRows_(plan.taggedRows))
+        plan.journal.getRange(start, workspaceConfig_().layout.journal.trip, count, 1)
+          .clearContent();
       replaceChoiceColumn_(plan.sheet, plan.column,
         plan.groups.filter(group => normalized_(group) !== normalized_(name)));
       return { ok: true };

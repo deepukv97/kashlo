@@ -3803,7 +3803,7 @@
 
       function groupManager() {
         const groups = state.data?.trips || [];
-        return '<div class="notice">An expense group connects payments for a wedding, home construction, a trip, or another purpose. Add groups here, then select one when recording an expense. Removing a saved group keeps existing expenses and their recorded group tags.</div>' +
+        return '<div class="notice">An expense group connects payments for a wedding, home construction, a trip, or another purpose. Add groups here, then select one when recording an expense. Removing a saved group also clears its tag from all matching transactions. The transactions and amounts are kept.</div>' +
           '<div class="card"><form id="groupForm"><div class="field"><label for="groupName">Expense group name</label>' +
           '<input id="groupName" required maxlength="' + (settings()?.limits.groupNameLength || 100) +
           '" placeholder="For example, Wedding or House construction"></div>' +
@@ -3839,7 +3839,7 @@
           '<div class="modal-head"><h2 id="manageChoiceTitle">' + (editing ? "Edit " : "Remove ") + label +
           '</h2><button class="close" aria-label="Close dialog">×</button></div><p>' + esc(choice.name) + '</p>' +
           '<div class="notice">' + (choice.kind === "group"
-            ? 'This removes the group from saved choices and dashboard group cards. Existing expenses and their recorded group tags stay unchanged.'
+            ? 'This removes the group from saved choices and dashboard group cards, and clears its tag from all matching transactions in your sheet. The transactions, amounts, and other details are kept.'
             : lookup
             ? 'Recorded transactions keep their original descriptions and categories. Changes apply to reusable choices for future entries.'
             : 'Recorded payment history stays in the sheet. Removed or renamed choices display as blank in the app for older transactions.' +
@@ -3876,7 +3876,8 @@
             await rpc("manageChoice", payload);
             $("#modalContainer").innerHTML = "";
             await refresh();
-            toast(editing ? "Saved choice updated." : "Saved choice removed.");
+            toast(choice.kind === "group" ? "Expense group removed and its transaction tags cleared." :
+              editing ? "Saved choice updated." : "Saved choice removed.");
           } catch (error) {
             $("#manageChoiceError").textContent = error.message +
               " If the result is uncertain, refresh and check before starting again.";
@@ -5270,8 +5271,6 @@
           if (!(state.data?.categories?.[transaction.type] || []).includes(transaction.category))
             $("#entryCategory").innerHTML += selectOptions([transaction.category], transaction.category);
           $("#entryCategory").value = transaction.category;
-          if (transaction.trip && !(state.data?.trips || []).includes(transaction.trip))
-            $("#entryTrip").innerHTML += selectOptions([transaction.trip], transaction.trip);
           $("#entryTrip").value = transaction.trip;
           $("#entryNotes").value = transaction.notes;
           populateDescriptions();
