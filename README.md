@@ -9,14 +9,14 @@ Track your expenses, income, and investment contributions in a private app backe
 You need a Google account and a computer browser for setup. After setup, you can use Kashlo on your phone or computer.
 
 1. Copy the [Kashlo — Personal Finances workbook](https://docs.google.com/spreadsheets/d/1DUx9pc11orQe0zhirA-l80z3VWRYEyGoILiw7znh77s/edit) into **your own Google Drive**.
-2. Open its attached Apps Script project and copy in the latest app files from this repository.
+2. Open **Extensions → Apps Script** in your copy. The app code is already included.
 3. Deploy it as a private web app: **Execute as Me → Only myself**.
 4. Open the app, paste **your copied sheet’s URL**, and complete the welcome screen.
 5. Bookmark your app and add your first transaction.
 
 **[Follow the step-by-step setup guide →](SETUP.md)**
 
-No programming or software installation is needed. The guide explains the copy-and-paste steps, Google’s authorization screen, and which URL goes where. Each person sets up their own workbook and private app. Share this repository and the empty template with friends.
+No programming, code copying, or software installation is needed for first-time setup. The guide explains deployment, Google’s authorization screen, and which URL goes where. Each person sets up their own workbook and private app. Share this repository and the empty template with friends.
 
 ## What you can do
 

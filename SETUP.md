@@ -17,30 +17,9 @@ The template includes the sheets and formulas Kashlo needs, with no personal tra
 
 ### 2. Open the attached app project
 
-In **your copied sheet**, choose **Extensions → Apps Script**. This opens the project attached to your copy. You do not need a second project.
+In **your copied sheet**, choose **Extensions → Apps Script**. This opens the project attached to your copy. **The app code and settings files are already included. You do not need to copy files from GitHub or edit code.** You do not need a second project.
 
-### 3. Put the latest app files in your copy
-
-A copied workbook includes a saved version of the app. Copy these four files from GitHub to receive the latest features. You are replacing file contents, not writing or customizing code.
-
-For each file below:
-
-1. Open its GitHub link. Use **Copy raw file** at the top of the file. If that button is unavailable, click **Raw**, select all the text, and copy it.
-2. In Apps Script, open the matching file. Select all its contents and paste the copied text in its place.
-3. Save the change. Repeat for all four files using the same repository version.
-
-| File on GitHub                     | Where to paste it in Apps Script          |
-| ---------------------------------- | ----------------------------------------- |
-| [Code.gs](Code.gs)                 | **Code.gs**                               |
-| [Config.gs](Config.gs)             | **Config.gs**                             |
-| [Index.html](Index.html)           | **Index.html**                            |
-| [appsscript.json](appsscript.json) | **appsscript.json** — see below if hidden |
-
-To show **appsscript.json**, open **Project settings** using the gear in the left sidebar, enable **Show "appsscript.json" manifest file in editor**, and return to the **Editor**. Then paste the manifest contents.
-
-If a file is missing, use **+ beside Files → Script** to create **Config** or **Code**, or **+ → HTML** to create **Index**. Apps Script adds the extension for you. Do not paste your name, email, or sheet URL into these files; the app will ask for your settings later.
-
-### 4. Publish your private app
+### 3. Publish your private app
 
 1. Click **Deploy → New deployment**.
 2. Click the gear beside **Select type** and choose **Web app**.
@@ -51,14 +30,14 @@ If a file is missing, use **+ beside Files → Script** to create **Config** or 
 
 Keep **Only myself** selected. Your friend should create their own private app rather than use yours.
 
-### 5. Authorize and open the app
+### 4. Authorize and open the app
 
 1. Click **Authorize access** and choose the same Google account used for your sheet copy.
 2. If Google shows **Google hasn’t verified this app**, open **Advanced → Go to [your project name] (unsafe)** only for the Kashlo copy you just created. This notice can appear for personal apps that Google has not verified. Check the requested permissions, then click **Allow** if you want to grant them.
 3. If Google says the app is blocked or offers no way to continue, see [Help](#if-something-goes-wrong).
 4. After deployment, copy the **Web app URL** ending in `/exec`. Open it in a new tab and bookmark it. This is the app you will use every day.
 
-### 6. Connect your sheet on the welcome screen
+### 5. Connect your sheet on the welcome screen
 
 1. Return to **your copied Google Sheet**. Copy the full URL from the browser address bar.
 2. Return to the Kashlo app’s **Welcome to Kashlo** screen.
@@ -85,7 +64,7 @@ Choose **Validate & connect workbook**. Kashlo prepares the template’s tab nam
 | **Your Google Sheet URL** — contains `docs.google.com/spreadsheets/` | Paste this into the welcome screen. This sheet holds your records. |
 | **Your web app URL** — ends in `/exec`                               | Bookmark and open this to use Kashlo.                              |
 
-### 7. Add your first transaction
+### 6. Add your first transaction
 
 1. Click **Add transaction**.
 2. Choose **expense**, **income**, or **investment**.
@@ -187,10 +166,10 @@ Currency changes how amounts look in the app; it does not convert money or chang
 
 ## Update your app
 
-Your copy does not automatically receive GitHub updates. To get newer features:
+Your copied app is a snapshot. It does not automatically receive later updates. **New users do not need these steps:** the shared template already includes the app. Use this section only to update an existing copy while keeping its records.
 
 1. Open **your sheet → Extensions → Apps Script**.
-2. Repeat [step 3](#3-put-the-latest-app-files-in-your-copy) to replace all four app files with the latest repository versions. Save them.
+2. Replace the four app files using the instructions below, then save them.
 3. Choose **Deploy → Manage deployments**.
 4. Select your existing web app and click the **pencil** to edit it.
 5. Under **Version**, choose **New version**. Add a description and click **Deploy**.
@@ -198,9 +177,26 @@ Your copy does not automatically receive GitHub updates. To get newer features:
 
 You do not need to copy a new workbook for an ordinary app update. If the welcome screen appears after an older-version upgrade, connect your existing Kashlo sheet. Profile preference changes do not require deployment.
 
+### Replace files for an existing app update
+
+Use this only when updating an app you already use. It is not part of first-time setup.
+
+For each file below, open its GitHub link and choose **Copy raw file**. If that button is unavailable, choose **Raw**, select all the text, and copy it. In Apps Script, open the matching file, select all its contents, paste the copied text, and save. Use all four files from the same repository version.
+
+| File on GitHub                     | Matching file in Apps Script |
+| ---------------------------------- | ---------------------------- |
+| [Code.gs](Code.gs)                 | **Code.gs**                  |
+| [Config.gs](Config.gs)             | **Config.gs**                |
+| [Index.html](Index.html)           | **Index.html**               |
+| [appsscript.json](appsscript.json) | **appsscript.json**          |
+
+If the manifest is hidden, open **Project settings** using the gear in the left sidebar, enable **Show "appsscript.json" manifest file in editor**, and return to the **Editor**. Do not paste personal settings into the files; keep those in Profile & settings.
+
+After replacing the files, continue with **Deploy → Manage deployments → pencil → New version → Deploy**, then reload your app.
+
 ## Start another year
 
-Repeat the setup with a **fresh copy of the empty shared template**, a new private app deployment, and the new year. Keep the earlier workbook and app for historical records. Transactions, custom descriptions, payment names, expense groups, and review statuses are not copied forward automatically.
+Repeat the setup with a **fresh copy of the empty shared template**, a new private app deployment, and the new year. The app code comes with the new copy, so no code copying is needed. Keep the earlier workbook and app for historical records. Transactions, custom descriptions, payment names, expense groups, and review statuses are not copied forward automatically.
 
 ## If something goes wrong
 
@@ -210,7 +206,7 @@ Repeat the setup with a **fresh copy of the empty shared template**, a new priva
 | Apps Script or Extensions is missing on your phone | Use a computer browser for setup.                                                                                                                                        |
 | Google blocks authorization                        | Check that you are using your own copied project and the same Google account. For a work/school account, ask your administrator; do not bypass an administrator’s block. |
 | The welcome screen rejects the URL                 | Paste your copied **Google Sheet URL**, not the shared template URL or web app URL. A blank sheet alone is not compatible.                                               |
-| App is blank or missing new features               | Replace all four app files, deploy a **New version** of the existing deployment, and reload the `/exec` URL.                                                             |
+| App is blank or missing new features               | Reload your `/exec` URL first. For an older copy, follow [Update your app](#update-your-app), including deployment of a **New version**.                                 |
 | Saved entry seems missing                          | Check its recorded date, journal type, active filters, and page. Then Refresh.                                                                                           |
 | Sheet changed while saving                         | Refresh before retrying. Another open tab or direct sheet edit may have changed the record.                                                                              |
 | Save/delete result is uncertain                    | Refresh and check whether the action already happened before starting a new attempt.                                                                                     |

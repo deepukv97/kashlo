@@ -44,6 +44,14 @@ A new installation uses `clasp deploy --description "Kashlo"` for its first depl
 
 The repository's `.gitignore` excludes clasp login files, local deployment targets, environment files, credential keys, workbook exports, and private-data/backup folders. Keep credentials and financial data outside tracked source files; ignore rules do not remove anything already committed. The shared `appsscript.json` manifest and `.clasp.example.json` contain public configuration and remain versioned.
 
+## Maintain the shared template’s bundled app
+
+First-time setup relies on the Apps Script source attached to the public template. Copying the workbook copies that source; a new owner only needs to create a private deployment and complete setup.
+
+When releasing app changes, update the shared template’s attached project with **Code.gs**, **Config.gs**, **Index.html**, and **appsscript.json** from the tested release. Back up the remote project first, use a separate local deployment target, and pull the updated source back to verify all four files. Do not reuse the personal app’s target or copy Script Properties, profile settings, or transaction data. Updating this source does not update deployments or workbook copies that users already created.
+
+Leave the shared workbook’s financial journals empty. Do not deploy a shared owner-executed app for other people; each copied workbook’s owner deploys their own instance.
+
 ## Expense-group setup and compatibility
 
 The browser and worksheet both use the visible label **Expense group**. In a fresh workbook, label Expense Journal cell **I1** `Expense group`, Item & Category cell **H1** `Expense groups`, and name the optional summary tab **{year} Group Summary** (setup replaces `{year}` with the selected year). Keep its existing expense/category pivot tables; their source is still the expense journal.
