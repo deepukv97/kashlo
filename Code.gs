@@ -1269,10 +1269,12 @@ function transactionValues_(book, input) {
   }
   // The legacy trip field stores any expense group, including events and projects.
   let trip = input.type === "expense" ? String(input.trip || "").trim() : "";
-  if (trip && !options_(lookup, lookupColumns.trips, mappings).includes(trip))
-    throw new Error(
-      "Choose an existing expense group, or create one in Dashboards → Expense groups first.",
-    );
+  if (trip && !options_(lookup, lookupColumns.trips, mappings).includes(trip)) {
+    const current = input.row && input.fingerprint && checkedTransaction_(book, input);
+    if (!current || current.sheet.getRange(current.row, workspaceConfig_().layout.journal.trip)
+      .getDisplayValues()[0][0] !== trip)
+      throw new Error("Choose an existing expense group, or add one in Manage → Expense groups first.");
+  }
   const payment = paymentValues_(book, input);
   const aliases =
     input.type === "expense" && !match
@@ -2331,7 +2333,7 @@ function preserveRecordedCategories_(book, type, descriptions) {
 }
 function managedChoicePlan_(input) {
   if (!input || !["edit", "remove"].includes(input.action) ||
-      !["paymentType", "paymentName", "description", "category"].includes(input.kind))
+      !["paymentType", "paymentName", "description", "category", "group"].includes(input.kind))
     throw new Error("Choose a valid Manage action.");
   if (input.action === "remove" && input.confirmed !== true)
     throw new Error("Confirm removal first.");
@@ -2346,6 +2348,14 @@ function managedChoicePlan_(input) {
     throw new Error("Choose another payment method name.");
   const same = (a, b) => normalized_(a) === normalized_(b);
   const plan = { book, name, newName };
+  if (input.kind === "group") {
+    if (input.action !== "remove") throw new Error("Choose Remove for an expense group.");
+    const sheet = requiredSheet_(book, workspaceConfig_().lookupSheets.expense);
+    const column = workspaceConfig_().layout.lookup.trips;
+    const groups = options_(sheet, column);
+    if (!groups.includes(name)) throw new Error("This expense group changed. Refresh the app.");
+    return { ...plan, sheet, column, groups };
+  }
   if (input.kind === "paymentType" || input.kind === "paymentName") {
     const methods = paymentMethods_(book), records = paymentRecords_(book);
     const method = input.kind === "paymentType" ? name : String(input.method || "");
@@ -2395,6 +2405,11 @@ function manageChoice(input) {
   if (!input || typeof input !== "object") throw new Error("Choose a valid Manage action.");
   return withWorkspaceWrite_(input, plan => {
     const { book, name, newName } = plan;
+    if (input.kind === "group") {
+      replaceChoiceColumn_(plan.sheet, plan.column,
+        plan.groups.filter(group => normalized_(group) !== normalized_(name)));
+      return { ok: true };
+    }
     if (input.kind === "paymentType" || input.kind === "paymentName") {
       ensurePaymentStorage_(book);
       const records = paymentRecords_(book);

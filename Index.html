@@ -3748,9 +3748,9 @@
           );
         }
         return (
-          '<div class="cardhead"><div class="notice" style="margin:0;flex:1">A category describes what you bought. An expense group connects payments for a wedding, home construction, a trip, or any other purpose.</div><button class="button" id="newGroupButton" ' +
+          '<div class="cardhead"><div class="notice" style="margin:0;flex:1">A category describes what you bought. An expense group connects payments for a wedding, home construction, a trip, or any other purpose.</div><button class="button" id="manageGroupsButton" ' +
           (!loaded() ? "disabled" : "") +
-          ">+ New group</button></div>" +
+          ">Manage groups</button></div>" +
           (groups.length
             ? '<div class="tripgrid">' +
               groups
@@ -3775,7 +3775,7 @@
             : empty(
                 "Bring related expenses together",
                 loaded()
-                  ? "Create your first group, such as Wedding, House construction, or Family holiday."
+                  ? "Add your first group in Manage → Expense groups, such as Wedding, House construction, or Family holiday."
                   : "Connect your sheet to load and create expense groups.",
               )) +
           '<div class="card" style="margin-top:23px"><div class="annual"><div>Grouped expenses<strong>' +
@@ -3790,7 +3790,7 @@
         );
       }
 
-      // Update the cached master list without re-rendering an unfinished entry form.
+      // Save a group and update the cached master list for Manage and transaction choices.
       async function createGroup(name, requestId) {
         const result = await rpc("createExpenseGroup", { name, requestId });
         if (!result || !Array.isArray(result.groups) || !result.name)
@@ -3801,47 +3801,23 @@
         return result;
       }
 
-      function openGroupDialog() {
-        if (!loaded() || state.saveBusy) return;
-        const requestId = id();
-        $("#modalContainer").innerHTML =
-          '<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="groupTitle"><div class="modal-head"><h2 id="groupTitle">New expense group</h2><button class="close" aria-label="Close dialog">×</button></div><form id="groupForm"><div class="field"><label for="groupName">Group name</label><input id="groupName" required placeholder="Wedding, House construction, Family holiday…"><small>Use this group across any expense categories. It is saved in your sheet too.</small></div><div class="formerror" id="groupError"></div><div class="modal-footer"><button type="button" class="button outline" id="cancelGroup">Cancel</button><button class="button" id="saveGroup">Create group</button></div></form></section></div>';
-        $("#groupName").maxLength = settings().limits.groupNameLength;
-        const close = () => {
-          if (!state.saveBusy) $("#modalContainer").innerHTML = "";
-        };
-        $(".close").onclick = close;
-        $("#cancelGroup").onclick = close;
-        $("#groupForm").onsubmit = async (event) => {
-          event.preventDefault();
-          if (state.saveBusy) return;
-          state.saveBusy = true;
-          $("#saveGroup").disabled = true;
-          $("#groupError").textContent = "";
-          try {
-            const result = await createGroup($("#groupName").value, requestId);
-            state.trip = result.name;
-            $("#modalContainer").innerHTML = "";
-            toast(
-              result.created
-                ? "Expense group created in your sheet."
-                : "This expense group already exists.",
-            );
-            await refresh();
-          } catch (error) {
-            $("#groupError").textContent =
-              error.message +
-              " If the result is uncertain, refresh and check the group list before trying again.";
-            $("#saveGroup").disabled = false;
-          } finally {
-            state.saveBusy = false;
-          }
-        };
-        $("#groupName").focus();
+      function groupManager() {
+        const groups = state.data?.trips || [];
+        return '<div class="notice">An expense group connects payments for a wedding, home construction, a trip, or another purpose. Add groups here, then select one when recording an expense. Removing a saved group keeps existing expenses and their recorded group tags.</div>' +
+          '<div class="card"><form id="groupForm"><div class="field"><label for="groupName">Expense group name</label>' +
+          '<input id="groupName" required maxlength="' + (settings()?.limits.groupNameLength || 100) +
+          '" placeholder="For example, Wedding or House construction"></div>' +
+          '<div class="modal-footer"><button class="button" id="saveGroup" ' + (!loaded() ? 'disabled' : '') +
+          '>Add group</button></div><p class="formerror" id="groupError" role="alert"></p></form></div>' +
+          '<div class="card" style="margin-top:23px"><div class="cardhead"><h2>Saved expense groups</h2><span class="pill">' +
+          groups.length + ' saved</span></div>' + (groups.length ? groups.map(name =>
+            '<div class="reviewitem"><span>' + esc(name) + '</span>' +
+            manageChoiceActions({ kind: "group", name }, ["remove"]) + '</div>').join('') :
+            '<p>No expense groups added yet.</p>') + '</div>';
       }
       // Keep reusable lists together, with the selected section and journal preserved on refresh.
-      function manageChoiceActions(choice) {
-        return '<div class="reviewactions">' + ["edit", "remove"].map(action =>
+      function manageChoiceActions(choice, actions = ["edit", "remove"]) {
+        return '<div class="reviewactions">' + actions.map(action =>
           '<button type="button" class="button outline" data-manage-choice="' +
           esc(JSON.stringify({ ...choice, action })) + '" aria-label="' +
           esc((action === "edit" ? "Edit " : "Remove ") + choice.name) + '">' +
@@ -3857,12 +3833,14 @@
           needsCategory = choice.kind === "description" && editing ||
             choice.kind === "category" && !editing && dependent;
         const label = { paymentType: "payment method", paymentName: "payment account / app",
-          description: "description", category: "category" }[choice.kind];
+          description: "description", category: "category", group: "expense group" }[choice.kind];
         $("#modalContainer").innerHTML =
           '<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="manageChoiceTitle">' +
           '<div class="modal-head"><h2 id="manageChoiceTitle">' + (editing ? "Edit " : "Remove ") + label +
           '</h2><button class="close" aria-label="Close dialog">×</button></div><p>' + esc(choice.name) + '</p>' +
-          '<div class="notice">' + (lookup
+          '<div class="notice">' + (choice.kind === "group"
+            ? 'This removes the group from saved choices and dashboard group cards. Existing expenses and their recorded group tags stay unchanged.'
+            : lookup
             ? 'Recorded transactions keep their original descriptions and categories. Changes apply to reusable choices for future entries.'
             : 'Recorded payment history stays in the sheet. Removed or renamed choices display as blank in the app for older transactions.' +
               (choice.kind === "paymentType" && !editing ? ' Removing a payment method also removes all saved accounts/apps under it.' : '')) +
@@ -3913,6 +3891,7 @@
             ["descriptions", "Descriptions"],
             ["categories", "Categories"],
             ["payments", "Payment methods"],
+            ["groups", "Expense groups"],
           ]
             .map(
               ([key, label]) =>
@@ -3930,7 +3909,8 @@
           "</div>";
         return (
           tabs +
-          (state.manageSection === "payments" ? payments() : lookupManager())
+          (state.manageSection === "payments" ? payments() :
+            state.manageSection === "groups" ? groupManager() : lookupManager())
         );
       }
       function lookupManager() {
@@ -4684,7 +4664,7 @@
             render();
           };
         });
-        if (state.view === "payments" && state.manageSection !== "payments") {
+        if (state.view === "payments" && ["descriptions", "categories"].includes(state.manageSection)) {
           $("#lookupType").value = state.lookupType;
           $("#lookupType").onchange = (event) => {
             if (state.saveBusy) {
@@ -4761,6 +4741,33 @@
                 if ($("#saveLookup")) $("#saveLookup").disabled = false;
                 $("#lookupType").disabled = false;
               }
+            }
+          };
+        }
+        if (state.view === "payments" && state.manageSection === "groups") {
+          let requestId = id();
+          $("#groupForm").onsubmit = async event => {
+            event.preventDefault();
+            if (state.saveBusy || !loaded()) return;
+            const name = $("#groupName").value.trim();
+            if (!name) {
+              $("#groupError").textContent = "Enter a group name.";
+              return;
+            }
+            state.saveBusy = true;
+            $("#saveGroup").disabled = true;
+            $("#groupError").textContent = "";
+            try {
+              const result = await createGroup(name, requestId);
+              requestId = id();
+              render();
+              toast(result.created ? "Expense group added." : "This expense group already exists.");
+            } catch (error) {
+              $("#groupError").textContent = error.message +
+                " If the result is uncertain, refresh and check the saved groups before starting again.";
+            } finally {
+              state.saveBusy = false;
+              $("#saveGroup").disabled = false;
             }
           };
         }
@@ -4931,7 +4938,11 @@
             }
           };
         });
-        $("#newGroupButton")?.addEventListener("click", openGroupDialog);
+        $("#manageGroupsButton")?.addEventListener("click", () => {
+          if (state.saveBusy) return;
+          state.manageSection = "groups";
+          navigate("payments");
+        });
         $("#addGroupExpense")?.addEventListener("click", () => openEntry());
         $("#backTrips")?.addEventListener("click", () => {
           state.trip = "";
@@ -5179,7 +5190,7 @@
             ["expense", "income", "investment"],
             state.view === "investments" ? "investment" : "expense",
           ) +
-          '</select></div><div class="field"><label for="entryDate">Date</label><input id="entryDate" type="date" required></div><div class="field full"><label for="entryDescription">Description</label><input id="entryDescription" placeholder="For example, groceries or salary" list="knownDescriptions" autocomplete="off" required><datalist id="knownDescriptions"></datalist><small>Known descriptions select their category automatically.</small></div><div class="field"><label for="entryAmount">Amount</label><input id="entryAmount" type="number" inputmode="decimal" min="0.01" step="0.01" placeholder="0.00" required></div><div class="field"><label for="entryCategory">Category</label><select id="entryCategory" required></select></div><div class="field full" id="tripField"><label for="entryTrip">Expense group (optional)</label><select id="entryTrip"></select><button type="button" class="textlink" id="newEntryGroup" style="margin-top:8px">+ Create new group</button><div id="inlineGroup" hidden style="margin-top:12px"><label for="inlineGroupName">New group name</label><input id="inlineGroupName" placeholder="For example, Wedding"><div style="display:flex;gap:10px;margin-top:8px"><button type="button" class="button light" id="saveInlineGroup">Add group</button><button type="button" class="textlink" id="cancelInlineGroup">Cancel</button></div><div class="formerror" id="inlineGroupError"></div></div></div><div class="field" id="paymentMethodField"><label for="entryPaymentMethod">Payment method (optional)</label><select id="entryPaymentMethod"></select><button type="button" class="textlink" id="newEntryPaymentType" aria-expanded="false" aria-controls="entryPaymentTypeCreator" style="margin-top:10px">+ Add payment method</button></div><div class="field full" id="entryPaymentTypeCreator" hidden>' +
+          '</select></div><div class="field"><label for="entryDate">Date</label><input id="entryDate" type="date" required></div><div class="field full"><label for="entryDescription">Description</label><input id="entryDescription" placeholder="For example, groceries or salary" list="knownDescriptions" autocomplete="off" required><datalist id="knownDescriptions"></datalist><small>Known descriptions select their category automatically.</small></div><div class="field"><label for="entryAmount">Amount</label><input id="entryAmount" type="number" inputmode="decimal" min="0.01" step="0.01" placeholder="0.00" required></div><div class="field"><label for="entryCategory">Category</label><select id="entryCategory" required></select></div><div class="field full" id="tripField"><label for="entryTrip">Expense group (optional)</label><select id="entryTrip"></select><small>Add or remove groups in Manage → Expense groups.</small></div><div class="field" id="paymentMethodField"><label for="entryPaymentMethod">Payment method (optional)</label><select id="entryPaymentMethod"></select><button type="button" class="textlink" id="newEntryPaymentType" aria-expanded="false" aria-controls="entryPaymentTypeCreator" style="margin-top:10px">+ Add payment method</button></div><div class="field full" id="entryPaymentTypeCreator" hidden>' +
           paymentTypeFields("entry") +
           '</div><div class="field" id="paymentDetailField" hidden><label for="entryPaymentDetail" id="paymentDetailLabel">Payment account / app</label><select id="entryPaymentDetail"></select></div><div class="field full" id="paymentNameControls" hidden><button type="button" class="textlink" id="newPaymentName">+ Add account / app</button><small>Manage accounts and apps in Manage → Payment methods.</small><div id="inlinePayment" hidden><label for="inlinePaymentType">Payment method</label><select id="inlinePaymentType"></select><label for="inlinePaymentName">Payment account / app</label><input id="inlinePaymentName" maxlength="100" placeholder="Enter an account, card, or app name"><button type="button" class="button light" id="saveInlinePayment">Add and select</button><button type="button" class="textlink" id="cancelInlinePayment">Cancel</button><div class="formerror" id="inlinePaymentError"></div></div></div><div class="field full"><label for="entryNotes">Notes (optional)</label><textarea id="entryNotes" placeholder="Anything you would like to remember"></textarea></div></div><div class="formerror" id="formError"></div><div class="modal-footer"><button type="button" class="button outline" id="cancelEntry">Cancel</button><button class="button" id="saveEntry" ' +
           (!isConnected ? "disabled" : "") +
@@ -5198,7 +5209,6 @@
           $("#entryDate").value = "";
           $("#entryDescription").maxLength = config.limits.descriptionLength;
           $("#entryNotes").maxLength = config.limits.noteLength;
-          $("#inlineGroupName").maxLength = config.limits.groupNameLength;
           document.querySelector('label[for="entryAmount"]').textContent =
             "Amount (" + config.currency + ")";
         }
@@ -5260,6 +5270,8 @@
           if (!(state.data?.categories?.[transaction.type] || []).includes(transaction.category))
             $("#entryCategory").innerHTML += selectOptions([transaction.category], transaction.category);
           $("#entryCategory").value = transaction.category;
+          if (transaction.trip && !(state.data?.trips || []).includes(transaction.trip))
+            $("#entryTrip").innerHTML += selectOptions([transaction.trip], transaction.trip);
           $("#entryTrip").value = transaction.trip;
           $("#entryNotes").value = transaction.notes;
           populateDescriptions();
@@ -5369,54 +5381,6 @@
           if (event.key === "Enter") {
             event.preventDefault();
             $("#saveInlinePayment").click();
-          }
-        };
-        // Inline creation preserves the date, description, amount, and other unsaved fields.
-        let groupRequestId = id();
-        $("#newEntryGroup").onclick = () => {
-          if (!loaded() || state.saveBusy) return;
-          groupRequestId = id();
-          $("#inlineGroup").hidden = false;
-          $("#inlineGroupError").textContent = "";
-          $("#inlineGroupName").focus();
-        };
-        $("#cancelInlineGroup").onclick = () => {
-          if (!state.saveBusy) $("#inlineGroup").hidden = true;
-        };
-        $("#saveInlineGroup").onclick = async () => {
-          if (!loaded() || state.saveBusy) return;
-          const name = $("#inlineGroupName").value.trim();
-          if (!name) {
-            $("#inlineGroupError").textContent = "Enter a group name.";
-            return;
-          }
-          state.saveBusy = true;
-          $("#saveInlineGroup").disabled = true;
-          $("#inlineGroupError").textContent = "";
-          try {
-            const result = await createGroup(name, groupRequestId);
-            $("#entryTrip").innerHTML =
-              '<option value="">No expense group</option>' +
-              selectOptions(state.data.trips, result.name);
-            $("#entryTrip").value = result.name;
-            $("#inlineGroup").hidden = true;
-            $("#inlineGroupName").value = "";
-            toast(
-              result.created
-                ? "Expense group created and selected."
-                : "Existing expense group selected.",
-            );
-          } catch (error) {
-            $("#inlineGroupError").textContent = error.message;
-          } finally {
-            state.saveBusy = false;
-            $("#saveInlineGroup").disabled = false;
-          }
-        };
-        $("#inlineGroupName").onkeydown = (event) => {
-          if (event.key === "Enter") {
-            event.preventDefault();
-            $("#saveInlineGroup").click();
           }
         };
         // Auto-select the saved category when a description matches a known mapping after trimming and lowercasing.

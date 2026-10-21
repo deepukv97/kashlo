@@ -27,7 +27,7 @@ No programming, code copying, or software installation is needed for first-time 
 | **Investments**        | Track contributions separately from expenses.                                                            |
 | **Dashboards**         | Explore expense groups, spending insights, and cash flow.                                                |
 | **Review**             | Check possible duplicates and mark each month complete.                                                  |
-| **Manage**             | Add, edit, or remove descriptions, categories, payment methods, and accounts/apps.                         |
+| **Manage**             | Manage descriptions, categories, payment choices, and saved expense groups.                         |
 | **Profile & settings** | Update your name, workspace label, and display preferences.                                              |
 
 Add, edit, and delete transactions from the app. Payment tracking is optional for expenses and investments; income has no payment fields. Kashlo asks only for account, card, or app names, never card numbers or CVVs.

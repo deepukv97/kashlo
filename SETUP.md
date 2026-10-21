@@ -128,7 +128,9 @@ Removing a payment account / app deletes it from the reusable list and shows tha
 
 These changes update reusable choices for future entries. Existing transactions keep their recorded descriptions, categories, and payment history in the sheet. Removed payment choices display as blank in the app. Renamed payment choices are new labels for future entries; old labels remain in the transaction history and display as blank unless added again.
 
-**Dashboards → Expense groups → New group:** create a group for an event, project, or trip. You can also create one from the transaction form. A group combines expenses across categories and months; creating its name does not add an expense. Income and investments do not use expense groups.
+**Manage → Expense groups:** add a group for an event, project, or trip. All saved groups appear below the form. Click **Remove**, then confirm, to remove a group from saved choices and dashboard group cards. Existing expenses and their recorded group tags stay unchanged.
+
+Select a saved group when adding an expense. **Dashboards → Expense groups → Manage groups** takes you to the same Manage section. Creating a group does not add an expense. Income and investments do not use expense groups.
 
 ### Read your dashboards
 

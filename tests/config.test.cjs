@@ -1390,7 +1390,7 @@ test("expense groups use configured lookup coordinates and expand master/summary
   assert.ok(summary.getMaxColumns() >= 10);
 });
 
-test("UI creates groups from the group page and within an unfinished expense form", async () => {
+test("Manage owns group creation and confirmed removal while expenses retain their history", async () => {
   const f = fixture();
   const elements = new Map();
   const element = (selector) => {
@@ -1413,6 +1413,7 @@ test("UI creates groups from the group page and within an unfinished expense for
       });
     return elements.get(selector);
   };
+  let choiceButtons = [];
   const runner = {
     withSuccessHandler(handler) {
       this.success = handler;
@@ -1434,6 +1435,10 @@ test("UI creates groups from the group page and within an unfinished expense for
         this.failure(error);
       }
     },
+    manageChoice(input) {
+      try { this.success(f.context.manageChoice(input)); }
+      catch (error) { this.failure(error); }
+    },
     addTransaction(input) {
       try {
         this.success(f.context.addTransaction(input));
@@ -1453,7 +1458,12 @@ test("UI creates groups from the group page and within an unfinished expense for
     window: { google },
     document: {
       querySelector: element,
-      querySelectorAll: () => [],
+      querySelectorAll(selector) {
+        if (selector !== "[data-manage-choice]") return [];
+        choiceButtons = Array.from(element("#content").innerHTML.matchAll(/data-manage-choice="([^"]+)"/g),
+          match => ({ dataset: { manageChoice: match[1].replaceAll("&quot;", '"') } }));
+        return choiceButtons;
+      },
       addEventListener() {},
     },
   });
@@ -1461,40 +1471,46 @@ test("UI creates groups from the group page and within an unfinished expense for
   await new Promise((resolve) => setImmediate(resolve));
   vm.runInContext('navigate("trips")', browser);
   assert.equal(element("#breadcrumb").textContent, "Dashboards");
-  assert.match(element("#content").innerHTML, /New group/);
-  element("#newGroupButton").onclick();
+  assert.match(element("#content").innerHTML, /Manage groups/);
+  assert.doesNotMatch(element("#content").innerHTML, /New group/);
+  element("#manageGroupsButton").onclick();
+  assert.equal(vm.runInContext("state.view", browser), "payments");
+  assert.equal(vm.runInContext("state.manageSection", browser), "groups");
+  assert.match(element("#content").innerHTML, /Saved expense groups/);
   element("#groupName").value = "Wedding";
   await element("#groupForm").onsubmit({ preventDefault() {} });
   assert.ok(f.context.getData().trips.includes("Wedding"));
   assert.match(element("#content").innerHTML, /Wedding/);
+  vm.runInContext('navigate("trips"); state.trip = "Wedding"; render()', browser);
   element("#addGroupExpense").onclick();
   assert.equal(element("#entryTrip").value, "Wedding");
   assert.equal(element("#entryDate").value, "");
+  assert.doesNotMatch(element("#modalContainer").innerHTML, /newEntryGroup|inlineGroup/);
+  assert.match(element("#modalContainer").innerHTML, /Manage → Expense groups/);
   element("#entryDate").value = "2026-10-14";
   element("#entryDescription").value = "Flowers";
   element("#entryAmount").value = "88";
   element("#entryCategory").value = "Food";
-  element("#entryNotes").value = "Keep this unsaved note";
-  element("#newEntryGroup").onclick();
-  element("#inlineGroupName").value = "House construction";
-  await element("#saveInlineGroup").onclick();
-  assert.equal(element("#entryTrip").value, "House construction");
-  assert.equal(element("#entryDescription").value, "Flowers");
-  assert.equal(element("#entryAmount").value, "88");
-  assert.equal(element("#entryDate").value, "2026-10-14");
-  assert.equal(element("#entryNotes").value, "Keep this unsaved note");
   element("#entryPaymentMethod").value = "Cash";
   await element("#entryForm").onsubmit({ preventDefault() {} });
-  const saved = f.context
-    .getData()
-    .transactions.find((t) => t.description === "Flowers");
-  assert.equal(saved.trip, "House construction");
-  assert.equal(vm.runInContext("state.trip", browser), "House construction");
+  const saved = f.context.getData().transactions.find(t => t.description === "Flowers");
+  assert.equal(saved.trip, "Wedding");
   assert.equal(saved.amount, 88);
-  assert.equal(
-    f.context.getData().transactions.find((t) => t.row === 2).trip,
-    "2026 Holiday",
-  );
+  vm.runInContext('state.manageSection="groups"; navigate("payments")', browser);
+  const remove = () => choiceButtons.find(button => JSON.parse(button.dataset.manageChoice).name === "Wedding").onclick();
+  remove();
+  assert.match(element("#modalContainer").innerHTML, /Confirm removal/);
+  element("#cancelManageChoice").onclick();
+  assert.ok(f.context.getData().trips.includes("Wedding"));
+  remove();
+  await element("#manageChoiceForm").onsubmit({ preventDefault() {} });
+  assert.equal(f.context.getData().trips.includes("Wedding"), false);
+  assert.equal(f.context.getData().transactions.find(t => t.description === "Flowers").trip, "Wedding");
+  browser.saved = JSON.parse(JSON.stringify(saved));
+  vm.runInContext("openEntry(saved)", browser);
+  assert.equal(element("#entryTrip").value, "Wedding");
+  vm.runInContext("openEntry()", browser);
+  assert.doesNotMatch(element("#entryTrip").innerHTML, /Wedding/);
 });
 
 test("payment names delete and re-add without changing journal history; methods validate and fingerprint", () => {
@@ -5998,4 +6014,40 @@ test("investment master migration updates only prepared future formulas and acce
   api.addTransaction({ type: "investment", description: "Index fund", amount: 100, date: "2026-10-21",
     category: "Funds", requestId: "save_custom_investment_category" });
   assert.ok(api.getData().transactions.some(entry => entry.type === "investment" && entry.category === "Funds"));
+});
+
+test("removing an expense group requires confirmation and changes only its master column", () => {
+  const f = fixture(), api = f.context, c = f.config.layout.lookup;
+  api.getData();
+  api.createExpenseGroup({ name: "Wedding", requestId: "new_group_to_preserve" });
+  const master = f.sheets[f.config.lookupSheets.expense];
+  const before = master.cells.map(row => row.slice());
+  const journalBefore = Object.values(f.config.sheets).map(name => JSON.stringify(f.sheets[f.resolve(name)].cells));
+  const input = { kind: "group", action: "remove", name: "2026 Holiday", requestId: "confirmed_group_removal" };
+  assert.throws(() => api.manageChoice(input), /Confirm removal/);
+  assert.equal(f.properties["request:confirmed_group_removal"], undefined);
+  assert.equal(api.manageChoice({ ...input, confirmed: true }).ok, true);
+  assert.equal(api.manageChoice({ ...input, confirmed: true }).ok, true);
+  assert.deepEqual(Array.from(api.getData().trips), ["Wedding"]);
+  master.cells.forEach((row, index) => row.forEach((value, column) => {
+    if (column !== c.trips - 1) assert.equal(value, before[index][column]);
+  }));
+  assert.deepEqual(Object.values(f.config.sheets).map(name => JSON.stringify(f.sheets[f.resolve(name)].cells)), journalBefore);
+  assert.throws(() => api.manageChoice({ ...input, confirmed: true, requestId: "stale_removed_group" }), /changed/);
+  api.createExpenseGroup({ name: "2026 Holiday", requestId: "readd_removed_group" });
+  assert.ok(api.getData().trips.includes("2026 Holiday"));
+});
+
+test("old expenses retain a removed group during corrections but new entries cannot select it", () => {
+  const f = fixture(), api = f.context;
+  const entry = api.getData().transactions[0];
+  api.manageChoice({ kind: "group", action: "remove", name: entry.trip, confirmed: true, requestId: "remove_used_expense_group" });
+  const input = { type: "expense", description: entry.description, amount: 20, date: entry.date,
+    category: entry.category, trip: entry.trip };
+  assert.throws(() => api.addTransaction({ ...input, requestId: "new_removed_expense_group" }), /Manage → Expense groups/);
+  api.updateTransaction({ ...input, row: entry.row, fingerprint: entry.fingerprint, requestId: "retain_historical_expense_group" });
+  assert.equal(api.getData().transactions[0].trip, entry.trip);
+  assert.equal(api.getData().transactions[0].amount, 20);
+  assert.throws(() => api.manageChoice({ kind: "group", action: "edit", name: entry.trip,
+    newName: "Other", requestId: "unsupported_group_action" }), /Choose Remove/);
 });
