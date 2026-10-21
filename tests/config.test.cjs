@@ -5180,3 +5180,189 @@ test("native Review source ranges follow growth without changing its decision lo
   );
   assert.equal(review.getRange(5, 8).getValues()[0][0], "Preserve action");
 });
+
+async function transactionFiltersBrowser() {
+  const f = await paginationBrowser();
+  f.browser.data.paymentOptions = {
+    UPI: ["Example Pay"],
+    "Bank transfer": ["Example Bank"],
+  };
+  f.browser.data.transactions = [
+    [
+      2,
+      "2026-01-14",
+      "expense",
+      "Food",
+      "Journey",
+      "UPI",
+      "Example Pay",
+      "Before range",
+    ],
+    [
+      3,
+      "2026-01-15",
+      "expense",
+      "Food",
+      "Journey",
+      "UPI",
+      "Example Pay",
+      "Platform snack",
+    ],
+    [
+      4,
+      "2026-01-21",
+      "expense",
+      "Food",
+      "Journey",
+      "Bank transfer",
+      "Example Bank",
+      "Water",
+      "Fictional note",
+    ],
+    [5, "2026-01-22", "expense", "Travel", "Journey", "Cash", "", "Train"],
+    [6, "2026-03-31", "income", "Salary", "", "", "", "Salary"],
+    [7, "2026-04-01", "investment", "Investments", "", "", "", "Fund"],
+    [8, "2026-12-31", "expense", "Home", "", "", "Removed name", "Lamp"],
+    [9, "2025-12-31", "expense", "Food", "", "", "", "Old year"],
+    [10, "2027-01-01", "expense", "Food", "", "", "", "Next year"],
+  ].map(
+    ([
+      row,
+      date,
+      type,
+      category,
+      trip,
+      paymentMethod,
+      paymentDetail,
+      description,
+      notes,
+    ]) => ({
+      row,
+      date,
+      type,
+      category,
+      trip,
+      paymentMethod,
+      paymentDetail,
+      description,
+      notes,
+      amount: 10,
+      issues: [],
+      fingerprint: "filter-" + row,
+    }),
+  );
+  return f;
+}
+
+test("transaction date presets and inclusive custom dates stay within the configured year", async () => {
+  const f = await transactionFiltersBrowser(),
+    b = f.browser;
+  const keys = (code) =>
+    tableKeys(vm.runInContext(code + ";transactions()", b));
+  assert.equal(keys('state.transactionFilters.period="year"').length, 7);
+  assert.deepEqual(
+    keys(
+      'state.transactionFilters.period="quarter";state.transactionFilters.quarter="2"',
+    ),
+    ["investment:7"],
+  );
+  assert.equal(keys('state.transactionFilters.quarter="1"').length, 5);
+  assert.deepEqual(
+    keys(
+      'state.transactionFilters.period="custom";state.transactionFilters.from="2026-01-15";state.transactionFilters.to="2026-01-21"',
+    ),
+    ["expense:4", "expense:3"],
+  );
+  assert.deepEqual(keys('state.transactionFilters.to="2026-01-15"'), [
+    "expense:3",
+  ]);
+  for (const end of ["", "2026-01-14", "2027-01-01"]) {
+    b.testEnd = end;
+    const html = vm.runInContext(
+      "state.transactionFilters.to=testEnd;transactions()",
+      b,
+    );
+    assert.match(html, /Choose a valid start and end date/);
+    assert.deepEqual(tableKeys(html), []);
+  }
+  vm.runInContext(
+    'state.data.config.year=2028;state.month=1;state.transactionFilters.period="month";var leapRange=transactionDateRange()',
+    b,
+  );
+  assert.deepEqual(Array.from(b.leapRange), ["2028-02-01", "2028-02-29"]);
+});
+
+test("transaction search covers visible payments, notes, groups, categories, dates and journal types", async () => {
+  const f = await transactionFiltersBrowser(),
+    b = f.browser;
+  vm.runInContext('state.transactionFilters.period="year"', b);
+  for (const [query, expected] of [
+    ["UPI", 2],
+    ["bank transfer", 1],
+    ["Example Bank", 1],
+    ["EXAMPLE PAY", 2],
+    ["Fictional note", 1],
+    ["Journey", 4],
+    ["Food", 3],
+    ["2026-01-21", 1],
+    ["income", 1],
+    ["Removed name", 0],
+  ]) {
+    b.query = query;
+    assert.equal(
+      tableKeys(vm.runInContext("state.search=query;transactions()", b)).length,
+      expected,
+      query,
+    );
+  }
+});
+
+test("transaction filters combine with search, reset pagination, retain all choices, and clear together", async () => {
+  const f = await transactionFiltersBrowser(),
+    b = f.browser;
+  vm.runInContext(
+    'state.transactionFilters.period="year";state.transactionFilters.category="Food";state.transactionFilters.method="UPI";state.transactionFilters.group="Journey";state.search="snack";state.transactionPage=6;var html=transactions()',
+    b,
+  );
+  assert.deepEqual(tableKeys(b.html), ["expense:3"]);
+  assert.equal(vm.runInContext("state.transactionPage", b), 1);
+  assert.match(b.html, /<option value="Home">Home/);
+  assert.match(b.html, /<option value="Cash">Cash/);
+  vm.runInContext(
+    'state.search="";state.transactionFilters.category="";state.transactionFilters.method="__blank__";state.transactionFilters.group="__blank__";var blanks=transactions()',
+    b,
+  );
+  assert.deepEqual(tableKeys(b.blanks), [
+    "expense:8",
+    "investment:7",
+    "income:6",
+  ]);
+  vm.runInContext("bindContent([])", b);
+  f.element("#clearTransactionFilters").onclick();
+  assert.equal(vm.runInContext("state.transactionFilters.period", b), "month");
+  assert.equal(vm.runInContext("state.transactionFilters.method", b), "");
+  assert.equal(vm.runInContext("state.search", b), "");
+  assert.equal(vm.runInContext("state.type", b), "all");
+});
+
+test("expanded filter controls exist only on Transactions and preserve the Investment month", async () => {
+  const f = await transactionFiltersBrowser(),
+    b = f.browser;
+  vm.runInContext(
+    'state.transactionFilters.period="custom";state.transactionFilters.from="2026-01-15";state.transactionFilters.to="2026-01-21";render()',
+    b,
+  );
+  assert.equal(f.element("#monthSelect").hidden, true);
+  const html = f.element("#content").innerHTML;
+  assert.match(html, /type="date" id="transactionFilter-from"/);
+  assert.match(html, /type="date" id="transactionFilter-to"/);
+  vm.runInContext('state.view="investments";state.month=3;render()', b);
+  assert.equal(f.element("#monthSelect").hidden, false);
+  assert.doesNotMatch(
+    f.element("#content").innerHTML,
+    /data-transaction-filter=/,
+  );
+  assert.deepEqual(tableKeys(f.element("#content").innerHTML), [
+    "investment:7",
+  ]);
+});
