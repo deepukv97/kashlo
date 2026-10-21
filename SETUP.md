@@ -79,7 +79,7 @@ You are ready to use Kashlo. Open your bookmarked app for daily use; you do not 
 
 ### Find and filter transactions
 
-Open **Transactions**. Search can find descriptions, categories, expense groups, payment types such as UPI or Bank transfer, available bank/card/app names, dates, amounts, and notes.
+Open **Transactions**. Search can find descriptions, categories, expense groups, payment methods such as UPI or Bank transfer, available bank/card/app names, dates, amounts, and notes.
 
 Combine search with these filters:
 
@@ -106,27 +106,31 @@ Use **Edit** or **Delete** beside an entry on Overview, Transactions, or Investm
 
 ### Track payment methods
 
-For expenses and investments, payment tracking is optional. Leave **Not recorded**, or choose a payment type. Income has no payment fields.
+**Payment method** is how you paid, such as Bank transfer, Card, UPI, Cash, or Wallet. **Payment account / app** is the specific account, card, or app you used. For example: **Card → Example credit card** or **UPI → Example UPI app**.
 
-- **Bank transfer, Card, UPI:** choose the bank, card, or app name after selecting the type.
+For expenses and investments, payment tracking is optional. Leave **Not recorded**, or choose a payment method. Income has no payment fields.
+
+- **Bank transfer, Card, UPI:** choose the bank, card, or app name after selecting the method.
 - **Cash:** no extra name is needed.
-- **Custom types:** add a type such as Wallet or Cheque. A payment name is optional for custom types.
+- **Custom methods:** add a method such as Wallet or Cheque. A payment account / app is optional for custom methods.
 
-Use **+ Add payment type** or **+ Add payment name** in the transaction form, or open **Manage → Payment methods**. Names are enough; do not enter card numbers, CVVs, passwords, or account credentials.
+Use **+ Add payment method** or **+ Add account / app** in the transaction form, or open **Manage → Payment methods**. Names are enough; do not enter card numbers, CVVs, passwords, or account credentials.
 
-Removing a payment name deletes it from the reusable list and shows its name as blank in the app’s past transactions. The payment type remains visible, and the original transaction record stays in the sheet.
+Removing a payment account / app deletes it from the reusable list and clears its name from matching transactions in your sheet. The payment method stays. Removing an entire payment method clears both the method and its account/app details from matching transactions. The transactions, amounts, and all other details stay unchanged.
 
 ### Organize descriptions, categories, and expense groups
 
 **Manage → Descriptions:** choose the journal, enter a description, and choose its category. For any journal, **+ Add new category** lets you create the category without leaving this section.
 
-**Manage → Categories:** add categories for expenses, income, or investments. Use **Edit** or **Remove** beside any saved description or category, including the initial choices. Editing a description lets you change its name and category. Removing a category asks for a replacement if saved descriptions use it; add another category first if needed. Confirm removals in the pop-up.
+**Manage → Categories:** add categories for expenses, income, or investments. Use **Edit** or **Remove** beside any saved description or category, including the initial choices. Editing a description lets you change its name and category. Removing a description or category clears that field from matching transactions in the selected journal. Those transactions appear in **Review** as **Missing description** or **Missing category**. Removing a category also clears it from saved description mappings, which remain available to edit. Confirm removals in the pop-up.
 
-**Manage → Payment methods:** use **Edit** or **Remove** on a payment type or saved payment name. You can remove initial types such as UPI, Card, Bank transfer, or Cash. Removing a type also removes all names saved under it. Add it again later if needed.
+**Manage → Payment methods:** use **Edit** or **Remove** on a payment method or saved payment account / app. You can remove initial methods such as UPI, Card, Bank transfer, or Cash. Removing a method also removes all names saved under it. Add it again later if needed.
 
-These changes update reusable choices for future entries. Existing transactions keep their recorded descriptions, categories, and payment history in the sheet. Removed payment choices display as blank in the app. Renamed payment choices are new labels for future entries; old labels remain in the transaction history and display as blank unless added again.
+Editing descriptions and categories updates reusable choices for future entries. Deleting them clears matching recorded fields and sends the affected transactions to Review for correction. Deleting payment choices also clears the corresponding payment fields in the sheet. Re-adding a deleted method or account/app does not restore cleared fields. Renaming payment choices still changes reusable labels for future entries; original labels remain in the transaction history.
 
-**Dashboards → Expense groups → New group:** create a group for an event, project, or trip. You can also create one from the transaction form. A group combines expenses across categories and months; creating its name does not add an expense. Income and investments do not use expense groups.
+**Manage → Expense groups:** add a group for an event, project, or trip. All saved groups appear below the form. Click **Remove**, then confirm, to remove a group from saved choices and dashboard group cards. The group’s tag is also cleared from all matching transactions in your sheet. The transactions, amounts, and other details are kept.
+
+Select a saved group when adding an expense. **Dashboards → Expense groups → Manage groups** takes you to the same Manage section. Creating a group does not add an expense. Income and investments do not use expense groups.
 
 ### Read your dashboards
 
@@ -200,7 +204,7 @@ After replacing the files, continue with **Deploy → Manage deployments → pen
 
 ## Start another year
 
-Repeat the setup with a **fresh copy of the empty shared template**, a new private app deployment, and the new year. The app code comes with the new copy, so no code copying is needed. Keep the earlier workbook and app for historical records. Transactions, custom descriptions, payment names, expense groups, and review statuses are not copied forward automatically.
+Repeat the setup with a **fresh copy of the empty shared template**, a new private app deployment, and the new year. The app code comes with the new copy, so no code copying is needed. Keep the earlier workbook and app for historical records. Transactions, custom descriptions, payment accounts/apps, expense groups, and review statuses are not copied forward automatically.
 
 ## If something goes wrong
 

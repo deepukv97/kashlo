@@ -1390,7 +1390,7 @@ test("expense groups use configured lookup coordinates and expand master/summary
   assert.ok(summary.getMaxColumns() >= 10);
 });
 
-test("UI creates groups from the group page and within an unfinished expense form", async () => {
+test("Manage owns group creation and confirmed removal clears tags while keeping expenses", async () => {
   const f = fixture();
   const elements = new Map();
   const element = (selector) => {
@@ -1413,6 +1413,7 @@ test("UI creates groups from the group page and within an unfinished expense for
       });
     return elements.get(selector);
   };
+  let choiceButtons = [];
   const runner = {
     withSuccessHandler(handler) {
       this.success = handler;
@@ -1434,6 +1435,10 @@ test("UI creates groups from the group page and within an unfinished expense for
         this.failure(error);
       }
     },
+    manageChoice(input) {
+      try { this.success(f.context.manageChoice(input)); }
+      catch (error) { this.failure(error); }
+    },
     addTransaction(input) {
       try {
         this.success(f.context.addTransaction(input));
@@ -1453,7 +1458,12 @@ test("UI creates groups from the group page and within an unfinished expense for
     window: { google },
     document: {
       querySelector: element,
-      querySelectorAll: () => [],
+      querySelectorAll(selector) {
+        if (selector !== "[data-manage-choice]") return [];
+        choiceButtons = Array.from(element("#content").innerHTML.matchAll(/data-manage-choice="([^"]+)"/g),
+          match => ({ dataset: { manageChoice: match[1].replaceAll("&quot;", '"') } }));
+        return choiceButtons;
+      },
       addEventListener() {},
     },
   });
@@ -1461,43 +1471,49 @@ test("UI creates groups from the group page and within an unfinished expense for
   await new Promise((resolve) => setImmediate(resolve));
   vm.runInContext('navigate("trips")', browser);
   assert.equal(element("#breadcrumb").textContent, "Dashboards");
-  assert.match(element("#content").innerHTML, /New group/);
-  element("#newGroupButton").onclick();
+  assert.match(element("#content").innerHTML, /Manage groups/);
+  assert.doesNotMatch(element("#content").innerHTML, /New group/);
+  element("#manageGroupsButton").onclick();
+  assert.equal(vm.runInContext("state.view", browser), "payments");
+  assert.equal(vm.runInContext("state.manageSection", browser), "groups");
+  assert.match(element("#content").innerHTML, /Saved expense groups/);
   element("#groupName").value = "Wedding";
   await element("#groupForm").onsubmit({ preventDefault() {} });
   assert.ok(f.context.getData().trips.includes("Wedding"));
   assert.match(element("#content").innerHTML, /Wedding/);
+  vm.runInContext('navigate("trips"); state.trip = "Wedding"; render()', browser);
   element("#addGroupExpense").onclick();
   assert.equal(element("#entryTrip").value, "Wedding");
   assert.equal(element("#entryDate").value, "");
+  assert.doesNotMatch(element("#modalContainer").innerHTML, /newEntryGroup|inlineGroup/);
+  assert.match(element("#modalContainer").innerHTML, /Manage → Expense groups/);
   element("#entryDate").value = "2026-10-14";
   element("#entryDescription").value = "Flowers";
   element("#entryAmount").value = "88";
   element("#entryCategory").value = "Food";
-  element("#entryNotes").value = "Keep this unsaved note";
-  element("#newEntryGroup").onclick();
-  element("#inlineGroupName").value = "House construction";
-  await element("#saveInlineGroup").onclick();
-  assert.equal(element("#entryTrip").value, "House construction");
-  assert.equal(element("#entryDescription").value, "Flowers");
-  assert.equal(element("#entryAmount").value, "88");
-  assert.equal(element("#entryDate").value, "2026-10-14");
-  assert.equal(element("#entryNotes").value, "Keep this unsaved note");
   element("#entryPaymentMethod").value = "Cash";
   await element("#entryForm").onsubmit({ preventDefault() {} });
-  const saved = f.context
-    .getData()
-    .transactions.find((t) => t.description === "Flowers");
-  assert.equal(saved.trip, "House construction");
-  assert.equal(vm.runInContext("state.trip", browser), "House construction");
+  const saved = f.context.getData().transactions.find(t => t.description === "Flowers");
+  assert.equal(saved.trip, "Wedding");
   assert.equal(saved.amount, 88);
-  assert.equal(
-    f.context.getData().transactions.find((t) => t.row === 2).trip,
-    "2026 Holiday",
-  );
+  vm.runInContext('state.manageSection="groups"; navigate("payments")', browser);
+  const remove = () => choiceButtons.find(button => JSON.parse(button.dataset.manageChoice).name === "Wedding").onclick();
+  remove();
+  assert.match(element("#modalContainer").innerHTML, /Confirm removal/);
+  element("#cancelManageChoice").onclick();
+  assert.ok(f.context.getData().trips.includes("Wedding"));
+  remove();
+  await element("#manageChoiceForm").onsubmit({ preventDefault() {} });
+  assert.equal(f.context.getData().trips.includes("Wedding"), false);
+  assert.equal(f.context.getData().transactions.find(t => t.description === "Flowers").trip, "");
+  browser.saved = JSON.parse(JSON.stringify(f.context.getData().transactions.find(t => t.description === "Flowers")));
+  vm.runInContext("openEntry(saved)", browser);
+  assert.equal(element("#entryTrip").value, "");
+  vm.runInContext("openEntry()", browser);
+  assert.doesNotMatch(element("#entryTrip").innerHTML, /Wedding/);
 });
 
-test("payment names delete and re-add without changing journal history; methods validate and fingerprint", () => {
+test("payment account deletion clears only the matching detail and re-adding does not restore it", () => {
   const f = fixture(),
     api = f.context,
     c = f.config.layout.journal;
@@ -1550,26 +1566,21 @@ test("payment names delete and re-add without changing journal history; methods 
   const afterRemoval = JSON.stringify(master.cells);
   api.managePaymentOption(removeRequest); // Retrying must not delete a shifted neighbour.
   assert.equal(JSON.stringify(master.cells), afterRemoval);
-  assert.equal(JSON.stringify(f.expense.cells), before);
+  const expected = JSON.parse(before);
+  expected[bank.row - 1][c.paymentDetail - 1] = "";
+  assert.equal(JSON.stringify(f.expense.cells), JSON.stringify(expected));
   assert.equal(api.getData().paymentOptions["Bank transfer"].length, 0);
-  api.updateTransaction({
-    ...payload,
-    row: bank.row,
-    fingerprint: bank.fingerprint,
-    amount: "91",
-    requestId: "retain_archived_payment",
-  });
-  assert.equal(
-    api.getData().transactions.find((t) => t.row === bank.row).paymentDetail,
-    "SBI Savings",
-  );
+  assert.throws(() => api.updateTransaction({ ...payload, row: bank.row,
+    fingerprint: bank.fingerprint, amount: "91", requestId: "reject_stale_removed_payment" }), /changed/);
+  assert.equal(api.getData().transactions.find(t => t.row === bank.row).paymentDetail, "");
   assert.throws(
     () =>
       api.addTransaction({ ...payload, requestId: "reject_archived_payment" }),
-    /available payment name/,
+    /available payment account \/ app/,
   );
   manage("add", "Bank transfer", "SBI Savings");
   assert.equal(api.getData().paymentOptions["Bank transfer"][0], "SBI Savings");
+  assert.equal(api.getData().transactions.find(t => t.row === bank.row).paymentDetail, "");
   for (const method of ["Card", "UPI", "Cash"]) {
     const detail = method === "Card" ? "HDFC Card" : "Google Pay";
     api.addTransaction({
@@ -1597,13 +1608,13 @@ test("payment names delete and re-add without changing journal history; methods 
         paymentDetail: "",
         requestId: "missing_upi_app_name",
       }),
-    /available payment name/,
+    /available payment account \/ app/,
   );
   assert.throws(
     () => manage("add", "Cash", "Wallet"),
-    /Choose an available payment type/,
+    /Choose an available payment method/,
   );
-  assert.throws(() => manage("add", "Card", " "), /enter a name/);
+  assert.throws(() => manage("add", "Card", " "), /enter an account \/ app name/);
   const current = api.getData().transactions.find((t) => t.row === bank.row);
   f.expense.cells[bank.row - 1][c.paymentDetail - 1] = "Changed directly";
   assert.throws(
@@ -1747,9 +1758,9 @@ test("payment UI manages names and conditionally requires details without losing
   element("#entryPaymentMethod").onchange();
   assert.equal(element("#entryPaymentMethod").value, "");
   for (const [method, label, name] of [
-    ["Bank transfer", "Which bank?", "Savings"],
-    ["Card", "Which card?", "Visa"],
-    ["UPI", "Which UPI app?", "PhonePe"],
+    ["Bank transfer", "Payment account / app", "Savings"],
+    ["Card", "Payment account / app", "Visa"],
+    ["UPI", "Payment account / app", "PhonePe"],
   ]) {
     element("#entryPaymentMethod").value = method;
     element("#entryPaymentMethod").onchange();
@@ -1876,10 +1887,10 @@ test("payment UI manages names and conditionally requires details without losing
     assert.doesNotMatch(element("#content").innerHTML, /Google Pay/);
     assert.match(
       element("#content").innerHTML,
-      /id="transaction-[^"]+-method"><span class="mobile-field-label">Payment method<\/span>UPI<\/td><td[^>]+id="transaction-[^"]+-detail"><span class="mobile-field-label">Bank \/ card \/ UPI app<\/span><\/td>/,
+      /id="transaction-[^"]+-method"><span class="mobile-field-label">Payment method<\/span>UPI<\/td><td[^>]+id="transaction-[^"]+-detail"><span class="mobile-field-label">Payment account \/ app<\/span><\/td>/,
     );
   }
-  browser.entry = JSON.parse(JSON.stringify(entry));
+  browser.entry = JSON.parse(JSON.stringify(f.context.getData().transactions.find(t => t.amount === 135)));
   vm.runInContext("openEntry(entry)", browser);
   assert.equal(element("#entryPaymentMethod").value, "UPI");
   assert.equal(element("#entryPaymentDetail").value, "");
@@ -2648,7 +2659,7 @@ test("optional payment saves in each spending journal and can be cleared on an e
           paymentDetail: "",
           requestId: "missing_name_" + type,
         }),
-      /available payment name/,
+      /available payment account \/ app/,
     );
   }
 });
@@ -2731,7 +2742,7 @@ test("custom payment types persist separately, deduplicate, and work with option
   assert.equal(api.getData().paymentOptions.Wallet.length, 0);
   assert.throws(
     () => api.addPaymentType({ name: " ", requestId: "empty_custom_type" }),
-    /Enter a payment type/,
+    /Enter a payment method/,
   );
   assert.throws(
     () =>
@@ -2739,7 +2750,7 @@ test("custom payment types persist separately, deduplicate, and work with option
         name: "X".repeat(61),
         requestId: "long_custom_type",
       }),
-    /Enter a payment type/,
+    /Enter a payment method/,
   );
   assert.throws(
     () =>
@@ -2747,7 +2758,7 @@ test("custom payment types persist separately, deduplicate, and work with option
         name: "__proto__",
         requestId: "reserved_custom_type",
       }),
-    /Enter a payment type/,
+    /Enter a payment method/,
   );
   f.setActiveEmail("other@example.test");
   assert.throws(
@@ -5764,7 +5775,7 @@ test("new-entry and edit forms require a positive amount with the decimal keyboa
 });
 
 for (const type of ["expense", "income", "investment"]) {
-  test(`${type}: Manage edits and removes descriptions and categories without altering records or adjacent lists`, () => {
+  test(`${type}: Manage edits choices and clears removed category references without moving adjacent lists`, () => {
     const f = fixture(), api = f.context, c = f.config.layout.lookup;
     api.getData();
     const master = f.sheets[f.config.lookupSheets[type]],
@@ -5782,23 +5793,23 @@ for (const type of ["expense", "income", "investment"]) {
     assert.equal(api.getData().mappings[type][0].category, "Other");
     manage({ kind: "category", action: "edit", name: "Other", newName: "General" });
     assert.equal(api.getData().mappings[type][0].category, "General");
-    // Validation happens before the retry marker, so a replacement can be corrected.
+    // Category removal clears dependent mappings instead of requiring a replacement.
     const removal = { kind: "category", type, action: "remove", name: "General", confirmed: true,
       requestId: `remove_category_${type}` };
-    assert.throws(() => api.manageChoice(removal), /replacement category/);
-    assert.equal(f.properties[`request:${removal.requestId}`], undefined);
-    api.manageChoice({ ...removal, replacement: original });
+    api.manageChoice(removal);
     assert.equal(api.getData().categories[type].includes("General"), false);
-    assert.equal(api.getData().mappings[type][0].category, original);
+    assert.equal(api.getData().mappings[type][0].category, "");
     assert.throws(() => manage({ kind: "description", action: "remove", name: "Updated item",
-      previousCategory: original }), /Confirm/);
-    manage({ kind: "description", action: "remove", name: "Updated item", previousCategory: original, confirmed: true });
+      previousCategory: "" }), /Confirm/);
+    manage({ kind: "description", action: "remove", name: "Updated item", previousCategory: "", confirmed: true });
     manage({ kind: "category", action: "remove", name: original, confirmed: true });
     assert.equal(api.getData().mappings[type].length, 0);
     assert.equal(api.getData().categories[type].length, 0);
     assert.equal(api.getData().categories[type].length, 0); // No default resurrection on refresh.
     assert.deepEqual(master.cells.map(row => row[c.trips - 1]), groups);
-    assert.deepEqual(Object.values(f.config.sheets).map(name => JSON.stringify(f.sheets[f.resolve(name)].cells)), journals);
+    const expected = journals.map(value => JSON.parse(value));
+    if (type === "expense") expected[0][1][f.config.layout.journal.category - 1] = "";
+    assert.deepEqual(Object.values(f.config.sheets).map(name => JSON.stringify(f.sheets[f.resolve(name)].cells)), expected.map(value => JSON.stringify(value)));
   });
 }
 
@@ -5851,7 +5862,7 @@ test("Manage rejects stale choices, conflicts, unsafe names and another workspac
   assert.throws(() => api.manageChoice({ kind: "paymentType", name: "UPI", action: "edit", newName: "card",
     requestId: "conflicting_type_name" }), /already exists/);
   assert.throws(() => api.manageChoice({ kind: "paymentType", name: "UPI", action: "edit", newName: "__proto__",
-    requestId: "unsafe_managed_type" }), /another payment type/);
+    requestId: "unsafe_managed_type" }), /another payment method/);
   api.manageChoice({ ...edit, previousCategory: "Food" });
   assert.throws(() => api.manageChoice({ ...edit, previousCategory: "Food", requestId: "obsolete_master_choice" }), /changed/);
   f.setActiveEmail("different@example.test");
@@ -5998,4 +6009,250 @@ test("investment master migration updates only prepared future formulas and acce
   api.addTransaction({ type: "investment", description: "Index fund", amount: 100, date: "2026-10-21",
     category: "Funds", requestId: "save_custom_investment_category" });
   assert.ok(api.getData().transactions.some(entry => entry.type === "investment" && entry.category === "Funds"));
+});
+
+test("removing an expense group clears matching tags and preserves all other financial data", () => {
+  const f = fixture(), api = f.context, c = f.config.layout.lookup;
+  api.getData();
+  api.createExpenseGroup({ name: "Wedding", requestId: "new_group_to_preserve" });
+  const master = f.sheets[f.config.lookupSheets.expense];
+  const before = master.cells.map(row => row.slice());
+  const journalBefore = Object.values(f.config.sheets).map(name => JSON.stringify(f.sheets[f.resolve(name)].cells));
+  const input = { kind: "group", action: "remove", name: "2026 Holiday", requestId: "confirmed_group_removal" };
+  assert.throws(() => api.manageChoice(input), /Confirm removal/);
+  assert.equal(f.properties["request:confirmed_group_removal"], undefined);
+  assert.equal(api.manageChoice({ ...input, confirmed: true }).ok, true);
+  assert.equal(api.manageChoice({ ...input, confirmed: true }).ok, true);
+  assert.deepEqual(Array.from(api.getData().trips), ["Wedding"]);
+  master.cells.forEach((row, index) => row.forEach((value, column) => {
+    if (column !== c.trips - 1) assert.equal(value, before[index][column]);
+  }));
+  const expected = journalBefore.map(text => JSON.parse(text));
+  expected[0][1][f.config.layout.journal.trip - 1] = "";
+  assert.deepEqual(Object.values(f.config.sheets).map(name => JSON.stringify(f.sheets[f.resolve(name)].cells)), expected.map(rows => JSON.stringify(rows)));
+  assert.throws(() => api.manageChoice({ ...input, confirmed: true, requestId: "stale_removed_group" }), /changed/);
+  api.createExpenseGroup({ name: "2026 Holiday", requestId: "readd_removed_group" });
+  assert.ok(api.getData().trips.includes("2026 Holiday"));
+});
+
+test("group removal invalidates stale corrections and removed tags cannot be restored", () => {
+  const f = fixture(), api = f.context;
+  const entry = api.getData().transactions[0];
+  api.manageChoice({ kind: "group", action: "remove", name: entry.trip, confirmed: true, requestId: "remove_used_expense_group" });
+  const input = { type: "expense", description: entry.description, amount: 20, date: entry.date,
+    category: entry.category, trip: entry.trip };
+  assert.throws(() => api.addTransaction({ ...input, requestId: "new_removed_expense_group" }), /Manage → Expense groups/);
+  assert.throws(() => api.updateTransaction({ ...input, row: entry.row, fingerprint: entry.fingerprint,
+    requestId: "stale_historical_expense_group" }), /changed/);
+  const current = api.getData().transactions[0];
+  assert.equal(current.trip, "");
+  assert.throws(() => api.updateTransaction({ ...input, row: current.row, fingerprint: current.fingerprint,
+    requestId: "restore_removed_expense_group" }), /Manage → Expense groups/);
+  api.updateTransaction({ ...input, trip: "", row: current.row, fingerprint: current.fingerprint,
+    requestId: "edit_ungrouped_transaction" });
+  assert.equal(api.getData().transactions[0].amount, 20);
+  assert.equal(api.getData().transactions[0].trip, "");
+});
+
+test("group removal batches only matching tags, preserves other groups and blocks partial replay", () => {
+  const f = fixture(), api = f.context, c = f.config.layout.journal;
+  api.getData();
+  api.createExpenseGroup({ name: "Other group", requestId: "other_group_for_tag_clear" });
+  f.expense.getRange(3, c.trip).setValue("Other group");
+  f.expense.getRange(4, c.trip).setValue(" 2026 HOLIDAY ");
+  f.expense.getRange(5, c.trip).setValue("2026 Holiday");
+  const before = JSON.stringify(f.expense.cells), original = f.expense.getRange.bind(f.expense);
+  let calls = [];
+  f.expense.getRange = (...args) => {
+    const range = original(...args), clear = range.clearContent;
+    range.clearContent = () => {
+      calls.push({ row: range.row, height: range.height, col: range.col, width: range.width });
+      if (calls.length === 2) throw new Error("Connection lost");
+      return clear();
+    };
+    return range;
+  };
+  const input = { kind: "group", action: "remove", name: "2026 Holiday", confirmed: true,
+    requestId: "partial_group_tag_clear" };
+  assert.throws(() => api.manageChoice(input), /Connection lost/);
+  assert.throws(() => api.manageChoice(input), /may already have started/);
+  assert.deepEqual(calls, [{ row: 2, height: 1, col: c.trip, width: 1 },
+    { row: 4, height: 2, col: c.trip, width: 1 }]);
+  assert.ok(api.getData().trips.includes("2026 Holiday"));
+  f.expense.getRange = original;
+  api.manageChoice({ ...input, requestId: "reconciled_group_tag_clear" });
+  const expected = JSON.parse(before);
+  for (const row of [2, 4, 5]) expected[row - 1][c.trip - 1] = "";
+  assert.equal(JSON.stringify(f.expense.cells), JSON.stringify(expected));
+  assert.equal(f.expense.cells[2][c.trip - 1], "Other group");
+  assert.equal(api.getData().trips.includes("2026 Holiday"), false);
+});
+
+for (const type of ["expense", "income", "investment"]) {
+  test(`${type}: deleted accounts/apps clear only matching details, and deleted methods clear both payment fields`, () => {
+    const f = fixture(), api = f.context, c = f.config.layout.journal;
+    api.getData();
+    for (const [method, name] of [["Bank transfer", "Example savings"], ["Bank transfer", "Other savings"], ["UPI", "Example savings"]])
+      api.managePaymentOption({ action: "add", method, name, requestId: "payment_ref_" + method.replaceAll(" ", "_") + name.replaceAll(" ", "_") });
+    const sheet = f.sheets[f.resolve(f.config.sheets[type])];
+    for (const [row, method, name] of [[2, "Bank transfer", "Example savings"], [3, "Bank transfer", "Other savings"],
+      [4, "UPI", "Example savings"], [5, " bank TRANSFER ", " EXAMPLE savings "]]) {
+      sheet.getRange(row, c.description).setValue("Recorded entry " + row);
+      sheet.getRange(row, c.amount).setValue(100 + row);
+      sheet.getRange(row, c.date).setValue(new Date("2026-10-21T12:00:00Z"));
+      sheet.getRange(row, c.paymentMethod).setValue(method);
+      sheet.getRange(row, c.paymentDetail).setValue(name);
+    }
+    const before = JSON.stringify(sheet.cells);
+    const remove = { kind: "paymentName", action: "remove", method: "Bank transfer", name: "Example savings", confirmed: true,
+      requestId: "delete_account_refs_" + type };
+    api.manageChoice(remove);
+    api.manageChoice(remove);
+    const expected = JSON.parse(before);
+    for (const row of [2, 5]) expected[row - 1][c.paymentDetail - 1] = "";
+    assert.equal(JSON.stringify(sheet.cells), JSON.stringify(expected));
+    api.manageChoice({ kind: "paymentType", action: "remove", name: "Bank transfer", confirmed: true,
+      requestId: "delete_method_refs_" + type });
+    for (const row of [2, 3, 5]) {
+      expected[row - 1][c.paymentMethod - 1] = "";
+      expected[row - 1][c.paymentDetail - 1] = "";
+    }
+    assert.equal(JSON.stringify(sheet.cells), JSON.stringify(expected));
+    assert.equal(sheet.cells[3][c.paymentMethod - 1], "UPI");
+    assert.equal(sheet.cells[3][c.paymentDetail - 1], "Example savings");
+    api.addPaymentType({ name: "Bank transfer", requestId: "readd_method_refs_" + type });
+    api.managePaymentOption({ action: "add", method: "Bank transfer", name: "Example savings", requestId: "readd_account_refs_" + type });
+    assert.equal(JSON.stringify(sheet.cells), JSON.stringify(expected));
+  });
+
+  test(`${type}: removing descriptions/categories keeps transactions and exposes missing labels in Review`, () => {
+    const f = fixture(), api = f.context, c = f.config.layout.journal;
+    api.getData();
+    const sheet = f.sheets[f.resolve(f.config.sheets[type])];
+    const category = type === "investment" ? "Investments" : "Food";
+    sheet.getRange(2, c.description).setValue("Known item");
+    sheet.getRange(2, c.amount).setValue(80);
+    sheet.getRange(2, c.date).setValue(new Date("2026-10-21T12:00:00Z"));
+    sheet.getRange(2, c.category).setValue(category);
+    sheet.getRange(2, c.decision).setValue("Okay");
+    const before = JSON.stringify(sheet.cells);
+    api.manageChoice({ kind: "description", action: "remove", type, name: "Known item", previousCategory: category,
+      confirmed: true, requestId: "clear_description_" + type });
+    let current = api.getData().transactions.find(entry => entry.type === type && entry.row === 2);
+    assert.equal(current.description, "");
+    assert.equal(current.category, category);
+    assert.ok(current.issues.includes("Missing description"));
+    assert.equal(current.decision, "Okay"); // Acceptance never suppresses missing required fields.
+    api.manageChoice({ kind: "category", action: "remove", type, name: category, confirmed: true,
+      requestId: "clear_category_" + type });
+    current = api.getData().transactions.find(entry => entry.type === type && entry.row === 2);
+    assert.equal(current.category, "");
+    assert.ok(current.issues.includes("Missing description"));
+    assert.ok(current.issues.includes("Missing category"));
+    assert.equal(current.amount, 80);
+    const expected = JSON.parse(before);
+    expected[1][c.description - 1] = "";
+    expected[1][c.category - 1] = "";
+    assert.equal(JSON.stringify(sheet.cells), JSON.stringify(expected));
+    api.addLookupOption({ kind: "description", type, name: "Corrected description", newCategory: "Corrected category",
+      requestId: "repair_master_labels_" + type });
+    api.updateTransaction({ type, row: current.row, fingerprint: current.fingerprint, description: "Corrected description",
+      category: "Corrected category", amount: 80, date: current.date, notes: current.notes, trip: current.trip,
+      requestId: "repair_transaction_labels_" + type });
+    current = api.getData().transactions.find(entry => entry.type === type && entry.row === 2);
+    assert.equal(current.issues.includes("Missing description"), false);
+    assert.equal(current.issues.includes("Missing category"), false);
+    assert.equal(current.amount, 80);
+  });
+}
+
+test("category deletion retains descriptions with missing mappings so Manage can repair them", () => {
+  const f = fixture(), api = f.context;
+  api.getData();
+  api.manageChoice({ kind: "category", type: "expense", action: "remove", name: "Food", confirmed: true,
+    requestId: "delete_dependent_category" });
+  let mapping = api.getData().mappings.expense.find(entry => entry.description === "Known item");
+  assert.ok(mapping);
+  assert.equal(mapping.category, "");
+  api.addLookupOption({ kind: "category", type: "expense", name: "New category", requestId: "new_repair_category" });
+  api.manageChoice({ kind: "description", type: "expense", action: "edit", name: "Known item", newName: "Known item",
+    previousCategory: "", category: "New category", requestId: "repair_empty_mapping" });
+  mapping = api.getData().mappings.expense.find(entry => entry.description === "Known item");
+  assert.equal(mapping.category, "New category");
+  assert.equal(api.getData().transactions[0].category, ""); // Correct the recorded entry in Review separately.
+});
+
+test("payment method clearing preserves gaps in custom layouts and blocks partial-write replay", () => {
+  const f = fixture({ apply(config) { config.layout.journal.paymentMethod = 24; config.layout.journal.paymentDetail = 28; } });
+  const api = f.context, c = f.config.layout.journal;
+  api.getData();
+  api.managePaymentOption({ action: "add", method: "UPI", name: "Example app", requestId: "custom_payment_ref" });
+  f.expense.getRange(2, c.paymentMethod).setValue("UPI");
+  f.expense.getRange(2, c.paymentDetail).setValue("Example app");
+  f.expense.getRange(2, 26).setValue("Keep intervening field");
+  const original = f.expense.getRange.bind(f.expense), calls = [];
+  f.expense.getRange = (...args) => {
+    const range = original(...args), clear = range.clearContent;
+    range.clearContent = () => {
+      calls.push({ col: range.col, width: range.width });
+      if (calls.length === 2) throw new Error("Connection lost");
+      return clear();
+    };
+    return range;
+  };
+  const input = { kind: "paymentType", action: "remove", name: "UPI", confirmed: true, requestId: "partial_method_clear" };
+  assert.throws(() => api.manageChoice(input), /Connection lost/);
+  assert.throws(() => api.manageChoice(input), /may already have started/);
+  assert.deepEqual(calls, [{ col: 28, width: 1 }, { col: 24, width: 1 }]);
+  assert.ok(api.getData().config.paymentMethods.includes("UPI"));
+  assert.equal(f.expense.cells[1][25], "Keep intervening field");
+  f.expense.getRange = original;
+  api.manageChoice({ ...input, requestId: "reconciled_method_clear" });
+  assert.equal(f.expense.cells[1][c.paymentMethod - 1], "");
+  assert.equal(f.expense.cells[1][c.paymentDetail - 1], "");
+  assert.equal(f.expense.cells[1][25], "Keep intervening field");
+});
+
+test("description deletion preserves a native computed category and Review names the missing field", () => {
+  const f = fixture(), api = f.context, c = f.config.layout.journal;
+  api.getData();
+  const sheet = f.expense, original = sheet.getRange.bind(sheet);
+  sheet.getRange(2, c.category).setFormula('=VLOOKUP(B2,\'Item & Category\'!A:B,2,FALSE)');
+  sheet.getRange(2, c.otherIssues[1]).setValue("Incomplete entry");
+  sheet.getRange(2, c.decision).setValue("Okay");
+  sheet.getRange = (...args) => {
+    const range = original(...args), values = range.getValues;
+    range.getValues = () => values().map(row => row.map(value =>
+      typeof value === "string" && value.startsWith("=VLOOKUP") ? "Food" : value));
+    return range;
+  };
+  api.manageChoice({ kind: "description", type: "expense", action: "remove", name: "Known item", previousCategory: "Food",
+    confirmed: true, requestId: "remove_native_description" });
+  const current = api.getData().transactions[0];
+  assert.equal(current.description, "");
+  assert.equal(current.category, "Food");
+  assert.deepEqual(Array.from(current.issues), ["Missing description"]);
+  assert.equal(current.amount, 50);
+});
+
+test("legacy removed payment names clear references without clearing an active duplicate account", () => {
+  for (const activeDuplicate of [false, true]) {
+    const f = fixture(), api = f.context, c = f.config.layout.journal;
+    api.getData();
+    api.managePaymentOption({ action: "add", method: "UPI", name: "Example app", requestId: "legacy_account_setup" });
+    const master = f.sheets[f.config.paymentMethodsSheet];
+    master.getRange(2, 3).setValue("No");
+    if (activeDuplicate) {
+      master.getRange(3, 1).setValue("UPI");
+      master.getRange(3, 2).setValue("Example app");
+      master.getRange(3, 3).setValue("Yes");
+    }
+    f.expense.getRange(2, c.paymentMethod).setValue("UPI");
+    f.expense.getRange(2, c.paymentDetail).setValue("Example app");
+    const current = api.getData().transactions[0];
+    assert.equal(current.paymentDetail, activeDuplicate ? "Example app" : "");
+    assert.equal(current.paymentMethod, "UPI");
+    assert.equal(current.amount, 50);
+    assert.equal(api.paymentRecords_(f.book).some(record => record.removed), false);
+  }
 });
