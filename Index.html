@@ -3934,7 +3934,9 @@
               : 'This removes the group from saved choices and dashboard group cards, and clears its tag from all matching transactions in your sheet. The transactions, amounts, and other details are kept.'
             : lookup
             ? editing
-              ? 'Edits update reusable choices for future entries. Recorded descriptions and categories stay unchanged.'
+              ? choice.kind === "category"
+                ? 'Renaming this category updates saved description mappings and all matching existing transactions in the selected journal. Amounts, dates, and other details stay unchanged.'
+                : 'Edits update reusable choices for future entries. Recorded descriptions and categories stay unchanged.'
               : 'This removes the saved choice and clears its matching ' + label + ' from transactions in this journal. Those transactions appear in Review as Missing ' + label + '. Transactions, amounts, and other details are kept.' +
                 (choice.kind === "category" ? ' Saved descriptions using this category will need a new category too.' : '')
             : paymentNotice) +
@@ -3973,7 +3975,7 @@
             if (choice.kind === "group" && editing && state.trip === choice.name) state.trip = payload.newName.trim();
             toast(choice.kind === "group"
               ? (editing ? "Expense group renamed and transaction tags updated." : "Expense group removed and its transaction tags cleared.")
-              : editing ? "Saved choice updated." : "Saved choice removed.");
+              : editing ? (choice.kind === "category" ? "Category renamed and existing transactions updated." : "Saved choice updated.") : "Saved choice removed.");
           } catch (error) {
             $("#manageChoiceError").textContent = error.message +
               " If the result is uncertain, refresh and check before starting again.";

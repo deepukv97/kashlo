@@ -2475,7 +2475,7 @@ function managedChoicePlan_(input) {
     }
   }
   let lookupReferences = null;
-  if (input.action === "remove") {
+  if (input.action === "remove" || input.kind === "category") {
     const journal = sheet_(book, input.type), j = workspaceConfig_().layout.journal;
     const target = input.kind === "description" ? j.description : j.category;
     const values = journal.getRange(j.firstDataRow, 1,
@@ -2489,7 +2489,7 @@ function managedChoicePlan_(input) {
   return { ...plan, sheet, c, categories, mappings, category, lookupReferences };
 }
 // Removing a master choice clears its matching references; financial rows and amounts stay.
-// Renaming reusable choices still preserves recorded labels.
+// Category and group renames update recorded references; description/payment edits retain history.
 // Read-only validation runs before the retry marker; partial writes remain protected.
 function manageChoice(input) {
   if (!input || typeof input !== "object") throw new Error("Choose a valid Manage action.");
@@ -2536,8 +2536,13 @@ function manageChoice(input) {
       if (input.type === "investment") initializeInvestmentCategories_(sheet, book);
       if (plan.lookupReferences) {
         const { journal, target, rows } = plan.lookupReferences;
-        for (const { start, count } of consecutiveRows_(rows))
-          journal.getRange(start, target, count, 1).clearContent();
+        for (const { start, count } of consecutiveRows_(rows)) {
+          const range = journal.getRange(start, target, count, 1);
+          if (input.action === "edit") {
+            const text = SpreadsheetApp.newRichTextValue().setText(newName).build();
+            range.setRichTextValues(Array.from({ length: count }, () => [text]));
+          } else range.clearContent();
+        }
       }
       if (input.kind === "category") {
         replaceChoiceColumn_(sheet, c.categoryOptions, categories.flatMap(value => value === name

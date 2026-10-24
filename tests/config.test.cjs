@@ -5876,7 +5876,7 @@ test("Manage rejects stale choices, conflicts, unsafe names and another workspac
     requestId: "unauthorized_master_edit" }), /private/);
 });
 
-test("master removal preserves computed native categories and allows editing historical categories", () => {
+test("category renaming updates computed native categories and rejects the old choice", () => {
   const f = fixture(), api = f.context, c = f.config.layout.journal;
   api.getData();
   const sheet = f.expense, getRange = sheet.getRange.bind(sheet);
@@ -5890,12 +5890,12 @@ test("master removal preserves computed native categories and allows editing his
   };
   api.manageChoice({ kind: "category", type: "expense", action: "edit", name: "Food", newName: "Meals",
     requestId: "freeze_native_history_category" });
-  assert.equal(sheet.cells[1][c.category - 1], "Food");
+  assert.equal(sheet.cells[1][c.category - 1], "Meals");
   const entry = api.getData().transactions[0];
   api.updateTransaction({ type: "expense", row: entry.row, fingerprint: entry.fingerprint,
-    description: entry.description, category: "Food", amount: 65, date: "2026-01-04",
+    description: entry.description, category: "Meals", amount: 65, date: "2026-01-04",
     requestId: "edit_retained_historical_category" });
-  assert.equal(api.getData().transactions[0].category, "Food");
+  assert.equal(api.getData().transactions[0].category, "Meals");
   assert.throws(() => api.addTransaction({ type: "expense", description: "New entry", category: "Food", amount: 1,
     date: "2026-10-21", requestId: "reject_new_removed_category" }), /valid category/);
 });
@@ -6353,4 +6353,56 @@ test("interrupted expense group renaming blocks replay and can be reconciled aft
   api.manageChoice({...input,requestId:"reconciled_group_rename"});
   for(const row of [2,4])assert.equal(f.expense.cells[row-1][c.trip-1],"Renamed event");
   assert.ok(api.getData().trips.includes("Renamed event"));
+});
+
+
+for (const type of ["expense", "income", "investment"]) {
+  test(`${type}: category renaming updates recorded categories and mappings without changing other data`, () => {
+    const f=fixture(),api=f.context,c=f.config.layout.journal;
+    api.getData();
+    const old=type === "investment" ? "Investments" : "Food";
+    const journal=f.sheets[f.resolve(f.config.sheets[type])];
+    for (const [row,category] of [[2,old],[3,"Unrelated category"],[4,"  "+old.toUpperCase()+"  "],[5,old]]) {
+      journal.getRange(row,c.description).setValue("Fictional entry "+row);
+      journal.getRange(row,c.amount).setValue(10+row);
+      journal.getRange(row,c.date).setValue(new Date("2026-10-24T12:00:00Z"));
+      journal.getRange(row,c.category).setValue(category);
+    }
+    const before=JSON.stringify(journal.cells),data=api.getData();
+    const stale=data.transactions.find(t=>t.type===type && t.row===2);
+    const others=Object.keys(f.config.sheets).filter(t=>t!==type).map(t=>JSON.stringify(f.sheets[f.resolve(f.config.sheets[t])].cells));
+    const input={kind:"category",action:"edit",type,name:old,newName:"Updated category",requestId:"rename_recorded_category_"+type};
+    assert.equal(api.manageChoice(input).ok,true);
+    assert.equal(api.manageChoice(input).ok,true);
+    const expected=JSON.parse(before);for (const row of [2,4,5]) expected[row-1][c.category-1]="Updated category";
+    assert.equal(JSON.stringify(journal.cells),JSON.stringify(expected));
+    const current=api.getData();
+    assert.equal(current.mappings[type][0].category,"Updated category");
+    assert.ok(current.categories[type].includes("Updated category"));
+    assert.ok(!current.categories[type].includes(old));
+    assert.deepEqual(Object.keys(f.config.sheets).filter(t=>t!==type).map(t=>JSON.stringify(f.sheets[f.resolve(f.config.sheets[t])].cells)),others);
+    assert.throws(()=>api.deleteTransaction({...stale,confirmed:true,requestId:"stale_category_delete_"+type}),/changed/);
+  });
+}
+
+test("category rename preserves native computed category results and blocks interrupted replay", () => {
+  const f=fixture(),api=f.context,c=f.config.layout.journal;
+  api.getData();
+  f.expense.getRange(2,c.category).setFormula("=LOOKUP_CATEGORY()");
+  f.expense.getRange(4,c.category).setValue("Food");
+  f.expense.getRange(4,c.description).setValue("Another fictional entry");
+  const original=f.expense.getRange.bind(f.expense);let writes=0;
+  f.expense.getRange=(...args)=>{
+    const range=original(...args),get=range.getValues,set=range.setRichTextValues;
+    range.getValues=()=>get().map(row=>row.map(value=>value==="=LOOKUP_CATEGORY()" ? "Food" : value));
+    range.setRichTextValues=values=>{if(++writes===2)throw new Error("Connection lost");return set(values)};
+    return range;
+  };
+  const input={kind:"category",action:"edit",type:"expense",name:"Food",newName:"New category",requestId:"interrupted_category_rename"};
+  assert.throws(()=>api.manageChoice(input),/Connection lost/);
+  assert.throws(()=>api.manageChoice(input),/may already have started/);
+  f.expense.getRange=original;
+  api.manageChoice({...input,requestId:"reconciled_category_rename"});
+  for(const row of [2,4])assert.equal(f.expense.cells[row-1][c.category-1],"New category");
+  assert.equal(api.getData().mappings.expense[0].category,"New category");
 });
