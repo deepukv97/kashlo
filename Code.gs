@@ -1594,6 +1594,36 @@ function deleteTransaction(input) {
   });
 }
 
+// Validate every selected row before deleting any, then remove bottom-up batches.
+// Completed retries return their receipt; partial failures cannot delete shifted rows.
+function deleteTransactions(input) {
+  if (!input || input.confirmed !== true)
+    throw new Error("Confirm the selected transaction deletions first.");
+  return withWorkspaceWrite_(input, (journals) => {
+    let count = 0;
+    journals.forEach((rows, sheet) => {
+      deleteCheckedRows_(sheet, rows);
+      count += rows.length;
+    });
+    return { ok: true, count };
+  }, () => {
+    if (!Array.isArray(input.entries) || !input.entries.length || input.entries.length > 500)
+      throw new Error("Select between 1 and 500 transactions.");
+    const book = book_(), journals = new Map(), seen = new Set();
+    input.entries.forEach(entry => {
+      if (!entry || !Object.prototype.hasOwnProperty.call(workspaceConfig_().sheets, entry.type))
+        throw new Error("Choose a valid journal.");
+      const key = entry.type + ":" + Number(entry.row);
+      if (seen.has(key)) throw new Error("The selection contains a repeated transaction.");
+      seen.add(key);
+      const current = checkedTransaction_(book, entry);
+      if (!journals.has(current.sheet)) journals.set(current.sheet, []);
+      journals.get(current.sheet).push(current.row);
+    });
+    return journals;
+  });
+}
+
 // Compress only adjacent validated rows; gaps always remain untouched.
 function consecutiveRows_(rows) {
   const runs = [];
@@ -2077,12 +2107,8 @@ function paymentValues_(book, input) {
   if (!methods.includes(paymentMethod))
     throw new Error("Choose a valid payment method.");
   if (paymentMethod === "Cash") return { paymentMethod, paymentDetail: "" };
-  // Custom types may stand alone (for example Cheque); built-in account methods still require a name.
-  if (
-    !paymentDetail &&
-    !["Bank transfer", "Card", "UPI"].includes(paymentMethod)
-  )
-    return { paymentMethod, paymentDetail: "" };
+  // Every payment method may be recorded without an account or app.
+  if (!paymentDetail) return { paymentMethod, paymentDetail: "" };
   const active = (paymentOptions_(book, methods)[paymentMethod] || []).includes(
     paymentDetail,
   );
@@ -2387,7 +2413,7 @@ function managedChoicePlan_(input) {
   const book = book_(), name = String(input.name || "").trim();
   const newName = input.action === "edit" ? String(input.newName || "").trim() : "";
   const limit = input.kind === "paymentType" ? 60 : input.kind === "paymentName" ? 100 :
-    workspaceConfig_().limits.descriptionLength;
+    input.kind === "group" ? workspaceConfig_().limits.groupNameLength : workspaceConfig_().limits.descriptionLength;
   if (!name || (input.action === "edit" && (!newName || newName.length > limit)))
     throw new Error("Enter a name up to " + limit + " characters.");
   if (input.kind === "paymentType" &&
@@ -2396,11 +2422,12 @@ function managedChoicePlan_(input) {
   const same = (a, b) => normalized_(a) === normalized_(b);
   const plan = { book, name, newName };
   if (input.kind === "group") {
-    if (input.action !== "remove") throw new Error("Choose Remove for an expense group.");
     const sheet = requiredSheet_(book, workspaceConfig_().lookupSheets.expense);
     const column = workspaceConfig_().layout.lookup.trips;
     const groups = options_(sheet, column);
     if (!groups.includes(name)) throw new Error("This expense group changed. Refresh the app.");
+    if (input.action === "edit" && groups.some(group => group !== name && same(group, newName)))
+      throw new Error("That expense group already exists.");
     const journal = sheet_(book, "expense"), j = workspaceConfig_().layout.journal;
     const tags = journal.getRange(j.firstDataRow, j.trip,
       journal.getMaxRows() - j.firstDataRow + 1, 1).getDisplayValues();
@@ -2448,7 +2475,7 @@ function managedChoicePlan_(input) {
     }
   }
   let lookupReferences = null;
-  if (input.action === "remove") {
+  if (input.action === "remove" || input.kind === "category") {
     const journal = sheet_(book, input.type), j = workspaceConfig_().layout.journal;
     const target = input.kind === "description" ? j.description : j.category;
     const values = journal.getRange(j.firstDataRow, 1,
@@ -2462,20 +2489,25 @@ function managedChoicePlan_(input) {
   return { ...plan, sheet, c, categories, mappings, category, lookupReferences };
 }
 // Removing a master choice clears its matching references; financial rows and amounts stay.
-// Renaming reusable choices still preserves recorded labels.
+// Category and group renames update recorded references; description/payment edits retain history.
 // Read-only validation runs before the retry marker; partial writes remain protected.
 function manageChoice(input) {
   if (!input || typeof input !== "object") throw new Error("Choose a valid Manage action.");
   return withWorkspaceWrite_(input, plan => {
     const { book, name, newName } = plan;
     if (input.kind === "group") {
-      // Clear only matching group cells, never entire transaction rows. Keep the
-      // master name until tags are cleared so partial failures can be reconciled.
-      for (const { start, count } of consecutiveRows_(plan.taggedRows))
-        plan.journal.getRange(start, workspaceConfig_().layout.journal.trip, count, 1)
-          .clearContent();
+      // Update matching tags before the master name; interrupted changes can be
+      // reconciled against the old choice. Never change entire financial rows.
+      for (const { start, count } of consecutiveRows_(plan.taggedRows)) {
+        const range = plan.journal.getRange(start, workspaceConfig_().layout.journal.trip, count, 1);
+        if (input.action === "edit") {
+          const text = SpreadsheetApp.newRichTextValue().setText(newName).build();
+          range.setRichTextValues(Array.from({ length: count }, () => [text]));
+        } else range.clearContent();
+      }
       replaceChoiceColumn_(plan.sheet, plan.column,
-        plan.groups.filter(group => normalized_(group) !== normalized_(name)));
+        plan.groups.flatMap(group => normalized_(group) === normalized_(name)
+          ? (input.action === "edit" ? [newName] : []) : [group]));
       return { ok: true };
     }
     if (input.kind === "paymentType" || input.kind === "paymentName") {
@@ -2504,8 +2536,13 @@ function manageChoice(input) {
       if (input.type === "investment") initializeInvestmentCategories_(sheet, book);
       if (plan.lookupReferences) {
         const { journal, target, rows } = plan.lookupReferences;
-        for (const { start, count } of consecutiveRows_(rows))
-          journal.getRange(start, target, count, 1).clearContent();
+        for (const { start, count } of consecutiveRows_(rows)) {
+          const range = journal.getRange(start, target, count, 1);
+          if (input.action === "edit") {
+            const text = SpreadsheetApp.newRichTextValue().setText(newName).build();
+            range.setRichTextValues(Array.from({ length: count }, () => [text]));
+          } else range.clearContent();
+        }
       }
       if (input.kind === "category") {
         replaceChoiceColumn_(sheet, c.categoryOptions, categories.flatMap(value => value === name

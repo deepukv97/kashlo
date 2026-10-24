@@ -79,7 +79,7 @@ You are ready to use Kashlo. Open your bookmarked app for daily use; you do not 
 
 ### Find and filter transactions
 
-Open **Transactions**. Search can find descriptions, categories, expense groups, payment methods such as UPI or Bank transfer, available bank/card/app names, dates, amounts, and notes.
+Open **Transactions**. Search can find descriptions, categories, expense groups, payment methods such as UPI or Bank transfer, available bank/card/app names, dates, amounts, and notes. Amount searches accept plain numbers or formatted amounts, such as `1000`, `1000.00`, or `1,000.00`.
 
 Combine search with these filters:
 
@@ -102,6 +102,8 @@ Closing the calendar with **×** cancels an unconfirmed choice. **Reset**, follo
 
 Use **Edit** or **Delete** beside an entry on Overview, Transactions, or Investments. On a phone, tap **Details** first.
 
+To delete several entries, tick their checkboxes on Overview, Transactions, or Investments, then choose **Delete selected**. **Select this page** selects only the visible page. Selections stay when moving between pages (up to 500 entries) and reset when changing views or filters, or refreshing. Review the confirmation list before deleting; all selected entries are permanently removed from the sheet.
+
 **Edit** opens the saved entry. Change it and save, or cancel to keep it as it is. **Delete** asks for confirmation; confirming removes that entry from your Google Sheet and totals.
 
 ### Track payment methods
@@ -110,7 +112,7 @@ Use **Edit** or **Delete** beside an entry on Overview, Transactions, or Investm
 
 For expenses and investments, payment tracking is optional. Leave **Not recorded**, or choose a payment method. Income has no payment fields.
 
-- **Bank transfer, Card, UPI:** choose the bank, card, or app name after selecting the method.
+- **Bank transfer, Card, UPI:** optionally choose the bank, card, or app name after selecting the method. Leave **Not recorded** to save just the payment method.
 - **Cash:** no extra name is needed.
 - **Custom methods:** add a method such as Wallet or Cheque. A payment account / app is optional for custom methods.
 
@@ -120,15 +122,15 @@ Removing a payment account / app deletes it from the reusable list and clears it
 
 ### Organize descriptions, categories, and expense groups
 
-**Manage → Descriptions:** choose the journal, enter a description, and choose its category. For any journal, **+ Add new category** lets you create the category without leaving this section.
+**Manage → Descriptions:** choose the journal, enter a description, and choose its category. Saved descriptions appear A–Z. Use the search box above the saved list to find a description or category. For any journal, **+ Add new category** lets you create the category without leaving this section.
 
-**Manage → Categories:** add categories for expenses, income, or investments. Use **Edit** or **Remove** beside any saved description or category, including the initial choices. Editing a description lets you change its name and category. Removing a description or category clears that field from matching transactions in the selected journal. Those transactions appear in **Review** as **Missing description** or **Missing category**. Removing a category also clears it from saved description mappings, which remain available to edit. Confirm removals in the pop-up.
+**Manage → Categories:** add categories for expenses, income, or investments. Use **Edit** or **Remove** beside any saved description or category, including the initial choices. Editing a description lets you change its name and category. Renaming a category updates its saved description mappings and all matching existing transactions in that journal, for expenses, income, and investments. Removing a description or category clears that field from matching transactions in the selected journal. Those transactions appear in **Review** as **Missing description** or **Missing category**. Removing a category also clears it from saved description mappings, which remain available to edit. Confirm removals in the pop-up.
 
 **Manage → Payment methods:** use **Edit** or **Remove** on a payment method or saved payment account / app. You can remove initial methods such as UPI, Card, Bank transfer, or Cash. Removing a method also removes all names saved under it. Add it again later if needed.
 
-Editing descriptions and categories updates reusable choices for future entries. Deleting them clears matching recorded fields and sends the affected transactions to Review for correction. Deleting payment choices also clears the corresponding payment fields in the sheet. Re-adding a deleted method or account/app does not restore cleared fields. Renaming payment choices still changes reusable labels for future entries; original labels remain in the transaction history.
+Editing descriptions updates reusable choices for future entries. Renaming a category also updates matching recorded categories in the selected journal. Deleting them clears matching recorded fields and sends the affected transactions to Review for correction. Deleting payment choices also clears the corresponding payment fields in the sheet. Re-adding a deleted method or account/app does not restore cleared fields. Renaming payment choices still changes reusable labels for future entries; original labels remain in the transaction history.
 
-**Manage → Expense groups:** add a group for an event, project, or trip. All saved groups appear below the form. Click **Remove**, then confirm, to remove a group from saved choices and dashboard group cards. The group’s tag is also cleared from all matching transactions in your sheet. The transactions, amounts, and other details are kept.
+**Manage → Expense groups:** add a group for an event, project, or trip. All saved groups appear below the form. Use **Edit** to rename a group; its tags on existing transactions and its dashboard name update together. Click **Remove**, then confirm, to remove a group from saved choices and dashboard group cards. The group’s tag is also cleared from all matching transactions in your sheet. The transactions, amounts, and other details are kept.
 
 Select a saved group when adding an expense. **Dashboards → Expense groups → Manage groups** takes you to the same Manage section. Creating a group does not add an expense. Income and investments do not use expense groups.
 

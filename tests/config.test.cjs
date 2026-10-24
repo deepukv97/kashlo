@@ -405,6 +405,7 @@ function fixture(overrides = {}) {
           "addTransaction",
           "updateTransaction",
           "deleteTransaction",
+          "deleteTransactions",
           "setReview",
           "bulkReview",
           "setMonthStatus",
@@ -1497,7 +1498,7 @@ test("Manage owns group creation and confirmed removal clears tags while keeping
   assert.equal(saved.trip, "Wedding");
   assert.equal(saved.amount, 88);
   vm.runInContext('state.manageSection="groups"; navigate("payments")', browser);
-  const remove = () => choiceButtons.find(button => JSON.parse(button.dataset.manageChoice).name === "Wedding").onclick();
+  const remove = () => choiceButtons.find(button => { const choice = JSON.parse(button.dataset.manageChoice); return choice.name === "Wedding" && choice.action === "remove"; }).onclick();
   remove();
   assert.match(element("#modalContainer").innerHTML, /Confirm removal/);
   element("#cancelManageChoice").onclick();
@@ -1605,8 +1606,8 @@ test("payment account deletion clears only the matching detail and re-adding doe
       api.addTransaction({
         ...payload,
         paymentMethod: "UPI",
-        paymentDetail: "",
-        requestId: "missing_upi_app_name",
+        paymentDetail: "Unavailable app",
+        requestId: "invalid_upi_app_name",
       }),
     /available payment account \/ app/,
   );
@@ -1630,7 +1631,7 @@ test("payment account deletion clears only the matching detail and re-adding doe
   assert.ok(api.getData().paymentOptions.Card.includes("=SUM(A1:A9)"));
 });
 
-test("payment UI manages names and conditionally requires details without losing transaction fields", async () => {
+test("payment UI manages optional accounts/apps without losing transaction fields", async () => {
   const f = fixture(),
     elements = new Map();
   const element = (selector) => {
@@ -1765,8 +1766,8 @@ test("payment UI manages names and conditionally requires details without losing
     element("#entryPaymentMethod").value = method;
     element("#entryPaymentMethod").onchange();
     assert.equal(element("#paymentDetailField").hidden, false);
-    assert.equal(element("#entryPaymentDetail").required, true);
-    assert.equal(element("#paymentDetailLabel").textContent, label);
+    assert.equal(element("#entryPaymentDetail").required, false);
+    assert.equal(element("#paymentDetailLabel").textContent, label + " (optional)");
     assert.match(element("#entryPaymentDetail").innerHTML, new RegExp(name));
     assert.equal(element("#entryPaymentDetail").value, "");
   }
@@ -2651,16 +2652,21 @@ test("optional payment saves in each spending journal and can be cleared on an e
         }),
       /valid payment method/,
     );
-    assert.throws(
-      () =>
-        api.addTransaction({
-          ...payload,
-          paymentMethod: "UPI",
-          paymentDetail: "",
-          requestId: "missing_name_" + type,
-        }),
-      /available payment account \/ app/,
-    );
+    for (const method of ["Bank transfer", "Card", "UPI"]) {
+      const saved = api.addTransaction({ ...payload, paymentMethod: method,
+        paymentDetail: "", requestId: "optional_account_" + type + method.replaceAll(" ", "_") });
+      let current = api.getData().transactions.find(t => t.type === type && t.row === saved.row);
+      assert.equal(current.paymentMethod, method);
+      assert.equal(current.paymentDetail, "");
+      api.updateTransaction({ ...payload, row: current.row, fingerprint: current.fingerprint,
+        paymentMethod: method, paymentDetail: "", requestId: "edit_optional_account_" + type + method.replaceAll(" ", "_") });
+      current = api.getData().transactions.find(t => t.type === type && t.row === saved.row);
+      assert.equal(current.paymentMethod, method);
+      assert.equal(current.paymentDetail, "");
+      assert.throws(() => api.addTransaction({ ...payload, paymentMethod: method,
+        paymentDetail: "Unavailable account", requestId: "invalid_account_" + type + method.replaceAll(" ", "_") }),
+        /available payment account \/ app/);
+    }
   }
 });
 
@@ -5711,7 +5717,7 @@ test("transaction preflight lets users correct date, description, category, grou
     { description: "" },
     { category: "Missing category" },
     { trip: "Missing group" },
-    { paymentMethod: "UPI", paymentDetail: "" },
+    { paymentMethod: "UPI", paymentDetail: "Unavailable app" },
   ]) {
     assert.throws(() => api.addTransaction({ ...base, ...invalid }));
     assert.equal(f.properties["request:" + base.requestId], undefined);
@@ -5870,7 +5876,7 @@ test("Manage rejects stale choices, conflicts, unsafe names and another workspac
     requestId: "unauthorized_master_edit" }), /private/);
 });
 
-test("master removal preserves computed native categories and allows editing historical categories", () => {
+test("category renaming updates computed native categories and rejects the old choice", () => {
   const f = fixture(), api = f.context, c = f.config.layout.journal;
   api.getData();
   const sheet = f.expense, getRange = sheet.getRange.bind(sheet);
@@ -5884,12 +5890,12 @@ test("master removal preserves computed native categories and allows editing his
   };
   api.manageChoice({ kind: "category", type: "expense", action: "edit", name: "Food", newName: "Meals",
     requestId: "freeze_native_history_category" });
-  assert.equal(sheet.cells[1][c.category - 1], "Food");
+  assert.equal(sheet.cells[1][c.category - 1], "Meals");
   const entry = api.getData().transactions[0];
   api.updateTransaction({ type: "expense", row: entry.row, fingerprint: entry.fingerprint,
-    description: entry.description, category: "Food", amount: 65, date: "2026-01-04",
+    description: entry.description, category: "Meals", amount: 65, date: "2026-01-04",
     requestId: "edit_retained_historical_category" });
-  assert.equal(api.getData().transactions[0].category, "Food");
+  assert.equal(api.getData().transactions[0].category, "Meals");
   assert.throws(() => api.addTransaction({ type: "expense", description: "New entry", category: "Food", amount: 1,
     date: "2026-10-21", requestId: "reject_new_removed_category" }), /valid category/);
 });
@@ -6255,4 +6261,162 @@ test("legacy removed payment names clear references without clearing an active d
     assert.equal(current.amount, 50);
     assert.equal(api.paymentRecords_(f.book).some(record => record.removed), false);
   }
+});
+
+
+test("selected deletion validates all journals before writes and retries without deleting shifted rows", () => {
+  const f = fixture(), api = f.context;
+  api.getData();
+  const expense = api.addTransaction({type:"expense", description:"Selected expense", amount:35,
+    date:"2026-01-06", category:"Food", requestId:"bulk_select_expense"});
+  const income = api.addTransaction({type:"income", description:"Selected income", amount:70,
+    date:"2026-01-06", category:"Food", requestId:"bulk_select_income"});
+  const entries = api.getData().transactions.filter(t =>
+    t.type === "expense" && t.row === expense.row || t.type === "income" && t.row === income.row)
+    .map(({type,row,fingerprint}) => ({type,row,fingerprint}));
+  const before = JSON.stringify(Object.values(f.sheets).map(s => s.cells));
+  const input = {entries, confirmed:true, requestId:"selected_delete_request"};
+  assert.throws(() => api.deleteTransactions({...input,confirmed:false}), /Confirm/);
+  assert.throws(() => api.deleteTransactions({...input,entries:[]}), /Select between/);
+  assert.throws(() => api.deleteTransactions({...input,entries:[entries[0],entries[0]]}), /repeated/);
+  assert.throws(() => api.deleteTransactions({...input,entries:[entries[0],{...entries[1],fingerprint:"stale"}]}), /changed/);
+  assert.equal(JSON.stringify(Object.values(f.sheets).map(s => s.cells)),before);
+  assert.equal(f.properties["request:"+input.requestId],undefined);
+  assert.equal(api.deleteTransactions(input).count,2);
+  const after = JSON.stringify(Object.values(f.sheets).map(s => s.cells));
+  assert.equal(api.deleteTransactions(input).count,2);
+  assert.equal(JSON.stringify(Object.values(f.sheets).map(s => s.cells)),after);
+  assert.ok(api.getData().transactions.some(t => t.description === "Known item"));
+});
+
+test("selected deletion batches consecutive rows, keeps gaps, and blocks partial replay", () => {
+  const f=fixture(),api=f.context;
+  for(let i=0;i<5;i++) api.addTransaction({type:"expense",description:"Selection entry "+i,
+    amount:10+i,date:"2026-01-08",category:"Food",requestId:"selected_row_setup_"+i});
+  const entries=api.getData().transactions.filter(t => t.type === "expense" &&
+    ["Selection entry 0","Selection entry 1","Selection entry 3"].includes(t.description));
+  const expected=entries.map(t=>t.row).sort((a,b)=>a-b);
+  const original=f.expense.deleteRows.bind(f.expense), calls=[];
+  f.expense.deleteRows=(row,count)=>{ calls.push([row,count]); if(calls.length===2) throw new Error("Connection lost"); return original(row,count); };
+  const input={entries:entries.map(({type,row,fingerprint})=>({type,row,fingerprint})),confirmed:true,requestId:"selected_partial_delete"};
+  assert.throws(()=>api.deleteTransactions(input),/Connection lost/);
+  assert.deepEqual(calls,[[expected[2],1],[expected[0],2]]);
+  const after=JSON.stringify(f.expense.cells);
+  assert.throws(()=>api.deleteTransactions(input),/may already have started/);
+  assert.equal(JSON.stringify(f.expense.cells),after);
+  assert.ok(api.getData().transactions.some(t=>t.description === "Selection entry 2"));
+  assert.throws(()=>api.deleteTransactions({...input,requestId:"selected_stale_new_request"}),/changed/);
+});
+
+
+test("expense group renaming updates matching tags only and validates names before writing", () => {
+  const f=fixture(),api=f.context,c=f.config.layout.journal;
+  const data=api.getData(), old=data.trips[0];
+  api.createExpenseGroup({name:"Other group",requestId:"rename_other_group"});
+  f.expense.getRange(3,c.trip).setValue("Other group");
+  f.expense.getRange(4,c.trip).setValue("  "+old.toUpperCase()+"  ");
+  f.expense.getRange(5,c.trip).setValue(old);
+  const before=JSON.stringify(f.expense.cells), original=data.transactions[0];
+  const input={kind:"group",action:"edit",name:old,newName:"Family celebration",requestId:"rename_group_request"};
+  for(const name of ["", "x".repeat(f.config.limits.groupNameLength+1), " OTHER GROUP "])
+    assert.throws(()=>api.manageChoice({...input,newName:name}));
+  assert.equal(JSON.stringify(f.expense.cells),before);
+  assert.equal(f.properties["request:"+input.requestId],undefined);
+  assert.equal(api.manageChoice(input).ok,true);
+  assert.equal(api.manageChoice(input).ok,true);
+  const expected=JSON.parse(before);for(const row of [2,4,5])expected[row-1][c.trip-1]=input.newName;
+  assert.equal(JSON.stringify(f.expense.cells),JSON.stringify(expected));
+  assert.ok(api.getData().trips.includes(input.newName));
+  assert.ok(!api.getData().trips.includes(old));
+  assert.throws(()=>api.deleteTransaction({...original,confirmed:true,requestId:"stale_group_rename_delete"}),/changed/);
+  api.manageChoice({...input,name:input.newName,newName:"family CELEBRATION",requestId:"rename_case_only_group"});
+  assert.equal(f.expense.cells[1][c.trip-1],"family CELEBRATION");
+  api.manageChoice({...input,name:"family CELEBRATION",newName:"=SUM(A1:A9)",requestId:"rename_literal_group"});
+  assert.ok(f.expense.operations.some(op => op.kind === "richText" && op.col === c.trip));
+  assert.equal(f.expense.cells[1][c.trip-1],"=SUM(A1:A9)");
+});
+
+test("interrupted expense group renaming blocks replay and can be reconciled after refresh", () => {
+  const f=fixture(),api=f.context,c=f.config.layout.journal;
+  const old=api.getData().trips[0];f.expense.getRange(4,c.trip).setValue(old);
+  const original=f.expense.getRange.bind(f.expense);let writes=0;
+  f.expense.getRange=(...args)=>{
+    const range=original(...args),set=range.setRichTextValues;
+    range.setRichTextValues=value=>{if(++writes===2)throw new Error("Connection lost");return set(value)};
+    return range;
+  };
+  const input={kind:"group",action:"edit",name:old,newName:"Renamed event",requestId:"partial_group_rename"};
+  assert.throws(()=>api.manageChoice(input),/Connection lost/);
+  assert.throws(()=>api.manageChoice(input),/may already have started/);
+  assert.ok(api.getData().trips.includes(old));
+  f.expense.getRange=original;
+  api.manageChoice({...input,requestId:"reconciled_group_rename"});
+  for(const row of [2,4])assert.equal(f.expense.cells[row-1][c.trip-1],"Renamed event");
+  assert.ok(api.getData().trips.includes("Renamed event"));
+});
+
+
+for (const type of ["expense", "income", "investment"]) {
+  test(`${type}: category renaming updates recorded categories and mappings without changing other data`, () => {
+    const f=fixture(),api=f.context,c=f.config.layout.journal;
+    api.getData();
+    const old=type === "investment" ? "Investments" : "Food";
+    const journal=f.sheets[f.resolve(f.config.sheets[type])];
+    for (const [row,category] of [[2,old],[3,"Unrelated category"],[4,"  "+old.toUpperCase()+"  "],[5,old]]) {
+      journal.getRange(row,c.description).setValue("Fictional entry "+row);
+      journal.getRange(row,c.amount).setValue(10+row);
+      journal.getRange(row,c.date).setValue(new Date("2026-10-24T12:00:00Z"));
+      journal.getRange(row,c.category).setValue(category);
+    }
+    const before=JSON.stringify(journal.cells),data=api.getData();
+    const stale=data.transactions.find(t=>t.type===type && t.row===2);
+    const others=Object.keys(f.config.sheets).filter(t=>t!==type).map(t=>JSON.stringify(f.sheets[f.resolve(f.config.sheets[t])].cells));
+    const input={kind:"category",action:"edit",type,name:old,newName:"Updated category",requestId:"rename_recorded_category_"+type};
+    assert.equal(api.manageChoice(input).ok,true);
+    assert.equal(api.manageChoice(input).ok,true);
+    const expected=JSON.parse(before);for (const row of [2,4,5]) expected[row-1][c.category-1]="Updated category";
+    assert.equal(JSON.stringify(journal.cells),JSON.stringify(expected));
+    const current=api.getData();
+    assert.equal(current.mappings[type][0].category,"Updated category");
+    assert.ok(current.categories[type].includes("Updated category"));
+    assert.ok(!current.categories[type].includes(old));
+    assert.deepEqual(Object.keys(f.config.sheets).filter(t=>t!==type).map(t=>JSON.stringify(f.sheets[f.resolve(f.config.sheets[t])].cells)),others);
+    assert.throws(()=>api.deleteTransaction({...stale,confirmed:true,requestId:"stale_category_delete_"+type}),/changed/);
+  });
+}
+
+test("category rename preserves native computed category results and blocks interrupted replay", () => {
+  const f=fixture(),api=f.context,c=f.config.layout.journal;
+  api.getData();
+  f.expense.getRange(2,c.category).setFormula("=LOOKUP_CATEGORY()");
+  f.expense.getRange(4,c.category).setValue("Food");
+  f.expense.getRange(4,c.description).setValue("Another fictional entry");
+  const original=f.expense.getRange.bind(f.expense);let writes=0;
+  f.expense.getRange=(...args)=>{
+    const range=original(...args),get=range.getValues,set=range.setRichTextValues;
+    range.getValues=()=>get().map(row=>row.map(value=>value==="=LOOKUP_CATEGORY()" ? "Food" : value));
+    range.setRichTextValues=values=>{if(++writes===2)throw new Error("Connection lost");return set(values)};
+    return range;
+  };
+  const input={kind:"category",action:"edit",type:"expense",name:"Food",newName:"New category",requestId:"interrupted_category_rename"};
+  assert.throws(()=>api.manageChoice(input),/Connection lost/);
+  assert.throws(()=>api.manageChoice(input),/may already have started/);
+  f.expense.getRange=original;
+  api.manageChoice({...input,requestId:"reconciled_category_rename"});
+  for(const row of [2,4])assert.equal(f.expense.cells[row-1][c.category-1],"New category");
+  assert.equal(api.getData().mappings.expense[0].category,"New category");
+});
+
+
+test("transaction search matches plain, decimal, and displayed currency amounts with existing filters", async () => {
+  const f=await transactionFiltersBrowser(),b=f.browser;
+  vm.runInContext('state.transactionFilters.period="year";state.data.transactions[0].amount=1234.5;state.data.transactions[1].amount=987.65',b);
+  const expected=vm.runInContext('state.data.transactions[0].type+":"+state.data.transactions[0].row',b);
+  for (const query of ["1234", "1234.50", "1,234.50", "₹1,234.50"]) {
+    b.query=query;
+    assert.deepEqual(tableKeys(vm.runInContext('state.search=query;transactions()',b)),[expected]);
+  }
+  b.query="987.65";
+  assert.equal(tableKeys(vm.runInContext('state.search=query;transactions()',b)).length,1);
+  assert.equal(tableKeys(vm.runInContext('state.search="1234.50";state.transactionFilters.category="No matching category";transactions()',b)).length,0);
 });

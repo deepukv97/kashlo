@@ -1436,6 +1436,38 @@
         background: #293125;
         color: #c3d1b8;
       }
+      /* Selection stays visible above both desktop tables and mobile cards. */
+      .transaction-selection {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 16px;
+      }
+      .transaction-selection label { display: inline-flex; align-items: center; gap: 8px; }
+      .transaction-selection input, .transaction-select { width: 20px; height: 20px; accent-color: var(--green); vertical-align: middle; }
+      .transaction-select { margin: 0 8px 0 0; cursor: pointer; }
+      /* Keep each payment choice and its actions together at every screen size. */
+      .payment-choice-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 12px;
+        padding: 16px 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .payment-choice-row:last-child { border-bottom: 0; }
+      .payment-choice-row h2 { margin: 0; font-size: 18px; }
+      .payment-choice-name { min-width: 0; overflow-wrap: anywhere; }
+      .payment-choice-name small {
+        display: block;
+        color: var(--muted);
+        font-size: 10px;
+        margin-bottom: 5px;
+      }
+      .payment-choice-row .reviewactions { flex-wrap: nowrap; gap: 6px; }
+      .payment-choice-row .button { padding: 9px 10px; font-size: 11px; }
+      .payment-method-row .reviewactions { flex-direction: column; }
       .formgrid {
         display: grid;
         grid-template-columns: 1fr 1fr;
@@ -1905,6 +1937,45 @@
         .formgrid {
           gap: 15px 12px;
         }
+        /* Saved choices become compact rows with actions below the text on phones. */
+        .lookup-list table,
+        .lookup-list tbody { display: block; width: 100%; }
+        .lookup-list thead {
+          position: absolute;
+          width: 1px;
+          height: 1px;
+          padding: 0;
+          overflow: hidden;
+          clip-path: inset(50%);
+        }
+        .lookup-list tr {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr);
+          gap: 8px;
+          padding: 16px 0;
+          border-bottom: 1px solid var(--line);
+        }
+        .lookup-list tr:last-child { border-bottom: 0; }
+        .lookup-list td {
+          display: block;
+          min-width: 0;
+          padding: 0;
+          border: 0;
+          white-space: normal;
+          overflow-wrap: anywhere;
+        }
+        .lookup-list .lookup-description { font-weight: 650; }
+        .lookup-list .lookup-category::before {
+          content: attr(data-label) ": ";
+          color: var(--muted);
+        }
+        .lookup-list .lookup-actions { padding-top: 4px; }
+        .lookup-list .reviewactions { gap: 8px; }
+        .lookup-list .button { min-height: 40px; }
+        /* Full-width payment fields keep long labels and account names readable. */
+        #paymentMethodField,
+        #paymentDetailField { grid-column: 1 / -1; }
+
         .notifications {
           bottom: 17px;
           right: 16px;
@@ -2071,6 +2142,15 @@
           min-height: 44px;
           padding: 10px 16px;
           font-size: 12px;
+        }
+      }
+      /* Readable form text prevents iPhone focus zoom. Keep manual pinch zoom enabled.
+         Override compact component fonts for every mobile/touch form, including dialogs. */
+      @media (max-width: 760px), (hover: none) and (pointer: coarse) {
+        input,
+        select,
+        textarea {
+          font-size: 16px !important;
         }
       }
       @media (prefers-reduced-motion: reduce) {
@@ -2351,6 +2431,7 @@
         paymentOptionType: "Bank transfer",
         manageSection: "descriptions",
         lookupType: "expense",
+        lookupSearch: "",
         search: "",
         transactionFilters: defaultTransactionFilters(),
         transactionPage: 1,
@@ -2363,6 +2444,8 @@
         loading: false,
         saveBusy: false,
       };
+      const selectedTransactions = new Map();
+      let transactionSelectionScope = "";
       // Select a DOM element with $. Escape text/attribute characters with esc before inserting sheet text into HTML.
       const $ = (s) => document.querySelector(s),
         esc = (s) =>
@@ -2540,6 +2623,7 @@
               runner.createExpenseGroup(args);
             else if (name === "setReview") runner.setReview(args);
             else if (name === "bulkReview") runner.bulkReview(args);
+            else if (name === "deleteTransactions") runner.deleteTransactions(args);
             else if (name === "setMonthStatus") runner.setMonthStatus(args);
             else reject(new Error("Unknown action."));
           });
@@ -2740,6 +2824,11 @@
         editable = false,
         showExpenseGroup = true,
       ) {
+        const selectionScope = JSON.stringify([state.view, state.month, state.type, state.search, state.transactionFilters]);
+        if (transactionSelectionScope !== selectionScope) {
+          selectedTransactions.clear();
+          transactionSelectionScope = selectionScope;
+        }
         if (!arr.length)
           return empty(
             loaded()
@@ -2750,6 +2839,9 @@
               : "Connect the app to read your journals. No sample transactions have been added.",
           );
         return (
+          (editable ? '<div class="transaction-selection"><label><input type="checkbox" id="selectPageTransactions"> Select this page</label><span id="transactionSelectionCount" aria-live="polite">' +
+            selectedTransactions.size + ' selected</span><button type="button" class="button danger" id="deleteSelectedTransactions" ' +
+            (!selectedTransactions.size ? 'disabled' : '') + '>Delete selected</button><button type="button" class="textlink" id="clearTransactionSelection">Clear selection</button></div>' : '') +
           '<div class="tablewrap transaction-list"><table class="transaction-table" role="table"><thead><tr><th>Description</th><th>Date</th><th style="text-align:right">Amount</th><th>Category</th>' +
           (showExpenseGroup ? "<th>Expense group</th>" : "") +
           "<th>Payment method</th><th>Payment account / app</th>" +
@@ -2766,6 +2858,9 @@
                 '" data-transaction-key="' +
                 esc(t.type + ":" + t.row) +
                 '"><td role="cell" class="desc">' +
+                (editable ? '<input type="checkbox" class="transaction-select" data-select-type="' + esc(t.type) +
+                  '" data-select-row="' + t.row + '" aria-label="' + esc('Select ' + (t.description || 'transaction') + ', ' + dateLabel(t.date) + ', ' + money(t.amount)) + '"' +
+                  (selectedTransactions.has(t.type + ':' + t.row) ? ' checked' : '') + '> ' : '') +
                 esc(t.description) +
                 '<span class="sub">' +
                 esc(
@@ -3450,6 +3545,8 @@
                   t.date,
                   t.type,
                   t.amount,
+                  Number(t.amount).toFixed(2),
+                  money(t.amount),
                   t.category,
                   t.trip,
                   visiblePaymentMethod(t),
@@ -3466,7 +3563,7 @@
           '<div class="filters"><input id="search" aria-label="Search transactions" placeholder="' +
           (investments
             ? "Search description or category…"
-            : "Search description, category, group, UPI, bank, notes…") +
+            : "Search amount, description, category, payment…") +
           '" value="' +
           esc(state.search) +
           '">' +
@@ -3803,7 +3900,7 @@
 
       function groupManager() {
         const groups = state.data?.trips || [];
-        return '<div class="notice">An expense group connects payments for a wedding, home construction, a trip, or another purpose. Add groups here, then select one when recording an expense. Removing a saved group also clears its tag from all matching transactions. The transactions and amounts are kept.</div>' +
+        return '<div class="notice">An expense group connects payments for a wedding, home construction, a trip, or another purpose. Add or rename groups here, then select one when recording an expense. Renaming a group updates its tags on existing transactions. Removing a saved group also clears its tag from all matching transactions. The transactions and amounts are kept.</div>' +
           '<div class="card"><form id="groupForm"><div class="field"><label for="groupName">Expense group name</label>' +
           '<input id="groupName" required maxlength="' + (settings()?.limits.groupNameLength || 100) +
           '" placeholder="For example, Wedding or House construction"></div>' +
@@ -3812,16 +3909,19 @@
           '<div class="card" style="margin-top:23px"><div class="cardhead"><h2>Saved expense groups</h2><span class="pill">' +
           groups.length + ' saved</span></div>' + (groups.length ? groups.map(name =>
             '<div class="reviewitem"><span>' + esc(name) + '</span>' +
-            manageChoiceActions({ kind: "group", name }, ["remove"]) + '</div>').join('') :
+            manageChoiceActions({ kind: "group", name }) + '</div>').join('') :
             '<p>No expense groups added yet.</p>') + '</div>';
       }
       // Keep reusable lists together, with the selected section and journal preserved on refresh.
       function manageChoiceActions(choice, actions = ["edit", "remove"]) {
         return '<div class="reviewactions">' + actions.map(action =>
-          '<button type="button" class="button outline" data-manage-choice="' +
+          '<button type="button" class="button ' +
+          (action === "remove" && choice.kind === "paymentType" ? "danger" : "outline") + '" data-manage-choice="' +
           esc(JSON.stringify({ ...choice, action })) + '" aria-label="' +
           esc((action === "edit" ? "Edit " : "Remove ") + choice.name) + '">' +
-          (action === "edit" ? "Edit" : "Remove") + '</button>').join("") + '</div>';
+          (choice.kind === "paymentType"
+            ? (action === "edit" ? "Edit method" : "Remove entire method")
+            : action === "edit" ? "Edit" : "Remove") + '</button>').join("") + '</div>';
       }
       function openManageChoice(choice) {
         if (state.saveBusy || !loaded()) return;
@@ -3841,10 +3941,14 @@
           '<div class="modal-head"><h2 id="manageChoiceTitle">' + (editing ? "Edit " : "Remove ") + label +
           '</h2><button class="close" aria-label="Close dialog">×</button></div><p>' + esc(choice.name) + '</p>' +
           '<div class="notice">' + (choice.kind === "group"
-            ? 'This removes the group from saved choices and dashboard group cards, and clears its tag from all matching transactions in your sheet. The transactions, amounts, and other details are kept.'
+            ? editing
+              ? 'Renaming this group updates its saved name, dashboard group cards, and matching transaction tags in your sheet. Transactions, amounts, and other details are kept.'
+              : 'This removes the group from saved choices and dashboard group cards, and clears its tag from all matching transactions in your sheet. The transactions, amounts, and other details are kept.'
             : lookup
             ? editing
-              ? 'Edits update reusable choices for future entries. Recorded descriptions and categories stay unchanged.'
+              ? choice.kind === "category"
+                ? 'This updates the category name in your saved descriptions and existing transactions. All other details stay the same.'
+                : 'Edits update reusable choices for future entries. Recorded descriptions and categories stay unchanged.'
               : 'This removes the saved choice and clears its matching ' + label + ' from transactions in this journal. Those transactions appear in Review as Missing ' + label + '. Transactions, amounts, and other details are kept.' +
                 (choice.kind === "category" ? ' Saved descriptions using this category will need a new category too.' : '')
             : paymentNotice) +
@@ -3852,7 +3956,7 @@
           (editing ? '<div class="field full"><label for="manageChoiceName">' +
             (choice.kind === "paymentType" ? "Payment method" : choice.kind === "paymentName" ? "Payment account / app" : "Name") +
             '</label><input id="manageChoiceName" required maxlength="' +
-            (choice.kind === "paymentType" ? 60 : choice.kind === "paymentName" ? 100 : 180) + '" value="' + esc(choice.name) + '"></div>' : '') +
+            (choice.kind === "paymentType" ? 60 : choice.kind === "paymentName" ? 100 : choice.kind === "group" ? settings().limits.groupNameLength : 180) + '" value="' + esc(choice.name) + '"></div>' : '') +
           (needsCategory ? '<div class="field full"><label for="manageChoiceCategory">' +
             'Category' +
             '</label><select id="manageChoiceCategory" required><option value="">Choose a category</option>' +
@@ -3880,8 +3984,10 @@
             await rpc("manageChoice", payload);
             $("#modalContainer").innerHTML = "";
             await refresh();
-            toast(choice.kind === "group" ? "Expense group removed and its transaction tags cleared." :
-              editing ? "Saved choice updated." : "Saved choice removed.");
+            if (choice.kind === "group" && editing && state.trip === choice.name) state.trip = payload.newName.trim();
+            toast(choice.kind === "group"
+              ? (editing ? "Expense group renamed and transaction tags updated." : "Expense group removed and its transaction tags cleared.")
+              : editing ? (choice.kind === "category" ? "Category renamed and existing transactions updated." : "Saved choice updated.") : "Saved choice removed.");
           } catch (error) {
             $("#manageChoiceError").textContent = error.message +
               " If the result is uncertain, refresh and check before starting again.";
@@ -3943,34 +4049,37 @@
           (!loaded() ? "disabled" : "") + '>Add ' + (descriptions ? "description" : "category") +
           '</button></div><p class="formerror" id="lookupError" role="alert"></p></form></div>';
         const entries = descriptions
-          ? mappings
+          ? [...mappings].sort((a, b) => a.description.localeCompare(b.description, settings()?.locale, { sensitivity: "base", numeric: true }))
           : categories.map((category) => ({ category }));
         return (
           '<div class="notice">Manage reusable choices for each journal. Removing a description or category clears that field from matching transactions and sends them to Review for correction. Amounts and other details stay unchanged.</div>' +
           form +
           '<div class="card" style="margin-top:23px"><div class="cardhead"><h2>' +
           (descriptions ? "Descriptions" : "Categories") +
-          '</h2><span class="pill">' +
+          '</h2><span class="pill" id="lookupSavedCount" aria-live="polite">' +
           entries.length +
-          ' saved</span></div><div class="tablewrap" style="max-height:420px"><table><thead><tr>' +
+          ' saved</span></div>' +
+          (descriptions ? '<div class="field" style="margin-bottom:16px"><label for="lookupSearch">Search saved descriptions</label><input id="lookupSearch" type="search" placeholder="Search description or category…" autocomplete="off" value="' + esc(state.lookupSearch) + '"></div>' : '') +
+          '<div class="tablewrap lookup-list" style="max-height:420px"><table role="table"><thead><tr>' +
           (descriptions ? "<th>Description</th>" : "") +
           "<th>Category</th><th>Actions</th></tr></thead><tbody>" +
           entries
             .map(
               (entry) =>
-                "<tr>" +
+                '<tr role="row"' + (descriptions ? ' data-lookup-search="' + esc((entry.description + " " + entry.category).toLowerCase()) + '"' : '') + '>' +
                 (descriptions
-                  ? "<td>" + esc(entry.description) + "</td>"
+                  ? '<td role="cell" class="lookup-description">' + esc(entry.description) + "</td>"
                   : "") +
-                "<td>" +
+                '<td role="cell" class="lookup-category" data-label="Category">' +
                 esc(entry.category || "Missing category") +
-                "</td><td>" + manageChoiceActions({ kind: descriptions ? "description" : "category",
+                '</td><td role="cell" class="lookup-actions">' + manageChoiceActions({ kind: descriptions ? "description" : "category",
                   type, name: descriptions ? entry.description : entry.category,
                   previousCategory: descriptions ? entry.category : "" }) + "</td></tr>",
             )
             .join("") +
           "</tbody></table></div>" +
           (!entries.length ? "<p>No choices added yet.</p>" : "") +
+          (descriptions ? '<p id="lookupSearchEmpty" hidden>No matching descriptions. Try another search.</p>' : '') +
           "</div>"
         );
       }
@@ -4255,15 +4364,15 @@
           paymentMethods()
             .map(
               (method) =>
-                '<div class="card"><h2>' +
+                '<div class="card"><div class="payment-choice-row payment-method-row"><div class="payment-choice-name"><small>Payment method</small><h2>' +
                 esc(method) +
-                "</h2>" + manageChoiceActions({ kind: "paymentType", name: method }) +
+                "</h2></div>" + manageChoiceActions({ kind: "paymentType", name: method }) + '</div>' +
                 ((state.data?.paymentOptions?.[method] || [])
                   .map(
                     (name) =>
-                      '<div class="reviewitem"><span>' +
+                      '<div class="payment-choice-row"><div class="payment-choice-name"><small>Account / app</small><span>' +
                       esc(name) +
-                      '</span>' + manageChoiceActions({ kind: "paymentName", method, name }) + '</div>',
+                      '</span></div>' + manageChoiceActions({ kind: "paymentName", method, name }) + '</div>',
                   )
                   .join("") || (method === "Cash" ? "<p>No payment account / app needed.</p>" : "<p>No accounts or apps added yet.</p>")) +
                 "</div>",
@@ -4637,6 +4746,7 @@
       }
       // Attach navigation, filtering, trip, review, and status handlers to the freshly rendered content.
       function bindContent(flagged = reviewRows(), preserveScroll = false) {
+        bindTransactionSelection();
         if (state.view === "profile") bindProfile();
         document.querySelectorAll("[data-dashboard]").forEach((button) => {
           button.onclick = () => {
@@ -4666,6 +4776,7 @@
           button.onclick = () => {
             if (state.saveBusy) return;
             state.manageSection = button.dataset.manage;
+            state.lookupSearch = "";
             render();
           };
         });
@@ -4677,9 +4788,28 @@
               return;
             }
             state.lookupType = event.target.value;
+            state.lookupSearch = "";
             render();
           };
           if (state.manageSection === "descriptions") {
+            const search = $("#lookupSearch");
+            const filterDescriptions = () => {
+              const query = search.value.trim().toLowerCase();
+              state.lookupSearch = search.value;
+              const items = [...document.querySelectorAll('[data-lookup-search]')];
+              let visible = 0;
+              items.forEach(row => {
+                row.hidden = !row.dataset.lookupSearch.includes(query);
+                if (!row.hidden) visible++;
+              });
+              $("#lookupSavedCount").textContent = query ? visible + " of " + items.length + " saved" : items.length + " saved";
+              $("#lookupSearchEmpty").hidden = !query || visible > 0;
+            };
+            search.oninput = () => {
+              filterDescriptions();
+              $(".lookup-list").scrollTop = 0;
+            };
+            filterDescriptions();
             $("#lookupCategory").onchange = () => {
               const creating = $("#lookupCategory").value === "__new__";
               $("#newLookupCategoryField").hidden = !creating;
@@ -5045,6 +5175,7 @@
       }
       // Switch pages and reset search text and selected trip; the selected month and journal filter persist.
       function navigate(view) {
+        selectedTransactions.clear();
         setMobileMenu(false);
         if (state.setupRequired) {
           state.view = "profile";
@@ -5132,6 +5263,7 @@
             for (const key of expandedTransactions)
               if (!currentKeys.has(key)) expandedTransactions.delete(key);
           }
+          selectedTransactions.clear();
           state.data = data;
           state.setupRequired = false;
           if (previousYear !== data.config.year) {
@@ -5294,17 +5426,15 @@
           $("#newEntryPaymentType").setAttribute("aria-expanded", "false");
           $("#paymentDetailField").hidden = !needsDetail;
           $("#paymentNameControls").hidden = income;
-          $("#entryPaymentDetail").required =
-            needsDetail && ["Bank transfer", "Card", "UPI"].includes(method);
-          $("#paymentDetailLabel").textContent = "Payment account / app" +
-            ($("#entryPaymentDetail").required ? "" : " (optional)");
+          $("#entryPaymentDetail").required = false;
+          $("#paymentDetailLabel").textContent = "Payment account / app (optional)";
           const options = [...(state.data?.paymentOptions?.[method] || [])];
           const retained =
             transaction?.paymentMethod === method
               ? visiblePaymentDetail(transaction)
               : "";
           $("#entryPaymentDetail").innerHTML =
-            '<option value="">Choose an account / app</option>' +
+            '<option value="">Not recorded</option>' +
             selectOptions(options, retained);
           $("#entryPaymentDetail").value = retained || "";
           $("#inlinePayment").hidden = true;
@@ -5472,6 +5602,74 @@
           }
         };
         $("#entryDescription").focus();
+      }
+      function updateTransactionSelection() {
+        const boxes = [...document.querySelectorAll('[data-select-row]')];
+        boxes.forEach(box => { box.checked = selectedTransactions.has(box.dataset.selectType + ':' + box.dataset.selectRow); });
+        const all = $("#selectPageTransactions");
+        if (!all) return;
+        const count = boxes.filter(box => box.checked).length;
+        all.checked = boxes.length > 0 && count === boxes.length;
+        all.indeterminate = count > 0 && count < boxes.length;
+        $("#transactionSelectionCount").textContent = selectedTransactions.size + " selected";
+        $("#deleteSelectedTransactions").disabled = !selectedTransactions.size || state.saveBusy;
+      }
+      function bindTransactionSelection() {
+        const boxes = [...document.querySelectorAll('[data-select-row]')];
+        function select(box, checked) {
+          const key = box.dataset.selectType + ':' + box.dataset.selectRow;
+          const entry = rows().find(t => t.type === box.dataset.selectType && t.row === Number(box.dataset.selectRow));
+          if (!checked) selectedTransactions.delete(key);
+          else if (entry && selectedTransactions.size < 500) selectedTransactions.set(key, entry);
+          else if (!selectedTransactions.has(key)) toast("Select up to 500 transactions at a time.", true);
+        }
+        boxes.forEach(box => { box.onchange = () => {
+          if (!state.saveBusy) select(box, box.checked);
+          updateTransactionSelection();
+        }; });
+        const pageToggle = $("#selectPageTransactions");
+        if (pageToggle) pageToggle.onchange = event => {
+          if (!state.saveBusy) boxes.forEach(box => select(box, event.target.checked));
+          updateTransactionSelection();
+        };
+        const clearSelection = $("#clearTransactionSelection");
+        if (clearSelection) clearSelection.onclick = () => {
+          if (!state.saveBusy) selectedTransactions.clear();
+          updateTransactionSelection();
+        };
+        const deleteSelection = $("#deleteSelectedTransactions");
+        if (deleteSelection) deleteSelection.onclick = openSelectedDeletion;
+        updateTransactionSelection();
+      }
+      function openSelectedDeletion() {
+        if (state.saveBusy || !loaded() || !selectedTransactions.size) return;
+        const entries = [...selectedTransactions.values()].map(t => ({type:t.type, row:t.row, fingerprint:t.fingerprint}));
+        const requestId = id();
+        $("#modalContainer").innerHTML = '<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="bulkDeleteTitle"><div class="modal-head"><h2 id="bulkDeleteTitle">Delete ' + entries.length +
+          ' selected transactions?</h2><button class="close" aria-label="Close dialog">×</button></div><div class="notice warning">This permanently deletes all selected transactions from your Google Sheet and updates your totals. Transactions on other pages that you selected are included. Other entries are kept.</div><div class="tablewrap"><ul>' +
+          [...selectedTransactions.values()].map(t => '<li>' + esc(t.description || 'Missing description') + ' · ' + esc(dateLabel(t.date)) + ' · ' + esc(t.type) + ' · ' + esc(money(t.amount)) + '</li>').join('') +
+          '</ul></div><p id="bulkDeleteError" class="formerror" role="alert"></p><div class="modal-footer"><button class="button outline" id="cancelSelectedDeletion">Cancel</button><button class="button danger" id="confirmSelectedDeletion">Delete selected transactions</button></div></section></div>';
+        const close = () => { if (!state.saveBusy) $("#modalContainer").innerHTML = ""; };
+        $(".close").onclick = close;
+        $("#cancelSelectedDeletion").onclick = close;
+        $("#cancelSelectedDeletion").focus();
+        $("#confirmSelectedDeletion").onclick = async () => {
+          if (state.saveBusy) return;
+          state.saveBusy = true;
+          $("#confirmSelectedDeletion").disabled = true;
+          $("#bulkDeleteError").textContent = "";
+          try {
+            const result = await rpc("deleteTransactions", {entries, requestId, confirmed:true});
+            selectedTransactions.clear();
+            $("#modalContainer").innerHTML = "";
+            toast(result.count + " transactions deleted.");
+            await refresh();
+          } catch (error) {
+            $("#bulkDeleteError").textContent = error.message + " If the result is uncertain, refresh and check the sheet before starting another deletion.";
+            $("#confirmSelectedDeletion").disabled = false;
+            $("#confirmSelectedDeletion").textContent = "Retry same deletion";
+          } finally { state.saveBusy = false; updateTransactionSelection(); }
+        };
       }
       // Confirm one specific entry before removing it. Keep the same request ID on retry,
       // so a lost network response cannot cause a second deletion.
