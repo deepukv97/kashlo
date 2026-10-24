@@ -1498,7 +1498,7 @@ test("Manage owns group creation and confirmed removal clears tags while keeping
   assert.equal(saved.trip, "Wedding");
   assert.equal(saved.amount, 88);
   vm.runInContext('state.manageSection="groups"; navigate("payments")', browser);
-  const remove = () => choiceButtons.find(button => JSON.parse(button.dataset.manageChoice).name === "Wedding").onclick();
+  const remove = () => choiceButtons.find(button => { const choice = JSON.parse(button.dataset.manageChoice); return choice.name === "Wedding" && choice.action === "remove"; }).onclick();
   remove();
   assert.match(element("#modalContainer").innerHTML, /Confirm removal/);
   element("#cancelManageChoice").onclick();
@@ -6306,4 +6306,51 @@ test("selected deletion batches consecutive rows, keeps gaps, and blocks partial
   assert.equal(JSON.stringify(f.expense.cells),after);
   assert.ok(api.getData().transactions.some(t=>t.description === "Selection entry 2"));
   assert.throws(()=>api.deleteTransactions({...input,requestId:"selected_stale_new_request"}),/changed/);
+});
+
+
+test("expense group renaming updates matching tags only and validates names before writing", () => {
+  const f=fixture(),api=f.context,c=f.config.layout.journal;
+  const data=api.getData(), old=data.trips[0];
+  api.createExpenseGroup({name:"Other group",requestId:"rename_other_group"});
+  f.expense.getRange(3,c.trip).setValue("Other group");
+  f.expense.getRange(4,c.trip).setValue("  "+old.toUpperCase()+"  ");
+  f.expense.getRange(5,c.trip).setValue(old);
+  const before=JSON.stringify(f.expense.cells), original=data.transactions[0];
+  const input={kind:"group",action:"edit",name:old,newName:"Family celebration",requestId:"rename_group_request"};
+  for(const name of ["", "x".repeat(f.config.limits.groupNameLength+1), " OTHER GROUP "])
+    assert.throws(()=>api.manageChoice({...input,newName:name}));
+  assert.equal(JSON.stringify(f.expense.cells),before);
+  assert.equal(f.properties["request:"+input.requestId],undefined);
+  assert.equal(api.manageChoice(input).ok,true);
+  assert.equal(api.manageChoice(input).ok,true);
+  const expected=JSON.parse(before);for(const row of [2,4,5])expected[row-1][c.trip-1]=input.newName;
+  assert.equal(JSON.stringify(f.expense.cells),JSON.stringify(expected));
+  assert.ok(api.getData().trips.includes(input.newName));
+  assert.ok(!api.getData().trips.includes(old));
+  assert.throws(()=>api.deleteTransaction({...original,confirmed:true,requestId:"stale_group_rename_delete"}),/changed/);
+  api.manageChoice({...input,name:input.newName,newName:"family CELEBRATION",requestId:"rename_case_only_group"});
+  assert.equal(f.expense.cells[1][c.trip-1],"family CELEBRATION");
+  api.manageChoice({...input,name:"family CELEBRATION",newName:"=SUM(A1:A9)",requestId:"rename_literal_group"});
+  assert.ok(f.expense.operations.some(op => op.kind === "richText" && op.col === c.trip));
+  assert.equal(f.expense.cells[1][c.trip-1],"=SUM(A1:A9)");
+});
+
+test("interrupted expense group renaming blocks replay and can be reconciled after refresh", () => {
+  const f=fixture(),api=f.context,c=f.config.layout.journal;
+  const old=api.getData().trips[0];f.expense.getRange(4,c.trip).setValue(old);
+  const original=f.expense.getRange.bind(f.expense);let writes=0;
+  f.expense.getRange=(...args)=>{
+    const range=original(...args),set=range.setRichTextValues;
+    range.setRichTextValues=value=>{if(++writes===2)throw new Error("Connection lost");return set(value)};
+    return range;
+  };
+  const input={kind:"group",action:"edit",name:old,newName:"Renamed event",requestId:"partial_group_rename"};
+  assert.throws(()=>api.manageChoice(input),/Connection lost/);
+  assert.throws(()=>api.manageChoice(input),/may already have started/);
+  assert.ok(api.getData().trips.includes(old));
+  f.expense.getRange=original;
+  api.manageChoice({...input,requestId:"reconciled_group_rename"});
+  for(const row of [2,4])assert.equal(f.expense.cells[row-1][c.trip-1],"Renamed event");
+  assert.ok(api.getData().trips.includes("Renamed event"));
 });

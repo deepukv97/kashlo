@@ -3888,7 +3888,7 @@
 
       function groupManager() {
         const groups = state.data?.trips || [];
-        return '<div class="notice">An expense group connects payments for a wedding, home construction, a trip, or another purpose. Add groups here, then select one when recording an expense. Removing a saved group also clears its tag from all matching transactions. The transactions and amounts are kept.</div>' +
+        return '<div class="notice">An expense group connects payments for a wedding, home construction, a trip, or another purpose. Add or rename groups here, then select one when recording an expense. Renaming a group updates its tags on existing transactions. Removing a saved group also clears its tag from all matching transactions. The transactions and amounts are kept.</div>' +
           '<div class="card"><form id="groupForm"><div class="field"><label for="groupName">Expense group name</label>' +
           '<input id="groupName" required maxlength="' + (settings()?.limits.groupNameLength || 100) +
           '" placeholder="For example, Wedding or House construction"></div>' +
@@ -3897,7 +3897,7 @@
           '<div class="card" style="margin-top:23px"><div class="cardhead"><h2>Saved expense groups</h2><span class="pill">' +
           groups.length + ' saved</span></div>' + (groups.length ? groups.map(name =>
             '<div class="reviewitem"><span>' + esc(name) + '</span>' +
-            manageChoiceActions({ kind: "group", name }, ["remove"]) + '</div>').join('') :
+            manageChoiceActions({ kind: "group", name }) + '</div>').join('') :
             '<p>No expense groups added yet.</p>') + '</div>';
       }
       // Keep reusable lists together, with the selected section and journal preserved on refresh.
@@ -3929,7 +3929,9 @@
           '<div class="modal-head"><h2 id="manageChoiceTitle">' + (editing ? "Edit " : "Remove ") + label +
           '</h2><button class="close" aria-label="Close dialog">×</button></div><p>' + esc(choice.name) + '</p>' +
           '<div class="notice">' + (choice.kind === "group"
-            ? 'This removes the group from saved choices and dashboard group cards, and clears its tag from all matching transactions in your sheet. The transactions, amounts, and other details are kept.'
+            ? editing
+              ? 'Renaming this group updates its saved name, dashboard group cards, and matching transaction tags in your sheet. Transactions, amounts, and other details are kept.'
+              : 'This removes the group from saved choices and dashboard group cards, and clears its tag from all matching transactions in your sheet. The transactions, amounts, and other details are kept.'
             : lookup
             ? editing
               ? 'Edits update reusable choices for future entries. Recorded descriptions and categories stay unchanged.'
@@ -3940,7 +3942,7 @@
           (editing ? '<div class="field full"><label for="manageChoiceName">' +
             (choice.kind === "paymentType" ? "Payment method" : choice.kind === "paymentName" ? "Payment account / app" : "Name") +
             '</label><input id="manageChoiceName" required maxlength="' +
-            (choice.kind === "paymentType" ? 60 : choice.kind === "paymentName" ? 100 : 180) + '" value="' + esc(choice.name) + '"></div>' : '') +
+            (choice.kind === "paymentType" ? 60 : choice.kind === "paymentName" ? 100 : choice.kind === "group" ? settings().limits.groupNameLength : 180) + '" value="' + esc(choice.name) + '"></div>' : '') +
           (needsCategory ? '<div class="field full"><label for="manageChoiceCategory">' +
             'Category' +
             '</label><select id="manageChoiceCategory" required><option value="">Choose a category</option>' +
@@ -3968,8 +3970,10 @@
             await rpc("manageChoice", payload);
             $("#modalContainer").innerHTML = "";
             await refresh();
-            toast(choice.kind === "group" ? "Expense group removed and its transaction tags cleared." :
-              editing ? "Saved choice updated." : "Saved choice removed.");
+            if (choice.kind === "group" && editing && state.trip === choice.name) state.trip = payload.newName.trim();
+            toast(choice.kind === "group"
+              ? (editing ? "Expense group renamed and transaction tags updated." : "Expense group removed and its transaction tags cleared.")
+              : editing ? "Saved choice updated." : "Saved choice removed.");
           } catch (error) {
             $("#manageChoiceError").textContent = error.message +
               " If the result is uncertain, refresh and check before starting again.";

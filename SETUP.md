@@ -130,7 +130,7 @@ Removing a payment account / app deletes it from the reusable list and clears it
 
 Editing descriptions and categories updates reusable choices for future entries. Deleting them clears matching recorded fields and sends the affected transactions to Review for correction. Deleting payment choices also clears the corresponding payment fields in the sheet. Re-adding a deleted method or account/app does not restore cleared fields. Renaming payment choices still changes reusable labels for future entries; original labels remain in the transaction history.
 
-**Manage → Expense groups:** add a group for an event, project, or trip. All saved groups appear below the form. Click **Remove**, then confirm, to remove a group from saved choices and dashboard group cards. The group’s tag is also cleared from all matching transactions in your sheet. The transactions, amounts, and other details are kept.
+**Manage → Expense groups:** add a group for an event, project, or trip. All saved groups appear below the form. Use **Edit** to rename a group; its tags on existing transactions and its dashboard name update together. Click **Remove**, then confirm, to remove a group from saved choices and dashboard group cards. The group’s tag is also cleared from all matching transactions in your sheet. The transactions, amounts, and other details are kept.
 
 Select a saved group when adding an expense. **Dashboards → Expense groups → Manage groups** takes you to the same Manage section. Creating a group does not add an expense. Income and investments do not use expense groups.
 

@@ -2413,7 +2413,7 @@ function managedChoicePlan_(input) {
   const book = book_(), name = String(input.name || "").trim();
   const newName = input.action === "edit" ? String(input.newName || "").trim() : "";
   const limit = input.kind === "paymentType" ? 60 : input.kind === "paymentName" ? 100 :
-    workspaceConfig_().limits.descriptionLength;
+    input.kind === "group" ? workspaceConfig_().limits.groupNameLength : workspaceConfig_().limits.descriptionLength;
   if (!name || (input.action === "edit" && (!newName || newName.length > limit)))
     throw new Error("Enter a name up to " + limit + " characters.");
   if (input.kind === "paymentType" &&
@@ -2422,11 +2422,12 @@ function managedChoicePlan_(input) {
   const same = (a, b) => normalized_(a) === normalized_(b);
   const plan = { book, name, newName };
   if (input.kind === "group") {
-    if (input.action !== "remove") throw new Error("Choose Remove for an expense group.");
     const sheet = requiredSheet_(book, workspaceConfig_().lookupSheets.expense);
     const column = workspaceConfig_().layout.lookup.trips;
     const groups = options_(sheet, column);
     if (!groups.includes(name)) throw new Error("This expense group changed. Refresh the app.");
+    if (input.action === "edit" && groups.some(group => group !== name && same(group, newName)))
+      throw new Error("That expense group already exists.");
     const journal = sheet_(book, "expense"), j = workspaceConfig_().layout.journal;
     const tags = journal.getRange(j.firstDataRow, j.trip,
       journal.getMaxRows() - j.firstDataRow + 1, 1).getDisplayValues();
@@ -2495,13 +2496,18 @@ function manageChoice(input) {
   return withWorkspaceWrite_(input, plan => {
     const { book, name, newName } = plan;
     if (input.kind === "group") {
-      // Clear only matching group cells, never entire transaction rows. Keep the
-      // master name until tags are cleared so partial failures can be reconciled.
-      for (const { start, count } of consecutiveRows_(plan.taggedRows))
-        plan.journal.getRange(start, workspaceConfig_().layout.journal.trip, count, 1)
-          .clearContent();
+      // Update matching tags before the master name; interrupted changes can be
+      // reconciled against the old choice. Never change entire financial rows.
+      for (const { start, count } of consecutiveRows_(plan.taggedRows)) {
+        const range = plan.journal.getRange(start, workspaceConfig_().layout.journal.trip, count, 1);
+        if (input.action === "edit") {
+          const text = SpreadsheetApp.newRichTextValue().setText(newName).build();
+          range.setRichTextValues(Array.from({ length: count }, () => [text]));
+        } else range.clearContent();
+      }
       replaceChoiceColumn_(plan.sheet, plan.column,
-        plan.groups.filter(group => normalized_(group) !== normalized_(name)));
+        plan.groups.flatMap(group => normalized_(group) === normalized_(name)
+          ? (input.action === "edit" ? [newName] : []) : [group]));
       return { ok: true };
     }
     if (input.kind === "paymentType" || input.kind === "paymentName") {
