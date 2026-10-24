@@ -79,7 +79,7 @@ You are ready to use Kashlo. Open your bookmarked app for daily use; you do not 
 
 ### Find and filter transactions
 
-Open **Transactions**. Search can find descriptions, categories, expense groups, payment methods such as UPI or Bank transfer, available bank/card/app names, dates, amounts, and notes.
+Open **Transactions**. Search can find descriptions, categories, expense groups, payment methods such as UPI or Bank transfer, available bank/card/app names, dates, amounts, and notes. Amount searches accept plain numbers or formatted amounts, such as `1000`, `1000.00`, or `1,000.00`.
 
 Combine search with these filters:
 

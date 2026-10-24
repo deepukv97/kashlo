@@ -6406,3 +6406,17 @@ test("category rename preserves native computed category results and blocks inte
   for(const row of [2,4])assert.equal(f.expense.cells[row-1][c.category-1],"New category");
   assert.equal(api.getData().mappings.expense[0].category,"New category");
 });
+
+
+test("transaction search matches plain, decimal, and displayed currency amounts with existing filters", async () => {
+  const f=await transactionFiltersBrowser(),b=f.browser;
+  vm.runInContext('state.transactionFilters.period="year";state.data.transactions[0].amount=1234.5;state.data.transactions[1].amount=987.65',b);
+  const expected=vm.runInContext('state.data.transactions[0].type+":"+state.data.transactions[0].row',b);
+  for (const query of ["1234", "1234.50", "1,234.50", "₹1,234.50"]) {
+    b.query=query;
+    assert.deepEqual(tableKeys(vm.runInContext('state.search=query;transactions()',b)),[expected]);
+  }
+  b.query="987.65";
+  assert.equal(tableKeys(vm.runInContext('state.search=query;transactions()',b)).length,1);
+  assert.equal(tableKeys(vm.runInContext('state.search="1234.50";state.transactionFilters.category="No matching category";transactions()',b)).length,0);
+});

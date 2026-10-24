@@ -3545,6 +3545,8 @@
                   t.date,
                   t.type,
                   t.amount,
+                  Number(t.amount).toFixed(2),
+                  money(t.amount),
                   t.category,
                   t.trip,
                   visiblePaymentMethod(t),
@@ -3561,7 +3563,7 @@
           '<div class="filters"><input id="search" aria-label="Search transactions" placeholder="' +
           (investments
             ? "Search description or category…"
-            : "Search description, category, group, UPI, bank, notes…") +
+            : "Search amount, description, category, payment…") +
           '" value="' +
           esc(state.search) +
           '">' +
