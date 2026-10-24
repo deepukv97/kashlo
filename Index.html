@@ -1436,6 +1436,27 @@
         background: #293125;
         color: #c3d1b8;
       }
+      /* Keep each payment choice and its actions together at every screen size. */
+      .payment-choice-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 12px;
+        padding: 16px 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .payment-choice-row:last-child { border-bottom: 0; }
+      .payment-choice-row h2 { margin: 0; font-size: 18px; }
+      .payment-choice-name { min-width: 0; overflow-wrap: anywhere; }
+      .payment-choice-name small {
+        display: block;
+        color: var(--muted);
+        font-size: 10px;
+        margin-bottom: 5px;
+      }
+      .payment-choice-row .reviewactions { flex-wrap: nowrap; gap: 6px; }
+      .payment-choice-row .button { padding: 9px 10px; font-size: 11px; }
+      .payment-method-row .reviewactions { flex-direction: column; }
       .formgrid {
         display: grid;
         grid-template-columns: 1fr 1fr;
@@ -1905,6 +1926,10 @@
         .formgrid {
           gap: 15px 12px;
         }
+        /* Full-width payment fields keep long labels and account names readable. */
+        #paymentMethodField,
+        #paymentDetailField { grid-column: 1 / -1; }
+
         .notifications {
           bottom: 17px;
           right: 16px;
@@ -3818,10 +3843,13 @@
       // Keep reusable lists together, with the selected section and journal preserved on refresh.
       function manageChoiceActions(choice, actions = ["edit", "remove"]) {
         return '<div class="reviewactions">' + actions.map(action =>
-          '<button type="button" class="button outline" data-manage-choice="' +
+          '<button type="button" class="button ' +
+          (action === "remove" && choice.kind === "paymentType" ? "danger" : "outline") + '" data-manage-choice="' +
           esc(JSON.stringify({ ...choice, action })) + '" aria-label="' +
           esc((action === "edit" ? "Edit " : "Remove ") + choice.name) + '">' +
-          (action === "edit" ? "Edit" : "Remove") + '</button>').join("") + '</div>';
+          (choice.kind === "paymentType"
+            ? (action === "edit" ? "Edit method" : "Remove entire method")
+            : action === "edit" ? "Edit" : "Remove") + '</button>').join("") + '</div>';
       }
       function openManageChoice(choice) {
         if (state.saveBusy || !loaded()) return;
@@ -4255,15 +4283,15 @@
           paymentMethods()
             .map(
               (method) =>
-                '<div class="card"><h2>' +
+                '<div class="card"><div class="payment-choice-row payment-method-row"><div class="payment-choice-name"><small>Payment method</small><h2>' +
                 esc(method) +
-                "</h2>" + manageChoiceActions({ kind: "paymentType", name: method }) +
+                "</h2></div>" + manageChoiceActions({ kind: "paymentType", name: method }) + '</div>' +
                 ((state.data?.paymentOptions?.[method] || [])
                   .map(
                     (name) =>
-                      '<div class="reviewitem"><span>' +
+                      '<div class="payment-choice-row"><div class="payment-choice-name"><small>Account / app</small><span>' +
                       esc(name) +
-                      '</span>' + manageChoiceActions({ kind: "paymentName", method, name }) + '</div>',
+                      '</span></div>' + manageChoiceActions({ kind: "paymentName", method, name }) + '</div>',
                   )
                   .join("") || (method === "Cash" ? "<p>No payment account / app needed.</p>" : "<p>No accounts or apps added yet.</p>")) +
                 "</div>",
