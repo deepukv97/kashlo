@@ -2144,6 +2144,15 @@
           font-size: 12px;
         }
       }
+      /* Readable form text prevents iPhone focus zoom. Keep manual pinch zoom enabled.
+         Override compact component fonts for every mobile/touch form, including dialogs. */
+      @media (max-width: 760px), (hover: none) and (pointer: coarse) {
+        input,
+        select,
+        textarea {
+          font-size: 16px !important;
+        }
+      }
       @media (prefers-reduced-motion: reduce) {
         *,
         *::before,
