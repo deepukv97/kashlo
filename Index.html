@@ -1436,6 +1436,17 @@
         background: #293125;
         color: #c3d1b8;
       }
+      /* Selection stays visible above both desktop tables and mobile cards. */
+      .transaction-selection {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 16px;
+      }
+      .transaction-selection label { display: inline-flex; align-items: center; gap: 8px; }
+      .transaction-selection input, .transaction-select { width: 20px; height: 20px; accent-color: var(--green); vertical-align: middle; }
+      .transaction-select { margin: 0 8px 0 0; cursor: pointer; }
       /* Keep each payment choice and its actions together at every screen size. */
       .payment-choice-row {
         display: grid;
@@ -2388,6 +2399,8 @@
         loading: false,
         saveBusy: false,
       };
+      const selectedTransactions = new Map();
+      let transactionSelectionScope = "";
       // Select a DOM element with $. Escape text/attribute characters with esc before inserting sheet text into HTML.
       const $ = (s) => document.querySelector(s),
         esc = (s) =>
@@ -2565,6 +2578,7 @@
               runner.createExpenseGroup(args);
             else if (name === "setReview") runner.setReview(args);
             else if (name === "bulkReview") runner.bulkReview(args);
+            else if (name === "deleteTransactions") runner.deleteTransactions(args);
             else if (name === "setMonthStatus") runner.setMonthStatus(args);
             else reject(new Error("Unknown action."));
           });
@@ -2765,6 +2779,11 @@
         editable = false,
         showExpenseGroup = true,
       ) {
+        const selectionScope = JSON.stringify([state.view, state.month, state.type, state.search, state.transactionFilters]);
+        if (transactionSelectionScope !== selectionScope) {
+          selectedTransactions.clear();
+          transactionSelectionScope = selectionScope;
+        }
         if (!arr.length)
           return empty(
             loaded()
@@ -2775,6 +2794,9 @@
               : "Connect the app to read your journals. No sample transactions have been added.",
           );
         return (
+          (editable ? '<div class="transaction-selection"><label><input type="checkbox" id="selectPageTransactions"> Select this page</label><span id="transactionSelectionCount" aria-live="polite">' +
+            selectedTransactions.size + ' selected</span><button type="button" class="button danger" id="deleteSelectedTransactions" ' +
+            (!selectedTransactions.size ? 'disabled' : '') + '>Delete selected</button><button type="button" class="textlink" id="clearTransactionSelection">Clear selection</button></div>' : '') +
           '<div class="tablewrap transaction-list"><table class="transaction-table" role="table"><thead><tr><th>Description</th><th>Date</th><th style="text-align:right">Amount</th><th>Category</th>' +
           (showExpenseGroup ? "<th>Expense group</th>" : "") +
           "<th>Payment method</th><th>Payment account / app</th>" +
@@ -2791,6 +2813,9 @@
                 '" data-transaction-key="' +
                 esc(t.type + ":" + t.row) +
                 '"><td role="cell" class="desc">' +
+                (editable ? '<input type="checkbox" class="transaction-select" data-select-type="' + esc(t.type) +
+                  '" data-select-row="' + t.row + '" aria-label="' + esc('Select ' + (t.description || 'transaction') + ', ' + dateLabel(t.date) + ', ' + money(t.amount)) + '"' +
+                  (selectedTransactions.has(t.type + ':' + t.row) ? ' checked' : '') + '> ' : '') +
                 esc(t.description) +
                 '<span class="sub">' +
                 esc(
@@ -4665,6 +4690,7 @@
       }
       // Attach navigation, filtering, trip, review, and status handlers to the freshly rendered content.
       function bindContent(flagged = reviewRows(), preserveScroll = false) {
+        bindTransactionSelection();
         if (state.view === "profile") bindProfile();
         document.querySelectorAll("[data-dashboard]").forEach((button) => {
           button.onclick = () => {
@@ -5073,6 +5099,7 @@
       }
       // Switch pages and reset search text and selected trip; the selected month and journal filter persist.
       function navigate(view) {
+        selectedTransactions.clear();
         setMobileMenu(false);
         if (state.setupRequired) {
           state.view = "profile";
@@ -5160,6 +5187,7 @@
             for (const key of expandedTransactions)
               if (!currentKeys.has(key)) expandedTransactions.delete(key);
           }
+          selectedTransactions.clear();
           state.data = data;
           state.setupRequired = false;
           if (previousYear !== data.config.year) {
@@ -5498,6 +5526,74 @@
           }
         };
         $("#entryDescription").focus();
+      }
+      function updateTransactionSelection() {
+        const boxes = [...document.querySelectorAll('[data-select-row]')];
+        boxes.forEach(box => { box.checked = selectedTransactions.has(box.dataset.selectType + ':' + box.dataset.selectRow); });
+        const all = $("#selectPageTransactions");
+        if (!all) return;
+        const count = boxes.filter(box => box.checked).length;
+        all.checked = boxes.length > 0 && count === boxes.length;
+        all.indeterminate = count > 0 && count < boxes.length;
+        $("#transactionSelectionCount").textContent = selectedTransactions.size + " selected";
+        $("#deleteSelectedTransactions").disabled = !selectedTransactions.size || state.saveBusy;
+      }
+      function bindTransactionSelection() {
+        const boxes = [...document.querySelectorAll('[data-select-row]')];
+        function select(box, checked) {
+          const key = box.dataset.selectType + ':' + box.dataset.selectRow;
+          const entry = rows().find(t => t.type === box.dataset.selectType && t.row === Number(box.dataset.selectRow));
+          if (!checked) selectedTransactions.delete(key);
+          else if (entry && selectedTransactions.size < 500) selectedTransactions.set(key, entry);
+          else if (!selectedTransactions.has(key)) toast("Select up to 500 transactions at a time.", true);
+        }
+        boxes.forEach(box => { box.onchange = () => {
+          if (!state.saveBusy) select(box, box.checked);
+          updateTransactionSelection();
+        }; });
+        const pageToggle = $("#selectPageTransactions");
+        if (pageToggle) pageToggle.onchange = event => {
+          if (!state.saveBusy) boxes.forEach(box => select(box, event.target.checked));
+          updateTransactionSelection();
+        };
+        const clearSelection = $("#clearTransactionSelection");
+        if (clearSelection) clearSelection.onclick = () => {
+          if (!state.saveBusy) selectedTransactions.clear();
+          updateTransactionSelection();
+        };
+        const deleteSelection = $("#deleteSelectedTransactions");
+        if (deleteSelection) deleteSelection.onclick = openSelectedDeletion;
+        updateTransactionSelection();
+      }
+      function openSelectedDeletion() {
+        if (state.saveBusy || !loaded() || !selectedTransactions.size) return;
+        const entries = [...selectedTransactions.values()].map(t => ({type:t.type, row:t.row, fingerprint:t.fingerprint}));
+        const requestId = id();
+        $("#modalContainer").innerHTML = '<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="bulkDeleteTitle"><div class="modal-head"><h2 id="bulkDeleteTitle">Delete ' + entries.length +
+          ' selected transactions?</h2><button class="close" aria-label="Close dialog">×</button></div><div class="notice warning">This permanently deletes all selected transactions from your Google Sheet and updates your totals. Transactions on other pages that you selected are included. Other entries are kept.</div><div class="tablewrap"><ul>' +
+          [...selectedTransactions.values()].map(t => '<li>' + esc(t.description || 'Missing description') + ' · ' + esc(dateLabel(t.date)) + ' · ' + esc(t.type) + ' · ' + esc(money(t.amount)) + '</li>').join('') +
+          '</ul></div><p id="bulkDeleteError" class="formerror" role="alert"></p><div class="modal-footer"><button class="button outline" id="cancelSelectedDeletion">Cancel</button><button class="button danger" id="confirmSelectedDeletion">Delete selected transactions</button></div></section></div>';
+        const close = () => { if (!state.saveBusy) $("#modalContainer").innerHTML = ""; };
+        $(".close").onclick = close;
+        $("#cancelSelectedDeletion").onclick = close;
+        $("#cancelSelectedDeletion").focus();
+        $("#confirmSelectedDeletion").onclick = async () => {
+          if (state.saveBusy) return;
+          state.saveBusy = true;
+          $("#confirmSelectedDeletion").disabled = true;
+          $("#bulkDeleteError").textContent = "";
+          try {
+            const result = await rpc("deleteTransactions", {entries, requestId, confirmed:true});
+            selectedTransactions.clear();
+            $("#modalContainer").innerHTML = "";
+            toast(result.count + " transactions deleted.");
+            await refresh();
+          } catch (error) {
+            $("#bulkDeleteError").textContent = error.message + " If the result is uncertain, refresh and check the sheet before starting another deletion.";
+            $("#confirmSelectedDeletion").disabled = false;
+            $("#confirmSelectedDeletion").textContent = "Retry same deletion";
+          } finally { state.saveBusy = false; updateTransactionSelection(); }
+        };
       }
       // Confirm one specific entry before removing it. Keep the same request ID on retry,
       // so a lost network response cannot cause a second deletion.

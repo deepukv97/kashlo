@@ -102,6 +102,8 @@ Closing the calendar with **×** cancels an unconfirmed choice. **Reset**, follo
 
 Use **Edit** or **Delete** beside an entry on Overview, Transactions, or Investments. On a phone, tap **Details** first.
 
+To delete several entries, tick their checkboxes on Overview, Transactions, or Investments, then choose **Delete selected**. **Select this page** selects only the visible page. Selections stay when moving between pages (up to 500 entries) and reset when changing views or filters, or refreshing. Review the confirmation list before deleting; all selected entries are permanently removed from the sheet.
+
 **Edit** opens the saved entry. Change it and save, or cancel to keep it as it is. **Delete** asks for confirmation; confirming removes that entry from your Google Sheet and totals.
 
 ### Track payment methods

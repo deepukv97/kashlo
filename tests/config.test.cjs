@@ -405,6 +405,7 @@ function fixture(overrides = {}) {
           "addTransaction",
           "updateTransaction",
           "deleteTransaction",
+          "deleteTransactions",
           "setReview",
           "bulkReview",
           "setMonthStatus",
@@ -6260,4 +6261,49 @@ test("legacy removed payment names clear references without clearing an active d
     assert.equal(current.amount, 50);
     assert.equal(api.paymentRecords_(f.book).some(record => record.removed), false);
   }
+});
+
+
+test("selected deletion validates all journals before writes and retries without deleting shifted rows", () => {
+  const f = fixture(), api = f.context;
+  api.getData();
+  const expense = api.addTransaction({type:"expense", description:"Selected expense", amount:35,
+    date:"2026-01-06", category:"Food", requestId:"bulk_select_expense"});
+  const income = api.addTransaction({type:"income", description:"Selected income", amount:70,
+    date:"2026-01-06", category:"Food", requestId:"bulk_select_income"});
+  const entries = api.getData().transactions.filter(t =>
+    t.type === "expense" && t.row === expense.row || t.type === "income" && t.row === income.row)
+    .map(({type,row,fingerprint}) => ({type,row,fingerprint}));
+  const before = JSON.stringify(Object.values(f.sheets).map(s => s.cells));
+  const input = {entries, confirmed:true, requestId:"selected_delete_request"};
+  assert.throws(() => api.deleteTransactions({...input,confirmed:false}), /Confirm/);
+  assert.throws(() => api.deleteTransactions({...input,entries:[]}), /Select between/);
+  assert.throws(() => api.deleteTransactions({...input,entries:[entries[0],entries[0]]}), /repeated/);
+  assert.throws(() => api.deleteTransactions({...input,entries:[entries[0],{...entries[1],fingerprint:"stale"}]}), /changed/);
+  assert.equal(JSON.stringify(Object.values(f.sheets).map(s => s.cells)),before);
+  assert.equal(f.properties["request:"+input.requestId],undefined);
+  assert.equal(api.deleteTransactions(input).count,2);
+  const after = JSON.stringify(Object.values(f.sheets).map(s => s.cells));
+  assert.equal(api.deleteTransactions(input).count,2);
+  assert.equal(JSON.stringify(Object.values(f.sheets).map(s => s.cells)),after);
+  assert.ok(api.getData().transactions.some(t => t.description === "Known item"));
+});
+
+test("selected deletion batches consecutive rows, keeps gaps, and blocks partial replay", () => {
+  const f=fixture(),api=f.context;
+  for(let i=0;i<5;i++) api.addTransaction({type:"expense",description:"Selection entry "+i,
+    amount:10+i,date:"2026-01-08",category:"Food",requestId:"selected_row_setup_"+i});
+  const entries=api.getData().transactions.filter(t => t.type === "expense" &&
+    ["Selection entry 0","Selection entry 1","Selection entry 3"].includes(t.description));
+  const expected=entries.map(t=>t.row).sort((a,b)=>a-b);
+  const original=f.expense.deleteRows.bind(f.expense), calls=[];
+  f.expense.deleteRows=(row,count)=>{ calls.push([row,count]); if(calls.length===2) throw new Error("Connection lost"); return original(row,count); };
+  const input={entries:entries.map(({type,row,fingerprint})=>({type,row,fingerprint})),confirmed:true,requestId:"selected_partial_delete"};
+  assert.throws(()=>api.deleteTransactions(input),/Connection lost/);
+  assert.deepEqual(calls,[[expected[2],1],[expected[0],2]]);
+  const after=JSON.stringify(f.expense.cells);
+  assert.throws(()=>api.deleteTransactions(input),/may already have started/);
+  assert.equal(JSON.stringify(f.expense.cells),after);
+  assert.ok(api.getData().transactions.some(t=>t.description === "Selection entry 2"));
+  assert.throws(()=>api.deleteTransactions({...input,requestId:"selected_stale_new_request"}),/changed/);
 });

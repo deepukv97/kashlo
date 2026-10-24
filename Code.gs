@@ -1594,6 +1594,36 @@ function deleteTransaction(input) {
   });
 }
 
+// Validate every selected row before deleting any, then remove bottom-up batches.
+// Completed retries return their receipt; partial failures cannot delete shifted rows.
+function deleteTransactions(input) {
+  if (!input || input.confirmed !== true)
+    throw new Error("Confirm the selected transaction deletions first.");
+  return withWorkspaceWrite_(input, (journals) => {
+    let count = 0;
+    journals.forEach((rows, sheet) => {
+      deleteCheckedRows_(sheet, rows);
+      count += rows.length;
+    });
+    return { ok: true, count };
+  }, () => {
+    if (!Array.isArray(input.entries) || !input.entries.length || input.entries.length > 500)
+      throw new Error("Select between 1 and 500 transactions.");
+    const book = book_(), journals = new Map(), seen = new Set();
+    input.entries.forEach(entry => {
+      if (!entry || !Object.prototype.hasOwnProperty.call(workspaceConfig_().sheets, entry.type))
+        throw new Error("Choose a valid journal.");
+      const key = entry.type + ":" + Number(entry.row);
+      if (seen.has(key)) throw new Error("The selection contains a repeated transaction.");
+      seen.add(key);
+      const current = checkedTransaction_(book, entry);
+      if (!journals.has(current.sheet)) journals.set(current.sheet, []);
+      journals.get(current.sheet).push(current.row);
+    });
+    return journals;
+  });
+}
+
 // Compress only adjacent validated rows; gaps always remain untouched.
 function consecutiveRows_(rows) {
   const runs = [];
