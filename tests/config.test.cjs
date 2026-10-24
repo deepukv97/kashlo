@@ -1605,8 +1605,8 @@ test("payment account deletion clears only the matching detail and re-adding doe
       api.addTransaction({
         ...payload,
         paymentMethod: "UPI",
-        paymentDetail: "",
-        requestId: "missing_upi_app_name",
+        paymentDetail: "Unavailable app",
+        requestId: "invalid_upi_app_name",
       }),
     /available payment account \/ app/,
   );
@@ -1630,7 +1630,7 @@ test("payment account deletion clears only the matching detail and re-adding doe
   assert.ok(api.getData().paymentOptions.Card.includes("=SUM(A1:A9)"));
 });
 
-test("payment UI manages names and conditionally requires details without losing transaction fields", async () => {
+test("payment UI manages optional accounts/apps without losing transaction fields", async () => {
   const f = fixture(),
     elements = new Map();
   const element = (selector) => {
@@ -1765,8 +1765,8 @@ test("payment UI manages names and conditionally requires details without losing
     element("#entryPaymentMethod").value = method;
     element("#entryPaymentMethod").onchange();
     assert.equal(element("#paymentDetailField").hidden, false);
-    assert.equal(element("#entryPaymentDetail").required, true);
-    assert.equal(element("#paymentDetailLabel").textContent, label);
+    assert.equal(element("#entryPaymentDetail").required, false);
+    assert.equal(element("#paymentDetailLabel").textContent, label + " (optional)");
     assert.match(element("#entryPaymentDetail").innerHTML, new RegExp(name));
     assert.equal(element("#entryPaymentDetail").value, "");
   }
@@ -2651,16 +2651,21 @@ test("optional payment saves in each spending journal and can be cleared on an e
         }),
       /valid payment method/,
     );
-    assert.throws(
-      () =>
-        api.addTransaction({
-          ...payload,
-          paymentMethod: "UPI",
-          paymentDetail: "",
-          requestId: "missing_name_" + type,
-        }),
-      /available payment account \/ app/,
-    );
+    for (const method of ["Bank transfer", "Card", "UPI"]) {
+      const saved = api.addTransaction({ ...payload, paymentMethod: method,
+        paymentDetail: "", requestId: "optional_account_" + type + method.replaceAll(" ", "_") });
+      let current = api.getData().transactions.find(t => t.type === type && t.row === saved.row);
+      assert.equal(current.paymentMethod, method);
+      assert.equal(current.paymentDetail, "");
+      api.updateTransaction({ ...payload, row: current.row, fingerprint: current.fingerprint,
+        paymentMethod: method, paymentDetail: "", requestId: "edit_optional_account_" + type + method.replaceAll(" ", "_") });
+      current = api.getData().transactions.find(t => t.type === type && t.row === saved.row);
+      assert.equal(current.paymentMethod, method);
+      assert.equal(current.paymentDetail, "");
+      assert.throws(() => api.addTransaction({ ...payload, paymentMethod: method,
+        paymentDetail: "Unavailable account", requestId: "invalid_account_" + type + method.replaceAll(" ", "_") }),
+        /available payment account \/ app/);
+    }
   }
 });
 
@@ -5711,7 +5716,7 @@ test("transaction preflight lets users correct date, description, category, grou
     { description: "" },
     { category: "Missing category" },
     { trip: "Missing group" },
-    { paymentMethod: "UPI", paymentDetail: "" },
+    { paymentMethod: "UPI", paymentDetail: "Unavailable app" },
   ]) {
     assert.throws(() => api.addTransaction({ ...base, ...invalid }));
     assert.equal(f.properties["request:" + base.requestId], undefined);

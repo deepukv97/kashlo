@@ -110,7 +110,7 @@ Use **Edit** or **Delete** beside an entry on Overview, Transactions, or Investm
 
 For expenses and investments, payment tracking is optional. Leave **Not recorded**, or choose a payment method. Income has no payment fields.
 
-- **Bank transfer, Card, UPI:** choose the bank, card, or app name after selecting the method.
+- **Bank transfer, Card, UPI:** optionally choose the bank, card, or app name after selecting the method. Leave **Not recorded** to save just the payment method.
 - **Cash:** no extra name is needed.
 - **Custom methods:** add a method such as Wallet or Cheque. A payment account / app is optional for custom methods.
 

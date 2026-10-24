@@ -5294,17 +5294,15 @@
           $("#newEntryPaymentType").setAttribute("aria-expanded", "false");
           $("#paymentDetailField").hidden = !needsDetail;
           $("#paymentNameControls").hidden = income;
-          $("#entryPaymentDetail").required =
-            needsDetail && ["Bank transfer", "Card", "UPI"].includes(method);
-          $("#paymentDetailLabel").textContent = "Payment account / app" +
-            ($("#entryPaymentDetail").required ? "" : " (optional)");
+          $("#entryPaymentDetail").required = false;
+          $("#paymentDetailLabel").textContent = "Payment account / app (optional)";
           const options = [...(state.data?.paymentOptions?.[method] || [])];
           const retained =
             transaction?.paymentMethod === method
               ? visiblePaymentDetail(transaction)
               : "";
           $("#entryPaymentDetail").innerHTML =
-            '<option value="">Choose an account / app</option>' +
+            '<option value="">Not recorded</option>' +
             selectOptions(options, retained);
           $("#entryPaymentDetail").value = retained || "";
           $("#inlinePayment").hidden = true;

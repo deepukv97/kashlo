@@ -2077,12 +2077,8 @@ function paymentValues_(book, input) {
   if (!methods.includes(paymentMethod))
     throw new Error("Choose a valid payment method.");
   if (paymentMethod === "Cash") return { paymentMethod, paymentDetail: "" };
-  // Custom types may stand alone (for example Cheque); built-in account methods still require a name.
-  if (
-    !paymentDetail &&
-    !["Bank transfer", "Card", "UPI"].includes(paymentMethod)
-  )
-    return { paymentMethod, paymentDetail: "" };
+  // Every payment method may be recorded without an account or app.
+  if (!paymentDetail) return { paymentMethod, paymentDetail: "" };
   const active = (paymentOptions_(book, methods)[paymentMethod] || []).includes(
     paymentDetail,
   );
