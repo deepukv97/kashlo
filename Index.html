@@ -3935,7 +3935,7 @@
             : lookup
             ? editing
               ? choice.kind === "category"
-                ? 'Renaming this category updates saved description mappings and all matching existing transactions in the selected journal. Amounts, dates, and other details stay unchanged.'
+                ? 'This updates the category name in your saved descriptions and existing transactions. All other details stay the same.'
                 : 'Edits update reusable choices for future entries. Recorded descriptions and categories stay unchanged.'
               : 'This removes the saved choice and clears its matching ' + label + ' from transactions in this journal. Those transactions appear in Review as Missing ' + label + '. Transactions, amounts, and other details are kept.' +
                 (choice.kind === "category" ? ' Saved descriptions using this category will need a new category too.' : '')
