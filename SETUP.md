@@ -122,7 +122,7 @@ Removing a payment account / app deletes it from the reusable list and clears it
 
 ### Organize descriptions, categories, and expense groups
 
-**Manage → Descriptions:** choose the journal, enter a description, and choose its category. For any journal, **+ Add new category** lets you create the category without leaving this section.
+**Manage → Descriptions:** choose the journal, enter a description, and choose its category. Saved descriptions appear A–Z. Use the search box above the saved list to find a description or category. For any journal, **+ Add new category** lets you create the category without leaving this section.
 
 **Manage → Categories:** add categories for expenses, income, or investments. Use **Edit** or **Remove** beside any saved description or category, including the initial choices. Editing a description lets you change its name and category. Renaming a category updates its saved description mappings and all matching existing transactions in that journal, for expenses, income, and investments. Removing a description or category clears that field from matching transactions in the selected journal. Those transactions appear in **Review** as **Missing description** or **Missing category**. Removing a category also clears it from saved description mappings, which remain available to edit. Confirm removals in the pop-up.
 

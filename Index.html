@@ -2431,6 +2431,7 @@
         paymentOptionType: "Bank transfer",
         manageSection: "descriptions",
         lookupType: "expense",
+        lookupSearch: "",
         search: "",
         transactionFilters: defaultTransactionFilters(),
         transactionPage: 1,
@@ -4046,22 +4047,24 @@
           (!loaded() ? "disabled" : "") + '>Add ' + (descriptions ? "description" : "category") +
           '</button></div><p class="formerror" id="lookupError" role="alert"></p></form></div>';
         const entries = descriptions
-          ? mappings
+          ? [...mappings].sort((a, b) => a.description.localeCompare(b.description, settings()?.locale, { sensitivity: "base", numeric: true }))
           : categories.map((category) => ({ category }));
         return (
           '<div class="notice">Manage reusable choices for each journal. Removing a description or category clears that field from matching transactions and sends them to Review for correction. Amounts and other details stay unchanged.</div>' +
           form +
           '<div class="card" style="margin-top:23px"><div class="cardhead"><h2>' +
           (descriptions ? "Descriptions" : "Categories") +
-          '</h2><span class="pill">' +
+          '</h2><span class="pill" id="lookupSavedCount" aria-live="polite">' +
           entries.length +
-          ' saved</span></div><div class="tablewrap lookup-list" style="max-height:420px"><table role="table"><thead><tr>' +
+          ' saved</span></div>' +
+          (descriptions ? '<div class="field" style="margin-bottom:16px"><label for="lookupSearch">Search saved descriptions</label><input id="lookupSearch" type="search" placeholder="Search description or category…" autocomplete="off" value="' + esc(state.lookupSearch) + '"></div>' : '') +
+          '<div class="tablewrap lookup-list" style="max-height:420px"><table role="table"><thead><tr>' +
           (descriptions ? "<th>Description</th>" : "") +
           "<th>Category</th><th>Actions</th></tr></thead><tbody>" +
           entries
             .map(
               (entry) =>
-                '<tr role="row">' +
+                '<tr role="row"' + (descriptions ? ' data-lookup-search="' + esc((entry.description + " " + entry.category).toLowerCase()) + '"' : '') + '>' +
                 (descriptions
                   ? '<td role="cell" class="lookup-description">' + esc(entry.description) + "</td>"
                   : "") +
@@ -4074,6 +4077,7 @@
             .join("") +
           "</tbody></table></div>" +
           (!entries.length ? "<p>No choices added yet.</p>" : "") +
+          (descriptions ? '<p id="lookupSearchEmpty" hidden>No matching descriptions. Try another search.</p>' : '') +
           "</div>"
         );
       }
@@ -4770,6 +4774,7 @@
           button.onclick = () => {
             if (state.saveBusy) return;
             state.manageSection = button.dataset.manage;
+            state.lookupSearch = "";
             render();
           };
         });
@@ -4781,9 +4786,28 @@
               return;
             }
             state.lookupType = event.target.value;
+            state.lookupSearch = "";
             render();
           };
           if (state.manageSection === "descriptions") {
+            const search = $("#lookupSearch");
+            const filterDescriptions = () => {
+              const query = search.value.trim().toLowerCase();
+              state.lookupSearch = search.value;
+              const items = [...document.querySelectorAll('[data-lookup-search]')];
+              let visible = 0;
+              items.forEach(row => {
+                row.hidden = !row.dataset.lookupSearch.includes(query);
+                if (!row.hidden) visible++;
+              });
+              $("#lookupSavedCount").textContent = query ? visible + " of " + items.length + " saved" : items.length + " saved";
+              $("#lookupSearchEmpty").hidden = !query || visible > 0;
+            };
+            search.oninput = () => {
+              filterDescriptions();
+              $(".lookup-list").scrollTop = 0;
+            };
+            filterDescriptions();
             $("#lookupCategory").onchange = () => {
               const creating = $("#lookupCategory").value === "__new__";
               $("#newLookupCategoryField").hidden = !creating;
