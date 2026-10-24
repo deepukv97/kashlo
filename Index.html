@@ -1937,6 +1937,41 @@
         .formgrid {
           gap: 15px 12px;
         }
+        /* Saved choices become compact rows with actions below the text on phones. */
+        .lookup-list table,
+        .lookup-list tbody { display: block; width: 100%; }
+        .lookup-list thead {
+          position: absolute;
+          width: 1px;
+          height: 1px;
+          padding: 0;
+          overflow: hidden;
+          clip-path: inset(50%);
+        }
+        .lookup-list tr {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr);
+          gap: 8px;
+          padding: 16px 0;
+          border-bottom: 1px solid var(--line);
+        }
+        .lookup-list tr:last-child { border-bottom: 0; }
+        .lookup-list td {
+          display: block;
+          min-width: 0;
+          padding: 0;
+          border: 0;
+          white-space: normal;
+          overflow-wrap: anywhere;
+        }
+        .lookup-list .lookup-description { font-weight: 650; }
+        .lookup-list .lookup-category::before {
+          content: attr(data-label) ": ";
+          color: var(--muted);
+        }
+        .lookup-list .lookup-actions { padding-top: 4px; }
+        .lookup-list .reviewactions { gap: 8px; }
+        .lookup-list .button { min-height: 40px; }
         /* Full-width payment fields keep long labels and account names readable. */
         #paymentMethodField,
         #paymentDetailField { grid-column: 1 / -1; }
@@ -4005,19 +4040,19 @@
           (descriptions ? "Descriptions" : "Categories") +
           '</h2><span class="pill">' +
           entries.length +
-          ' saved</span></div><div class="tablewrap" style="max-height:420px"><table><thead><tr>' +
+          ' saved</span></div><div class="tablewrap lookup-list" style="max-height:420px"><table role="table"><thead><tr>' +
           (descriptions ? "<th>Description</th>" : "") +
           "<th>Category</th><th>Actions</th></tr></thead><tbody>" +
           entries
             .map(
               (entry) =>
-                "<tr>" +
+                '<tr role="row">' +
                 (descriptions
-                  ? "<td>" + esc(entry.description) + "</td>"
+                  ? '<td role="cell" class="lookup-description">' + esc(entry.description) + "</td>"
                   : "") +
-                "<td>" +
+                '<td role="cell" class="lookup-category" data-label="Category">' +
                 esc(entry.category || "Missing category") +
-                "</td><td>" + manageChoiceActions({ kind: descriptions ? "description" : "category",
+                '</td><td role="cell" class="lookup-actions">' + manageChoiceActions({ kind: descriptions ? "description" : "category",
                   type, name: descriptions ? entry.description : entry.category,
                   previousCategory: descriptions ? entry.category : "" }) + "</td></tr>",
             )
