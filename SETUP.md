@@ -104,7 +104,7 @@ Use **Edit** or **Delete** beside an entry on Overview, Transactions, or Investm
 
 To delete several entries, tick their checkboxes on Overview, Transactions, or Investments, then choose **Delete selected**. **Select this page** selects only the visible page. Selections stay when moving between pages (up to 500 entries) and reset when changing views or filters, or refreshing. Review the confirmation list before deleting; all selected entries are permanently removed from the sheet.
 
-**Edit** opens the saved entry. Change it and save, or cancel to keep it as it is. **Delete** asks for confirmation; confirming removes that entry from your Google Sheet and totals.
+**Edit** opens the saved entry. Change it and save, or cancel to keep it as it is. To move an expense to Investments (or an investment to Expenses), change **Journal**, choose a category for that journal, and click **Move transaction**. Moving to Investments clears the expense group. Income entries stay in Income. **Delete** asks for confirmation; confirming removes that entry from your Google Sheet and totals.
 
 ### Track payment methods
 

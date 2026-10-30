@@ -1325,6 +1325,77 @@ function writeTransaction_(sheet, row, values, type) {
     literal_(sheet.getRange(row, columns.trip), values.trip);
 }
 
+// Shared append path for new transactions and validated journal moves.
+function appendTransaction_(book, sheet, values, type) {
+  const columns = workspaceConfig_().layout.journal;
+  const { description, category, lookup, lookupColumns, mappings, match } =
+    values;
+  // Append after the last recorded input, including incomplete native-sheet entries.
+  // Formula-only rows and earlier gaps do not determine the append location.
+  const inputColumns = [columns.description, columns.amount, columns.date];
+  const firstColumn = Math.min(...inputColumns);
+  const inputs = sheet
+    .getRange(
+      columns.firstDataRow,
+      firstColumn,
+      sheet.getMaxRows() - columns.firstDataRow + 1,
+      Math.max(...inputColumns) - firstColumn + 1,
+    )
+    .getValues();
+  let last = columns.firstDataRow - 1;
+  for (let i = inputs.length - 1; i >= 0; i--) {
+    const values = inputs[i];
+    if (
+      inputColumns.some((column) =>
+        String(values[column - firstColumn] ?? "").trim(),
+      )
+    ) {
+      last = i + columns.firstDataRow;
+      break;
+    }
+  }
+  const row = Math.max(last + 1, columns.firstDataRow);
+  ensureJournalCapacity_(sheet, row, book);
+  writeTransaction_(sheet, row, values, type);
+  // Remember a genuinely new description once for subsequent automatic categorization.
+  // Append a new description/category pair to lookup A:B, extending the lookup sheet if necessary.
+  if (!match && !values.legacyDescription) {
+    let mappingLast = lookupColumns.firstDataRow - 1;
+    mappings.forEach((r, i) => {
+      if (r[lookupColumns.description - 1].trim())
+        mappingLast = i + lookupColumns.firstDataRow;
+    });
+    if (mappingLast + 1 > lookup.getMaxRows())
+      lookup.insertRowsAfter(lookup.getMaxRows(), 1);
+    literal_(
+      lookup.getRange(mappingLast + 1, lookupColumns.description),
+      description,
+    );
+    literal_(
+      lookup.getRange(mappingLast + 1, lookupColumns.category),
+      category,
+    );
+    // Sort the mapping pair only; adjacent category/group lists keep their positions.
+    const firstColumn = Math.min(
+      lookupColumns.description,
+      lookupColumns.category,
+    );
+    lookup
+      .getRange(
+        lookupColumns.firstDataRow,
+        firstColumn,
+        mappingLast + 2 - lookupColumns.firstDataRow,
+        Math.abs(lookupColumns.category - lookupColumns.description) + 1,
+      )
+      .sort([
+        { column: lookupColumns.category, ascending: true },
+        { column: lookupColumns.description, ascending: true },
+      ]);
+  }
+  // Return the journal and physical row for a successful submission receipt.
+  return { ok: true, type, row };
+}
+
 // Create an entry in the selected journal without replacing formula columns.
 // The input includes requestId, type, description, amount, date, category, notes, and optional trip.
 // Validation and writes run inside withWrite_ so duplicate submissions cannot append twice.
@@ -1333,75 +1404,7 @@ function addTransaction(input) {
     throw new Error("Missing transaction.");
   return withWorkspaceWrite_(
     input,
-    ({ book, sheet, values }) => {
-      const columns = workspaceConfig_().layout.journal;
-      const { description, category, lookup, lookupColumns, mappings, match } =
-        values;
-      // Append after the last recorded input, including incomplete native-sheet entries.
-      // Formula-only rows and earlier gaps do not determine the append location.
-      const inputColumns = [columns.description, columns.amount, columns.date];
-      const firstColumn = Math.min(...inputColumns);
-      const inputs = sheet
-        .getRange(
-          columns.firstDataRow,
-          firstColumn,
-          sheet.getMaxRows() - columns.firstDataRow + 1,
-          Math.max(...inputColumns) - firstColumn + 1,
-        )
-        .getValues();
-      let last = columns.firstDataRow - 1;
-      for (let i = inputs.length - 1; i >= 0; i--) {
-        const values = inputs[i];
-        if (
-          inputColumns.some((column) =>
-            String(values[column - firstColumn] ?? "").trim(),
-          )
-        ) {
-          last = i + columns.firstDataRow;
-          break;
-        }
-      }
-      const row = Math.max(last + 1, columns.firstDataRow);
-      ensureJournalCapacity_(sheet, row, book);
-      writeTransaction_(sheet, row, values, input.type);
-      // Remember a genuinely new description once for subsequent automatic categorization.
-      // Append a new description/category pair to lookup A:B, extending the lookup sheet if necessary.
-      if (!match && !values.legacyDescription) {
-        let mappingLast = lookupColumns.firstDataRow - 1;
-        mappings.forEach((r, i) => {
-          if (r[lookupColumns.description - 1].trim())
-            mappingLast = i + lookupColumns.firstDataRow;
-        });
-        if (mappingLast + 1 > lookup.getMaxRows())
-          lookup.insertRowsAfter(lookup.getMaxRows(), 1);
-        literal_(
-          lookup.getRange(mappingLast + 1, lookupColumns.description),
-          description,
-        );
-        literal_(
-          lookup.getRange(mappingLast + 1, lookupColumns.category),
-          category,
-        );
-        // Sort the mapping pair only; adjacent category/group lists keep their positions.
-        const firstColumn = Math.min(
-          lookupColumns.description,
-          lookupColumns.category,
-        );
-        lookup
-          .getRange(
-            lookupColumns.firstDataRow,
-            firstColumn,
-            mappingLast + 2 - lookupColumns.firstDataRow,
-            Math.abs(lookupColumns.category - lookupColumns.description) + 1,
-          )
-          .sort([
-            { column: lookupColumns.category, ascending: true },
-            { column: lookupColumns.description, ascending: true },
-          ]);
-      }
-      // Return the journal and physical row for a successful submission receipt.
-      return { ok: true, type: input.type, row };
-    },
+    ({ book, sheet, values }) => appendTransaction_(book, sheet, values, input.type),
     () => {
       const book = book_();
       return {
@@ -1552,33 +1555,43 @@ function checkedTransaction_(book, input) {
   return { sheet, row, values };
 }
 
-// Correct the selected entry in place, using add-entry validation and retry protection.
-// The journal is fixed by the selected entry; corrections do not move rows between journals.
+// Same-journal corrections stay in place. Expense/investment moves append the
+// validated destination before removing the source, under the same write receipt.
 function updateTransaction(input) {
-  if (!input || typeof input !== "object")
-    throw new Error("Missing transaction.");
-  return withWorkspaceWrite_(
-    input,
-    ({ current, values }) => {
-      writeTransaction_(current.sheet, current.row, values, input.type);
-      // Recheck duplicates after correction rather than carrying forward an old Okay decision.
-      literal_(
-        current.sheet.getRange(
-          current.row,
-          workspaceConfig_().layout.journal.decision,
-        ),
-        "Pending",
-      );
-      return { ok: true, type: input.type, row: current.row };
-    },
-    () => {
-      const book = book_();
-      return {
-        current: checkedTransaction_(book, input),
-        values: transactionValues_(book, input),
-      };
-    },
-  );
+  if (!input || typeof input !== "object") throw new Error("Missing transaction.");
+  const sourceType = input.sourceType === undefined ? input.type : input.sourceType;
+  const moving = sourceType !== input.type;
+  if (moving && !(["expense", "investment"].includes(sourceType) &&
+      ["expense", "investment"].includes(input.type)))
+    throw new Error("Only expenses and investments can be moved between journals.");
+  return withWorkspaceWrite_(input, ({ book, current, values }) => {
+    const c = workspaceConfig_().layout.journal;
+    if (moving) {
+      const destination = sheet_(book, input.type);
+      const result = appendTransaction_(book, destination, values, input.type);
+      literal_(destination.getRange(result.row, c.decision), "Pending");
+      literal_(destination.getRange(result.row, c.reviewNote), current.values[c.reviewNote - 1] || "");
+      // Never remove the source until the complete destination is persisted.
+      // A failed/uncertain move retains a started receipt and cannot replay.
+      SpreadsheetApp.flush();
+      deleteCheckedTransaction_(checkedTransaction_(book, { ...input, type: sourceType }));
+      return { ...result, moved: true, sourceType, sourceRow: current.row };
+    }
+    writeTransaction_(current.sheet, current.row, values, input.type);
+    literal_(current.sheet.getRange(current.row, c.decision), "Pending");
+    return { ok: true, type: input.type, row: current.row };
+  }, () => {
+    const book = book_();
+    const current = checkedTransaction_(book, { ...input, type: sourceType });
+    // Destination validation must not retain a historical source category/account.
+    const target = moving ? { ...input, row: undefined, fingerprint: undefined } : input;
+    if (moving && input.paymentMethod === undefined && input.paymentDetail === undefined) {
+      const c = workspaceConfig_().layout.journal;
+      target.paymentMethod = current.values[c.paymentMethod - 1];
+      target.paymentDetail = current.values[c.paymentDetail - 1];
+    }
+    return { book, current, values: transactionValues_(book, target) };
+  });
 }
 
 // Remove the actual sheet row after confirmation so no blank gap remains.

@@ -687,7 +687,7 @@ test("browser uses configured year, profile, currency, dates, and investment cat
   const transaction = browser.data.transactions[0];
   browser.transaction = transaction;
   vm.runInContext("openEntry(transaction)", browser);
-  assert.equal(element("#entryType").disabled, true);
+  assert.equal(element("#entryType").disabled, transaction.type === "income");
   assert.equal(element("#entryDescription").value, transaction.description);
   assert.equal(element("#entryDate").value, transaction.date);
   element("#entryAmount").value = "90";
@@ -1237,7 +1237,7 @@ test("Overview, Transactions, and Investments edit and delete the selected journ
     assert.equal(element("#entryDate").value, before.date);
     assert.equal(element("#entryAmount").value, before.amount);
     assert.equal(element("#entryType").value, type);
-    assert.equal(element("#entryType").disabled, true);
+    assert.equal(element("#entryType").disabled, type === "income");
     element("#cancelEntry").onclick();
     assert.equal(JSON.stringify(sheet.cells), original);
     button.onclick();
@@ -6419,4 +6419,121 @@ test("transaction search matches plain, decimal, and displayed currency amounts 
   b.query="987.65";
   assert.equal(tableKeys(vm.runInContext('state.search=query;transactions()',b)).length,1);
   assert.equal(tableKeys(vm.runInContext('state.search="1234.50";state.transactionFilters.category="No matching category";transactions()',b)).length,0);
+});
+
+
+for (const [sourceType,type] of [["expense","investment"],["investment","expense"]]) {
+  test(`${sourceType} to ${type}: moves one entry, preserves details and safely replays the completed request`, () => {
+    const f=fixture(),api=f.context,c=f.config.layout.journal;
+    api.getData();
+    api.managePaymentOption({action:"add",method:"UPI",name:"Example app",requestId:"move_payment_setup_"+sourceType});
+    const created=api.addTransaction({type:sourceType,description:"Fictional move",amount:123.45,date:"2026-10-24",
+      category:sourceType==="expense"?"Food":"Investments",trip:sourceType==="expense"?"2026 Holiday":"",
+      notes:"Preserve notes",paymentMethod:"UPI",paymentDetail:"Example app",requestId:"move_source_setup_"+sourceType});
+    const source=api.getData().transactions.find(t=>t.type===sourceType&&t.row===created.row);
+    const sheet=f.sheets[f.resolve(f.config.sheets[sourceType])];
+    sheet.getRange(source.row,c.reviewNote).setValue("Preserve review note");
+    const refreshed=api.getData().transactions.find(t=>t.type===sourceType&&t.row===created.row);
+    const before=api.getData().transactions.length;
+    const input={sourceType,type,row:source.row,fingerprint:refreshed.fingerprint,description:source.description,amount:source.amount,
+      date:source.date,category:type==="expense"?"Food":"Investments",trip:"2026 Holiday",notes:source.notes,
+      paymentMethod:source.paymentMethod,paymentDetail:source.paymentDetail,requestId:"move_transaction_"+sourceType};
+    const result=api.updateTransaction(input);
+    assert.equal(result.moved,true);assert.equal(result.sourceType,sourceType);
+    assert.equal(api.updateTransaction(input).row,result.row);
+    const data=api.getData();assert.equal(data.transactions.length,before);
+    assert.ok(!data.transactions.some(t=>t.type===sourceType&&t.description===source.description));
+    const moved=data.transactions.find(t=>t.type===type&&t.row===result.row);
+    assert.equal(moved.description,source.description);assert.equal(moved.amount,123.45);assert.equal(moved.date,source.date);
+    assert.equal(moved.notes,"Preserve notes");assert.equal(moved.paymentMethod,"UPI");assert.equal(moved.paymentDetail,"Example app");
+    assert.equal(moved.trip,type==="expense"?"2026 Holiday":"");assert.equal(moved.decision,"Pending");assert.equal(moved.reviewNote,"Preserve review note");
+    assert.ok(data.mappings[type].some(m=>m.description===source.description));
+    assert.equal(data.transactions.filter(t=>t.description===source.description).length,1);
+  });
+}
+
+test("journal move preflight rejects stale rows, invalid destination fields, and income moves without writes", () => {
+  const f=fixture(),api=f.context;const entry=api.getData().transactions[0];
+  const input={...entry,sourceType:"expense",type:"investment",category:"Investments",requestId:"move_validation_request"};
+  const before=JSON.stringify(Object.values(f.sheets).map(s=>s.cells));
+  for(const invalid of [{amount:0},{category:"Not an investment category"},{fingerprint:"stale"},{type:"income"}])
+    assert.throws(()=>api.updateTransaction({...input,...invalid}));
+  assert.equal(JSON.stringify(Object.values(f.sheets).map(s=>s.cells)),before);
+  assert.equal(f.properties["request:"+input.requestId],undefined);
+  assert.equal(api.updateTransaction(input).moved,true);
+});
+
+test("failed destination writes preserve the original transaction and block move replay", () => {
+  const f=fixture(),api=f.context,c=f.config.layout.journal;const entry=api.getData().transactions[0];
+  const destination=f.sheets[f.resolve(f.config.sheets.investment)],original=destination.getRange.bind(destination);
+  const sourceBefore=JSON.stringify(f.expense.cells);
+  destination.getRange=(...args)=>{const range=original(...args);if(args[1]===c.amount)range.setValue=()=>{throw new Error("Connection lost")};return range};
+  const input={...entry,sourceType:"expense",type:"investment",category:"Investments",requestId:"partial_move_destination"};
+  assert.throws(()=>api.updateTransaction(input),/Connection lost/);
+  assert.equal(JSON.stringify(f.expense.cells),sourceBefore);
+  assert.throws(()=>api.updateTransaction(input),/may already have started/);
+});
+
+test("failed source removal keeps the complete destination, preserves source, and cannot replay", () => {
+  const f=fixture(),api=f.context;const entry=api.getData().transactions[0];const before=JSON.stringify(f.expense.cells);
+  f.expense.deleteRows=()=>{throw new Error("Connection lost")};
+  const input={...entry,sourceType:"expense",type:"investment",category:"Investments",requestId:"partial_move_source_delete"};
+  assert.throws(()=>api.updateTransaction(input),/Connection lost/);
+  assert.equal(JSON.stringify(f.expense.cells),before);
+  const moved=api.getData().transactions.filter(t=>t.type==="investment"&&t.description===entry.description);
+  assert.equal(moved.length,1);assert.equal(moved[0].amount,entry.amount);
+  assert.throws(()=>api.updateTransaction(input),/may already have started/);
+  assert.equal(api.getData().transactions.filter(t=>t.type==="investment"&&t.description===entry.description).length,1);
+});
+
+test("edit form moves Expense to Investment and back with destination categories and explicit move notice", async () => {
+  const f=fixture(),elements=new Map();
+  const element=selector=>{
+    if(!elements.has(selector))elements.set(selector,{value:"",innerHTML:"",textContent:"",classList:{add(){},remove(){},toggle(){}},addEventListener(){},setAttribute(){},focus(){}});
+    return elements.get(selector);
+  };
+  let submitted;
+  const runner={withSuccessHandler(fn){this.success=fn;return this},withFailureHandler(fn){this.failure=fn;return this},
+    getData(){this.success(JSON.parse(JSON.stringify(f.context.getData())))},
+    updateTransaction(input){submitted=input;try{this.success(f.context.updateTransaction(input))}catch(error){this.failure(error)}}};
+  const google={script:{run:runner}};
+  const browser=vm.createContext({console,Intl,Date,crypto,setTimeout:()=>0,google,window:{google},
+    document:{querySelector:element,querySelectorAll:()=>[],addEventListener(){}}});
+  vm.runInContext(browserSource,browser);await new Promise(resolve=>setImmediate(resolve));
+  for(const [from,to] of [["expense","investment"],["investment","expense"]]){
+    browser.entry=JSON.parse(JSON.stringify(f.context.getData().transactions.find(t=>t.type===from)));
+    vm.runInContext("openEntry(entry)",browser);
+    assert.equal(element("#entryType").disabled,false);
+    assert.doesNotMatch(element("#entryType").innerHTML,/value="income"/);
+    const amount=element("#entryAmount").value,date=element("#entryDate").value;
+    element("#entryType").value=to;element("#entryType").onchange();
+    assert.equal(element("#journalChangeNotice").hidden,false);
+    assert.equal(element("#saveEntry").textContent,"Move transaction");
+    assert.equal(element("#tripField").hidden,to!=="expense");
+    assert.equal(element("#entryAmount").value,amount);assert.equal(element("#entryDate").value,date);
+    assert.equal(element("#entryCategory").value,to==="expense"?"Food":"Investments");
+    await element("#entryForm").onsubmit({preventDefault(){}});
+    assert.equal(submitted.sourceType,from);assert.equal(submitted.type,to);
+    assert.equal(element("#modalContainer").innerHTML,"");
+    const data=f.context.getData();assert.equal(data.transactions.length,1);assert.equal(data.transactions[0].type,to);
+    assert.equal(vm.runInContext('sum(monthly("expense",0))',browser),to==="expense"?50:0);
+    assert.equal(vm.runInContext('sum(monthly("investment",0))',browser),to==="investment"?50:0);
+  }
+});
+
+test("journal moves grow the destination and restore source array anchors when the first entry moves", () => {
+  const f=fixture(),api=f.context,c=f.config.layout.journal;
+  api.getData();api.installDuplicateArray_(f.expense);api.refreshDateArrays_(f.expense,Object.values(c.dateDerived));
+  const destination=f.sheets[f.resolve(f.config.sheets.investment)];
+  const last=destination.getMaxRows();
+  destination.getRange(last,c.description).setValue("Keep existing last entry");
+  destination.getRange(last,c.amount).setValue(90);
+  const entry=api.getData().transactions.find(t=>t.type==="expense");
+  const result=api.updateTransaction({...entry,sourceType:"expense",type:"investment",category:"Investments",requestId:"move_capacity_and_arrays"});
+  assert.equal(result.row,last+1);assert.ok(destination.getMaxRows()>last);
+  assert.match(f.expense.getRange(c.firstDataRow,c.duplicateIssue).getFormula(),/LET\(descriptions,/);
+  for (const column of Object.values(c.dateDerived))
+    assert.match(f.expense.getRange(c.firstDataRow,column).getFormula(),/ARRAYFORMULA/);
+  assert.equal(destination.cells[last-1][c.description-1],"Keep existing last entry");
+  assert.equal(api.getData().transactions.filter(t=>t.type==="expense").length,0);
 });

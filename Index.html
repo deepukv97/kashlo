@@ -5322,10 +5322,10 @@
           (!isConnected
             ? '<div class="notice warning">Preview only. Connect the deployed app before saving transactions.</div>'
             : "") +
-          '<form id="entryForm"><div class="formgrid"><div class="field"><label for="entryType">Journal</label><select id="entryType">' +
+          '<form id="entryForm"><div class="notice warning" id="journalChangeNotice" hidden></div><div class="formgrid"><div class="field"><label for="entryType">Journal</label><select id="entryType">' +
           selectOptions(
-            ["expense", "income", "investment"],
-            state.view === "investments" ? "investment" : "expense",
+            transaction ? (transaction.type === "income" ? ["income"] : ["expense", "investment"]) : ["expense", "income", "investment"],
+            transaction?.type || (state.view === "investments" ? "investment" : "expense"),
           ) +
           '</select></div><div class="field"><label for="entryDate">Date</label><input id="entryDate" type="date" required></div><div class="field full"><label for="entryDescription">Description</label><input id="entryDescription" placeholder="For example, groceries or salary" list="knownDescriptions" autocomplete="off" required><datalist id="knownDescriptions"></datalist><small>Known descriptions select their category automatically.</small></div><div class="field"><label for="entryAmount">Amount</label><input id="entryAmount" type="number" inputmode="decimal" min="0.01" step="0.01" placeholder="0.00" required></div><div class="field"><label for="entryCategory">Category</label><select id="entryCategory" required></select></div><div class="field full" id="tripField"><label for="entryTrip">Expense group (optional)</label><select id="entryTrip"></select><small>Add or remove groups in Manage → Expense groups.</small></div><div class="field" id="paymentMethodField"><label for="entryPaymentMethod">Payment method (optional)</label><select id="entryPaymentMethod"></select><button type="button" class="textlink" id="newEntryPaymentType" aria-expanded="false" aria-controls="entryPaymentTypeCreator" style="margin-top:10px">+ Add payment method</button></div><div class="field full" id="entryPaymentTypeCreator" hidden>' +
           paymentTypeFields("entry") +
@@ -5335,7 +5335,7 @@
         if (transaction) {
           $("#entryTitle").textContent = "Edit transaction";
           $("#entryType").value = transaction.type;
-          $("#entryType").disabled = true;
+          $("#entryType").disabled = transaction.type === "income";
           $("#saveEntry").textContent = "Save changes";
         }
         // Date bounds, field limits, and currency come from the same server configuration.
@@ -5393,8 +5393,27 @@
             $("#entryCategory").value = (state.data?.categories?.investment || [])[0] || "";
         }
         $("#entryType").onchange = () => {
+          const paymentDetail = $("#entryPaymentDetail").value;
           populate();
           populatePayment();
+          if ((state.data?.paymentOptions?.[$("#entryPaymentMethod").value] || []).includes(paymentDetail))
+            $("#entryPaymentDetail").value = paymentDetail;
+          const type = $("#entryType").value;
+          const match = state.data?.mappings?.[type]?.find(m =>
+            m.description.trim().toLowerCase() === $("#entryDescription").value.trim().toLowerCase());
+          if (match && (state.data?.categories?.[type] || []).includes(match.category))
+            $("#entryCategory").value = match.category;
+          else if (transaction && type === transaction.type) {
+            if (transaction.category && !(state.data?.categories?.[type] || []).includes(transaction.category))
+              $("#entryCategory").innerHTML += selectOptions([transaction.category], transaction.category);
+            $("#entryCategory").value = transaction.category;
+          }
+          const moving = transaction && type !== transaction.type;
+          $("#journalChangeNotice").hidden = !moving;
+          $("#journalChangeNotice").textContent = type === "investment"
+            ? "Saving moves this transaction from Expenses to Investments. Its expense group will be cleared."
+            : "Saving moves this transaction from Investments to Expenses. Choose an expense category and, optionally, an expense group.";
+          if (transaction) $("#saveEntry").textContent = moving ? "Move transaction" : "Save changes";
         };
         populate();
         // New expenses opened from a group detail view start with that group selected.
@@ -5561,6 +5580,7 @@
           // On success, close the dialog and refresh the live snapshot to include the saved transaction.
           try {
             if (transaction) {
+              payload.sourceType = transaction.type;
               payload.row = transaction.row;
               payload.fingerprint = transaction.fingerprint;
             }
@@ -5577,7 +5597,9 @@
             $("#modalContainer").innerHTML = "";
             toast(
               transaction
-                ? "Transaction updated. Updating totals and review checks."
+                ? (payload.type !== transaction.type
+                    ? "Transaction moved to " + (payload.type === "investment" ? "Investments" : "Expenses") + ". Updating totals and review checks."
+                    : "Transaction updated. Updating totals and review checks.")
                 : "Saved to your Google Sheet.",
             );
             if (!transaction && payload.type === "investment")
@@ -5585,7 +5607,7 @@
             if (transaction) restoreViewContext(entryContext);
             await refresh(
               transaction
-                ? { incremental: true, editedTransaction: transaction }
+                ? { incremental: true, editedTransaction: payload.type === transaction.type ? transaction : null }
                 : {},
             );
           } catch (e) {
