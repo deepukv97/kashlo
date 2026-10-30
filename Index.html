@@ -948,6 +948,22 @@
       .mobile-field-label {
         display: none;
       }
+      .transaction-summary {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+        margin-bottom: 23px;
+      }
+      .transaction-summary span { color: var(--muted); font-size: 12px; }
+      .transaction-summary strong {
+        display: block;
+        margin-top: 8px;
+        font-size: clamp(20px, 3vw, 28px);
+        font-variant-numeric: tabular-nums;
+        overflow-wrap: anywhere;
+      }
+      .transaction-summary p { grid-column: 1 / -1; margin: 0; font-size: 11px; color: var(--muted); line-height: 1.6; }
+      .transaction-notes { min-width: 160px; max-width: 320px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
       .pagination {
         display: flex;
         align-items: center;
@@ -2133,6 +2149,17 @@
           color: var(--muted);
           font-size: 10px;
         }
+        .transaction-table .transaction-notes {
+          display: block;
+          grid-column: 1 / -1;
+          grid-row: 3;
+          min-width: 0;
+          max-width: none;
+          padding-top: 10px;
+          border-top: 1px solid var(--line);
+          font-size: 12px;
+        }
+        .transaction-table .transaction-empty-notes { display: none; }
         .transaction-table .transaction-actions {
           flex-wrap: wrap;
           gap: 10px;
@@ -2823,6 +2850,7 @@
         limit = 100,
         editable = false,
         showExpenseGroup = true,
+        showNotes = false,
       ) {
         const selectionScope = JSON.stringify([state.view, state.month, state.type, state.search, state.transactionFilters]);
         if (transactionSelectionScope !== selectionScope) {
@@ -2845,6 +2873,7 @@
           '<div class="tablewrap transaction-list"><table class="transaction-table" role="table"><thead><tr><th>Description</th><th>Date</th><th style="text-align:right">Amount</th><th>Category</th>' +
           (showExpenseGroup ? "<th>Expense group</th>" : "") +
           "<th>Payment method</th><th>Payment account / app</th>" +
+          (showNotes ? "<th>Notes</th>" : "") +
           (editable ? "<th>Actions</th>" : "") +
           '<th class="mobile-transaction-toggle">Details</th></tr></thead><tbody>' +
           arr
@@ -2905,6 +2934,11 @@
                   esc(visiblePaymentDetail(t)),
                   visiblePaymentDetail(t) ? "" : "transaction-empty-detail",
                 ) +
+                (showNotes
+                  ? '<td role="cell" class="transaction-notes' + (t.notes ? '' : ' transaction-empty-notes') +
+                    '" id="' + esc(transactionDetailId(t, "notes")) + '"><span class="mobile-field-label">Notes</span><span class="transaction-note-text">' +
+                    esc(t.notes || "—") + '</span></td>'
+                  : "") +
                 (editable
                   ? '<td role="cell" class="transaction-secondary transaction-action-cell" id="' +
                     esc(transactionDetailId(t, "actions")) +
@@ -2980,6 +3014,7 @@
         arr,
         editable = false,
         showExpenseGroup = true,
+        showNotes = false,
       ) {
         const scope = JSON.stringify([
           state.view,
@@ -3008,6 +3043,7 @@
           TRANSACTION_PAGE_SIZE,
           editable,
           showExpenseGroup,
+          showNotes,
         );
         if (arr.length <= TRANSACTION_PAGE_SIZE) return table;
         const button = (label, page, disabled) =>
@@ -3608,15 +3644,24 @@
             ) +
             '</div><div class="notice">These figures track contributions. They do not calculate current portfolio value, profit, or return.</div>'
           : "";
+        // Calculate before pagination so changing pages never changes these totals.
+        const summary = investments ? "" :
+          '<section class="card transaction-summary" id="transactionTotals" aria-label="Filtered transaction totals">' +
+          '<div><span>Total transactions</span><strong id="filteredTransactionCount">' +
+          (loaded() ? filtered.length.toLocaleString(settings().locale) : "—") + '</strong></div>' +
+          '<div><span>Total amount</span><strong id="filteredTransactionTotal">' +
+          (loaded() ? money(sum(filtered)) : "—") + '</strong></div>' +
+          '<p>All matching transactions across every page. Amounts are added together.</p></section>';
         return (
           head +
           filter +
+          summary +
           '<div class="card"><div class="cardhead"><h2>' +
           (investments ? "Investment journal" : "Transaction journal") +
           '</h2><span class="pill">' +
           filtered.length +
           " entries</span></div>" +
-          paginatedTransactions(filtered, true, !investments) +
+          paginatedTransactions(filtered, true, !investments, !investments) +
           "</div>"
         );
       }

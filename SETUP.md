@@ -81,6 +81,8 @@ You are ready to use Kashlo. Open your bookmarked app for daily use; you do not 
 
 Open **Transactions**. Search can find descriptions, categories, expense groups, payment methods such as UPI or Bank transfer, available bank/card/app names, dates, amounts, and notes. Amount searches accept plain numbers or formatted amounts, such as `1000`, `1000.00`, or `1,000.00`.
 
+Below the filters, **Total transactions** and **Total amount** summarize all matching entries across every page. They stay the same when you change pages and update when you change filters or search. Total amount adds matching amounts together; it is not income minus expenses. Transaction notes appear in the journal and directly on mobile cards.
+
 Combine search with these filters:
 
 - **Journal type:** all, expense, income, or investment. Category choices follow that type; **All categories** is always available.

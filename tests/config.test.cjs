@@ -6537,3 +6537,63 @@ test("journal moves grow the destination and restore source array anchors when t
   assert.equal(destination.cells[last-1][c.description-1],"Keep existing last entry");
   assert.equal(api.getData().transactions.filter(t=>t.type==="expense").length,0);
 });
+
+test("transaction count and amount summarize every filtered page and sit between filters and journal", async () => {
+  const f=await paginationBrowser(),b=f.browser;
+  const summary=html=>html.match(/<section class="card transaction-summary"[\s\S]*?<\/section>/)[0];
+  let original;
+  for(const page of [1,4,7]){
+    const html=vm.runInContext(`state.transactionPage=${page};transactions()`,b);
+    assert.match(html,/<strong id="filteredTransactionCount">155<\/strong>/);
+    assert.match(html,/<strong id="filteredTransactionTotal">₹12,090\.00<\/strong>/);
+    assert.ok(html.indexOf('id="clearTransactionFilters"')<html.indexOf('id="transactionTotals"'));
+    assert.ok(html.indexOf('id="transactionTotals"')<html.indexOf('<h2>Transaction journal</h2>'));
+    if(original)assert.equal(summary(html),original);else original=summary(html);
+  }
+  const filtered=vm.runInContext('state.search="Needle offpage";transactions()',b);
+  assert.match(filtered,/<strong id="filteredTransactionCount">1<\/strong>/);
+  assert.match(filtered,/<strong id="filteredTransactionTotal">₹1\.00<\/strong>/);
+  const empty=vm.runInContext('state.search="No matching record";transactions()',b);
+  assert.match(empty,/<strong id="filteredTransactionCount">0<\/strong>/);
+  assert.match(empty,/<strong id="filteredTransactionTotal">₹0\.00<\/strong>/);
+  const investments=vm.runInContext('state.search="";transactions(true)',b);
+  assert.doesNotMatch(investments,/id="transactionTotals"/);
+});
+
+test("transaction totals respond to dates, journal/category filters, and mixed transaction amounts", async () => {
+  const f=await transactionFiltersBrowser(),b=f.browser;
+  const html=vm.runInContext('state.transactionFilters.period="year";transactions()',b);
+  assert.match(html,/<strong id="filteredTransactionCount">7<\/strong>/);
+  assert.match(html,/<strong id="filteredTransactionTotal">₹70\.00<\/strong>/);
+  const custom=vm.runInContext('state.transactionFilters.period="custom";state.transactionFilters.from="2026-01-15";state.transactionFilters.to="2026-01-21";transactions()',b);
+  assert.match(custom,/<strong id="filteredTransactionCount">2<\/strong>/);
+  assert.match(custom,/<strong id="filteredTransactionTotal">₹20\.00<\/strong>/);
+  const income=vm.runInContext('state.transactionFilters.period="year";state.type="income";transactions()',b);
+  assert.match(income,/<strong id="filteredTransactionCount">1<\/strong>/);
+  assert.match(income,/<strong id="filteredTransactionTotal">₹10\.00<\/strong>/);
+  const updated=vm.runInContext('state.type="all";state.data.transactions[0].amount=25.5;transactions()',b);
+  assert.match(updated,/<strong id="filteredTransactionTotal">₹85\.50<\/strong>/);
+  const category=vm.runInContext('state.transactionFilters.category="Food";transactions()',b);
+  assert.match(category,/<strong id="filteredTransactionCount">3<\/strong>/);
+  assert.match(category,/<strong id="filteredTransactionTotal">₹45\.50<\/strong>/);
+  const payment=vm.runInContext('state.transactionFilters.method="UPI";state.transactionFilters.group="Journey";transactions()',b);
+  assert.match(payment,/<strong id="filteredTransactionCount">2<\/strong>/);
+  assert.match(payment,/<strong id="filteredTransactionTotal">₹35\.50<\/strong>/);
+});
+
+test("transaction notes are escaped, retain line breaks, and stay available across pagination and search", async () => {
+  const f=await paginationBrowser(),b=f.browser;
+  b.note='Fictional note\n<script>alert("test")</script> & more';
+  const first=vm.runInContext('state.data.transactions[154].notes=note;state.data.transactions[0].notes="Offpage note";transactions()',b);
+  assert.match(first,/<th>Notes<\/th>/);
+  assert.match(first,/class="transaction-notes"/);
+  assert.match(first,/Fictional note\n&lt;script&gt;alert\(&quot;test&quot;\)&lt;\/script&gt; &amp; more/);
+  assert.doesNotMatch(first,/<script>alert/);
+  const last=vm.runInContext('state.transactionPage=7;transactions()',b);
+  assert.match(last,/Offpage note/);
+  const search=vm.runInContext('state.search="Offpage note";transactions()',b);
+  assert.deepEqual(tableKeys(search),["expense:2"]);
+  assert.match(search,/<strong id="filteredTransactionCount">1<\/strong>/);
+  const unchanged=vm.runInContext('transactionTable(rows(),25,true,true)',b);
+  assert.doesNotMatch(unchanged,/<th>Notes<\/th>/);
+});
