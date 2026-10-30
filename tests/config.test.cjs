@@ -5339,8 +5339,8 @@ test("transaction filters combine with search, reset pagination, retain all choi
   );
   assert.deepEqual(tableKeys(b.html), ["expense:3"]);
   assert.equal(vm.runInContext("state.transactionPage", b), 1);
-  assert.match(b.html, /<option value="Home">Home/);
-  assert.match(b.html, /<option value="Cash">Cash/);
+  assert.ok(vm.runInContext('transactionMultiSpec("category").options.some(([value]) => value === "Home")',b));
+  assert.ok(vm.runInContext('transactionMultiSpec("method").options.some(([value]) => value === "Cash")',b));
   vm.runInContext(
     'state.search="";state.transactionFilters.category="";state.transactionFilters.method="__blank__";state.transactionFilters.group="__blank__";var blanks=transactions()',
     b,
@@ -5539,17 +5539,13 @@ test("a later From clears an invalid To only after the calendar checkmark", asyn
 test("Transactions keeps the month selector in the filter panel and uses it to change results", async () => {
   const f = await transactionFiltersBrowser(),
     b = f.browser;
-  const month = { dataset: { transactionFilter: "month" } };
-  const original = f.document.querySelectorAll;
-  f.document.querySelectorAll = (selector) =>
-    selector === "[data-transaction-filter]" ? [month] : original(selector);
   vm.runInContext("render()", b);
   assert.equal(f.element("#monthSelect").hidden, true);
   assert.match(
     f.element("#content").innerHTML,
     /class="transaction-period-fields">[\s\S]*id="transactionFilter-period"[\s\S]*id="transactionFilter-month"/,
   );
-  month.onchange({ target: { value: "3" } });
+  vm.runInContext('setTransactionFilterValues("month",["3"])',b);
   assert.equal(vm.runInContext("state.month", b), 3);
   assert.deepEqual(tableKeys(f.element("#content").innerHTML), [
     "investment:7",
@@ -5570,25 +5566,20 @@ test("category options follow journal type, include unused configured categories
     'state.transactionFilters.period="year";state.transactionFilters.category="Food";bindContent([])',
     b,
   );
-  f.element("#typeFilter").onchange({ target: { value: "income" } });
-  assert.equal(vm.runInContext("state.transactionFilters.category", b), "");
-  const categoryOptions = () =>
-    f
-      .element("#content")
-      .innerHTML.match(
-        /id="transactionFilter-category"[^>]*>([\s\S]*?)<\/select>/,
-      )[1];
+  vm.runInContext('setTransactionFilterValues("type",["income"])',b);
+  assert.deepEqual(Array.from(vm.runInContext("state.transactionFilters.category", b)), []);
+  const categoryOptions = () => vm.runInContext('JSON.stringify(transactionMultiSpec("category"))',b);
   assert.match(categoryOptions(), /All categories/);
   assert.match(categoryOptions(), /Unused income/);
   assert.doesNotMatch(categoryOptions(), /Food|Investments/);
   assert.deepEqual(tableKeys(f.element("#content").innerHTML), ["income:6"]);
-  f.element("#typeFilter").onchange({ target: { value: "investment" } });
+  vm.runInContext('setTransactionFilterValues("type",["investment"])',b);
   assert.match(categoryOptions(), /Investments/);
   assert.doesNotMatch(categoryOptions(), /Salary|Food/);
-  f.element("#typeFilter").onchange({ target: { value: "expense" } });
+  vm.runInContext('setTransactionFilterValues("type",["expense"])',b);
   assert.match(categoryOptions(), /Unused expense/);
   assert.doesNotMatch(categoryOptions(), /Salary|Investments/);
-  f.element("#typeFilter").onchange({ target: { value: "all" } });
+  vm.runInContext('setTransactionFilterValues("type",[])',b);
   assert.match(categoryOptions(), /Salary/);
   assert.match(categoryOptions(), /Investments/);
   assert.match(categoryOptions(), /Food/);
@@ -6596,4 +6587,82 @@ test("transaction notes are escaped, retain line breaks, and stay available acro
   assert.match(search,/<strong id="filteredTransactionCount">1<\/strong>/);
   const unchanged=vm.runInContext('transactionTable(rows(),25,true,true)',b);
   assert.doesNotMatch(unchanged,/<th>Notes<\/th>/);
+});
+
+test("multi-select filters combine alternatives within each field and narrow across fields", async () => {
+  const f = await transactionFiltersBrowser(), b = f.browser;
+  const keys = code => tableKeys(vm.runInContext(code + ';transactions()', b));
+  assert.equal(keys('state.transactionFilters.period="year";state.type=["expense","income"]').length, 6);
+  assert.equal(keys('state.transactionFilters.category=["Food","Travel"]').length, 4);
+  assert.deepEqual(keys('state.transactionFilters.method=["UPI","Bank transfer"]'), ["expense:4", "expense:3", "expense:2"]);
+  assert.equal(keys('state.transactionFilters.category=[];state.transactionFilters.method=["UPI","__blank__"];state.transactionFilters.group=["Journey","__blank__"]').length, 4);
+  assert.equal(keys('state.transactionFilters.group=["Journey"]').length, 2);
+  const html = vm.runInContext('transactions()', b);
+  assert.match(html, /<strong id="filteredTransactionCount">2<\/strong>/);
+  assert.match(html, /<strong id="filteredTransactionTotal">₹20\.00<\/strong>/);
+});
+
+test("multiple months and quarters exclude gaps and All covers the configured year", async () => {
+  const f = await transactionFiltersBrowser(), b = f.browser;
+  const keys = code => tableKeys(vm.runInContext(code + ';transactions()', b));
+  assert.equal(keys('state.transactionFilters.period="month";state.transactionFilters.month=["0","11"]').length, 5);
+  assert.deepEqual(keys('state.transactionFilters.month=["0","3"]').sort(), ["expense:2","expense:3","expense:4","expense:5","investment:7"]);
+  assert.equal(keys('state.transactionFilters.month=[]').length, 7);
+  assert.equal(keys('state.transactionFilters.period="quarter";state.transactionFilters.quarter=["1","4"]').length, 6);
+  assert.equal(keys('state.transactionFilters.quarter=[]').length, 7);
+  assert.deepEqual(keys('state.transactionFilters.period="custom";state.transactionFilters.from="2026-01-15";state.transactionFilters.to="2026-01-21"'), ["expense:4","expense:3"]);
+});
+
+test("category multi-selection keeps valid choices when journal selections change", async () => {
+  const f = await transactionFiltersBrowser(), b = f.browser;
+  b.data.categories = {expense:["Food","Travel"],income:["Salary"],investment:["Investments"]};
+  vm.runInContext('setTransactionFilterValues("type",["expense","income"]);setTransactionFilterValues("category",["Food","Salary"]);setTransactionFilterValues("type",["expense"])', b);
+  assert.deepEqual(Array.from(vm.runInContext('state.transactionFilters.category',b)), ["Food"]);
+  vm.runInContext('setTransactionFilterValues("type",["income"])',b);
+  assert.deepEqual(Array.from(vm.runInContext('state.transactionFilters.category',b)), []);
+});
+
+test("multi-select dialog stages changes until Apply and supports cancelling and All", async () => {
+  const f = await transactionFiltersBrowser(), b = f.browser;
+  const original = f.browser.document.querySelectorAll.bind(f.browser.document);
+  let boxes = [];
+  f.browser.document.querySelectorAll = selector => {
+    if (selector === '[data-multi-choice]') {
+      boxes = [...f.element('#modalContainer').innerHTML.matchAll(/id="(transactionChoice-\d+)" data-multi-choice="([^"]+)"/g)].map(([,id,value]) => {
+        const node = f.element('#'+id); node.dataset.multiChoice=value; return node;
+      });
+      return boxes;
+    }
+    return original(selector);
+  };
+  vm.runInContext('state.transactionFilters.period="year";openTransactionMultiSelect("category")',b);
+  const food = boxes.find(node => node.dataset.multiChoice === 'Food');
+  food.checked=true; food.onchange();
+  assert.equal(vm.runInContext('state.transactionFilters.category',b), '');
+  f.element('#cancelTransactionMulti').onclick();
+  assert.equal(vm.runInContext('state.transactionFilters.category',b), '');
+  vm.runInContext('openTransactionMultiSelect("category")',b);
+  for (const value of ['Food','Travel']) { const box=boxes.find(node=>node.dataset.multiChoice===value);box.checked=true;box.onchange(); }
+  f.element('#applyTransactionMulti').onclick();
+  assert.deepEqual(Array.from(vm.runInContext('state.transactionFilters.category',b)), ['Food','Travel']);
+  assert.equal(tableKeys(f.element('#content').innerHTML).length,4);
+  vm.runInContext('openTransactionMultiSelect("category")',b);
+  f.element('#transactionMultiAll').onchange();
+  f.element('#applyTransactionMulti').onclick();
+  assert.deepEqual(Array.from(vm.runInContext('state.transactionFilters.category',b)), []);
+  assert.equal(tableKeys(f.element('#content').innerHTML).length,7);
+});
+
+test("multi-selected filters keep totals stable across pages and reset paging on change", async () => {
+  const f = await paginationBrowser(), b = f.browser;
+  vm.runInContext('setTransactionFilterValues("type",["expense","investment"]);setTransactionFilterValues("category",["Food"])',b);
+  for (const page of [1,4,7]) {
+    const html=vm.runInContext('state.transactionPage='+page+';transactions()',b);
+    assert.match(html,/<strong id="filteredTransactionCount">155<\/strong>/);
+    assert.match(html,/<strong id="filteredTransactionTotal">₹12,090\.00<\/strong>/);
+  }
+  vm.runInContext('setTransactionFilterValues("month",["0","2"])',b);
+  assert.equal(vm.runInContext('state.transactionPage',b),1);
+  vm.runInContext('state.search="Needle offpage"',b);
+  assert.deepEqual(tableKeys(vm.runInContext('transactions()',b)),['expense:2']);
 });

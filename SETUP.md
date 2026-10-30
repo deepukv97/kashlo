@@ -83,11 +83,11 @@ Open **Transactions**. Search can find descriptions, categories, expense groups,
 
 Below the filters, **Total transactions** and **Total amount** summarize all matching entries across every page. They stay the same when you change pages and update when you change filters or search. Total amount adds matching amounts together; it is not income minus expenses. Transaction notes appear in the journal and directly on mobile cards.
 
-Combine search with these filters:
+Combine search with these filters. Tap a type, month, quarter, category, payment method, or expense-group selector, tick one or more choices, then choose **Apply selection**. Choices within one filter are combined; different filters narrow the results together. **All** removes that filter. The **Date range** preset and custom **From/To** dates remain single selections. Selected months or quarters can be separated (for example, January and March); entries from the gap are excluded.
 
-- **Journal type:** all, expense, income, or investment. Category choices follow that type; **All categories** is always available.
+- **Journal type:** choose any combination of expense, income, and investment, or **All types**. Category choices include the selected types; **All categories** is always available.
 - **Date range:** selected month, quarter, entire year, or custom dates. Month and quarter selection appear beside the date-range preset.
-- **Category, Payment method, Expense group:** choose a specific value or keep all values.
+- **Category, Payment method, Expense group:** choose one or more values, or keep all values.
 
 For **Custom dates**:
 
