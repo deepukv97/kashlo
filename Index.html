@@ -948,6 +948,22 @@
       .mobile-field-label {
         display: none;
       }
+      .transaction-summary {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+        margin-bottom: 23px;
+      }
+      .transaction-summary span { color: var(--muted); font-size: 12px; }
+      .transaction-summary strong {
+        display: block;
+        margin-top: 8px;
+        font-size: clamp(20px, 3vw, 28px);
+        font-variant-numeric: tabular-nums;
+        overflow-wrap: anywhere;
+      }
+      .transaction-summary p { grid-column: 1 / -1; margin: 0; font-size: 11px; color: var(--muted); line-height: 1.6; }
+      .transaction-notes { min-width: 160px; max-width: 320px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
       .pagination {
         display: flex;
         align-items: center;
@@ -1006,6 +1022,29 @@
         min-width: 0;
         align-items: end;
       }
+      .transaction-multiselect { display: grid; gap: 8px; min-width: 0; }
+      .filters .transaction-type-filter { min-width: 155px; }
+      .transaction-multi-trigger {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        width: 100%;
+        min-width: 0;
+        min-height: 46px;
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: #1b201d;
+        color: var(--ink);
+        text-align: left;
+      }
+      .transaction-multi-trigger span:first-child { min-width: 0; overflow-wrap: anywhere; }
+      .multi-options { max-height: 42vh; overflow-y: auto; margin-top: 4px; }
+      .multi-option { display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+      .multi-option input { flex: 0 0 auto; width: 22px; height: 22px; margin: 0; accent-color: var(--green); }
+      .multi-option span { min-width: 0; overflow-wrap: anywhere; }
+      .multi-help { color: var(--muted); font-size: 12px; line-height: 1.6; }
       .transaction-calendar-trigger {
         display: flex;
         align-items: center;
@@ -2133,6 +2172,17 @@
           color: var(--muted);
           font-size: 10px;
         }
+        .transaction-table .transaction-notes {
+          display: block;
+          grid-column: 1 / -1;
+          grid-row: 3;
+          min-width: 0;
+          max-width: none;
+          padding-top: 10px;
+          border-top: 1px solid var(--line);
+          font-size: 12px;
+        }
+        .transaction-table .transaction-empty-notes { display: none; }
         .transaction-table .transaction-actions {
           flex-wrap: wrap;
           gap: 10px;
@@ -2416,6 +2466,7 @@
       // loading prevents overlapping refreshes; saveBusy prevents concurrent entry/review actions in this page.
       const defaultTransactionFilters = () => ({
         period: "month",
+        month: "",
         quarter: "",
         from: "",
         to: "",
@@ -2823,6 +2874,7 @@
         limit = 100,
         editable = false,
         showExpenseGroup = true,
+        showNotes = false,
       ) {
         const selectionScope = JSON.stringify([state.view, state.month, state.type, state.search, state.transactionFilters]);
         if (transactionSelectionScope !== selectionScope) {
@@ -2845,6 +2897,7 @@
           '<div class="tablewrap transaction-list"><table class="transaction-table" role="table"><thead><tr><th>Description</th><th>Date</th><th style="text-align:right">Amount</th><th>Category</th>' +
           (showExpenseGroup ? "<th>Expense group</th>" : "") +
           "<th>Payment method</th><th>Payment account / app</th>" +
+          (showNotes ? "<th>Notes</th>" : "") +
           (editable ? "<th>Actions</th>" : "") +
           '<th class="mobile-transaction-toggle">Details</th></tr></thead><tbody>' +
           arr
@@ -2905,6 +2958,11 @@
                   esc(visiblePaymentDetail(t)),
                   visiblePaymentDetail(t) ? "" : "transaction-empty-detail",
                 ) +
+                (showNotes
+                  ? '<td role="cell" class="transaction-notes' + (t.notes ? '' : ' transaction-empty-notes') +
+                    '" id="' + esc(transactionDetailId(t, "notes")) + '"><span class="mobile-field-label">Notes</span><span class="transaction-note-text">' +
+                    esc(t.notes || "—") + '</span></td>'
+                  : "") +
                 (editable
                   ? '<td role="cell" class="transaction-secondary transaction-action-cell" id="' +
                     esc(transactionDetailId(t, "actions")) +
@@ -2980,6 +3038,7 @@
         arr,
         editable = false,
         showExpenseGroup = true,
+        showNotes = false,
       ) {
         const scope = JSON.stringify([
           state.view,
@@ -3008,6 +3067,7 @@
           TRANSACTION_PAGE_SIZE,
           editable,
           showExpenseGroup,
+          showNotes,
         );
         if (arr.length <= TRANSACTION_PAGE_SIZE) return table;
         const button = (label, page, disabled) =>
@@ -3213,25 +3273,36 @@
           "</strong></div></div></div>"
         );
       }
-      // Date comparisons use workbook ISO dates, avoiding browser time-zone shifts.
+      const transactionFilterValues = value => Array.isArray(value) ? value : value ? [value] : [];
+      const transactionTypes = () => state.type === "all" ? [] : transactionFilterValues(state.type);
+      // Empty arrays mean All; an unset month/quarter starts with the current period.
+      function transactionPeriodValues(key) {
+        const value = state.transactionFilters[key];
+        return Array.isArray(value) ? value : value ? [String(value)] :
+          [String(key === "month" ? state.month : Math.floor(state.month / 3) + 1)];
+      }
+      function transactionDateMonths() {
+        const period = state.transactionFilters.period;
+        if (!["month", "quarter"].includes(period)) return null;
+        const selected = transactionPeriodValues(period);
+        const values = selected.length ? selected : period === "month"
+          ? MONTHS.map((_, i) => String(i)) : ["1", "2", "3", "4"];
+        return period === "month" ? values.map(Number) :
+          values.flatMap(q => [0, 1, 2].map(offset => (Number(q) - 1) * 3 + offset));
+      }
+      // Outer bounds plus membership checks preserve gaps between chosen periods.
       function transactionDateRange() {
         const f = state.transactionFilters,
           year = settings()?.year || new Date().getFullYear();
         if (f.period === "custom") return [f.from, f.to];
         if (f.period === "year") return [year + "-01-01", year + "-12-31"];
-        const first =
-          f.period === "quarter"
-            ? (Number(f.quarter || Math.floor(state.month / 3) + 1) - 1) * 3
-            : state.month;
-        const last = first + (f.period === "quarter" ? 2 : 0);
+        const months = transactionDateMonths(), first = Math.min(...months), last = Math.max(...months);
         const days = new Date(Date.UTC(year, last + 1, 0)).getUTCDate();
         return [monthPrefix(first) + "-01", monthPrefix(last) + "-" + days];
       }
       function transactionCategoryChoices() {
-        const journals =
-          state.type === "all"
-            ? ["expense", "income", "investment"]
-            : [state.type];
+        const selected = transactionTypes(),
+          journals = selected.length ? selected : ["expense", "income", "investment"];
         return [
           ...new Set(
             [
@@ -3391,9 +3462,104 @@
         };
         draw();
       }
+      function transactionMultiSpec(key) {
+        const f = state.transactionFilters, year = settings()?.year || new Date().getFullYear();
+        const choices = property => [...new Set(rows().map(t =>
+          property === "paymentMethod" ? visiblePaymentMethod(t) : t[property]).filter(Boolean))]
+          .sort((a, b) => a.localeCompare(b)).map(value => [value, value]);
+        const specs = {
+          type: ["Transaction type", "All types", [["expense", "Expense"], ["income", "Income"], ["investment", "Investment"]]],
+          category: ["Category", "All categories", () => transactionCategoryChoices().map(value => [value, value])],
+          method: ["Payment method", "All payment methods", () => [["__blank__", "Not recorded"], ...choices("paymentMethod")]],
+          group: ["Expense group", "All expense groups", () => [["__blank__", "No expense group"], ...choices("trip")]],
+          month: ["Month", "All months", MONTHS.map((name, i) => [String(i), name + " " + year])],
+          quarter: ["Quarter", "All quarters", [1, 2, 3, 4].map(q => [String(q), "Q" + q + " · " + MONTHS[(q - 1) * 3] + "–" + MONTHS[q * 3 - 1]])],
+        };
+        if (!specs[key]) return null;
+        const [label, all, buildOptions] = specs[key];
+        const options = typeof buildOptions === "function" ? buildOptions() : buildOptions;
+        const selected = key === "type" ? transactionTypes() : ["month", "quarter"].includes(key)
+          ? transactionPeriodValues(key) : transactionFilterValues(f[key]);
+        return { key, label, all, options, selected };
+      }
+      function transactionMultiControl(key) {
+        const spec = transactionMultiSpec(key);
+        const names = spec.options.filter(([value]) => spec.selected.includes(value)).map(([, label]) => label);
+        const text = !names.length ? spec.all : names.length === 1 ? names[0] : names.length + " selected";
+        return '<div class="transaction-multiselect' + (key === "type" ? ' transaction-type-filter' : '') + '">' +
+          (key === "type" ? '' : '<span class="calendar-field-label">' + esc(spec.label) + '</span>') +
+          '<button type="button" class="transaction-multi-trigger" id="' + (key === "type" ? 'typeFilter' : 'transactionFilter-' + key) +
+          '" data-transaction-multi="' + key + '" aria-haspopup="dialog" aria-label="' + esc(spec.label + ': ' + text) +
+          '" title="' + esc(names.length ? names.join(', ') : spec.all) + '"><span>' + esc(text) + '</span><span aria-hidden="true">⌄</span></button></div>';
+      }
+      function setTransactionFilterValues(key, values) {
+        const spec = transactionMultiSpec(key);
+        if (!spec) return;
+        const allowed = new Set(spec.options.map(([value]) => value));
+        const selected = [...new Set(values)].filter(value => allowed.has(value));
+        if (key === "type") {
+          state.type = selected;
+          const categories = new Set(transactionCategoryChoices());
+          state.transactionFilters.category = transactionFilterValues(state.transactionFilters.category)
+            .filter(value => categories.has(value));
+        } else {
+          state.transactionFilters[key] = selected;
+          if (key === "month" && selected.length === 1) state.month = Number(selected[0]);
+        }
+        state.transactionPage = 1;
+        render();
+      }
+      function openTransactionMultiSelect(key) {
+        if (state.saveBusy || !settings()) return;
+        const spec = transactionMultiSpec(key);
+        if (!spec) return;
+        const selected = new Set(spec.selected);
+        const triggerId = key === "type" ? "typeFilter" : "transactionFilter-" + key;
+        const close = () => { $("#modalContainer").innerHTML = ""; $("#" + triggerId)?.focus({preventScroll:true}); };
+        $("#modalContainer").innerHTML = '<div class="modal-backdrop"><section class="modal" id="transactionMultiDialog" role="dialog" aria-modal="true" aria-labelledby="transactionMultiTitle">' +
+          '<div class="modal-head"><h2 id="transactionMultiTitle">' + esc(spec.label) + '</h2><button type="button" class="close" aria-label="Close dialog">×</button></div>' +
+          '<p class="multi-help">Choose one or more options. Choose All to remove this filter.</p>' +
+          '<div class="field"><label for="transactionMultiSearch">Search options</label><input id="transactionMultiSearch" type="search" autocomplete="off"></div>' +
+          '<label class="multi-option"><input id="transactionMultiAll" type="checkbox"><span>' + esc(spec.all) + '</span></label>' +
+          '<div class="multi-options">' + spec.options.map(([value, label], i) =>
+            '<label class="multi-option" data-multi-label="' + esc(label.toLowerCase()) + '"><input type="checkbox" id="transactionChoice-' + i + '" data-multi-choice="' +
+            esc(value) + '"' + (selected.has(value) ? ' checked' : '') + '><span>' + esc(label) + '</span></label>').join('') +
+          '</div><p id="transactionMultiEmpty" hidden>No matching options.</p><p id="transactionMultiCount" aria-live="polite"></p>' +
+          '<div class="modal-footer"><button type="button" class="button outline" id="cancelTransactionMulti">Cancel</button><button type="button" class="button" id="applyTransactionMulti">Apply selection</button></div></section></div>';
+        const boxes = [...document.querySelectorAll('[data-multi-choice]')];
+        const sync = () => {
+          boxes.forEach(box => { box.checked = selected.has(box.dataset.multiChoice); });
+          $("#transactionMultiAll").checked = !selected.size;
+          $("#transactionMultiCount").textContent = selected.size ? selected.size + " selected" : spec.all;
+        };
+        boxes.forEach(box => { box.onchange = () => {
+          if (box.checked) selected.add(box.dataset.multiChoice); else selected.delete(box.dataset.multiChoice);
+          sync();
+        }; });
+        $("#transactionMultiAll").onchange = () => { selected.clear(); sync(); };
+        $("#transactionMultiSearch").oninput = event => {
+          const query = event.target.value.trim().toLowerCase(); let visible = 0;
+          document.querySelectorAll('[data-multi-label]').forEach(label => {
+            label.hidden = !label.dataset.multiLabel.includes(query); if (!label.hidden) visible++;
+          });
+          $("#transactionMultiEmpty").hidden = visible > 0;
+        };
+        $(".close").onclick = close;
+        $("#cancelTransactionMulti").onclick = close;
+        $("#applyTransactionMulti").onclick = () => { setTransactionFilterValues(key, [...selected]); close(); };
+        $("#transactionMultiDialog").onkeydown = event => {
+          if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(); }
+          if (event.key === "Tab") {
+            const controls = [...$("#transactionMultiDialog").querySelectorAll('button,input')].filter(node => !node.disabled && node.getClientRects().length);
+            const first = controls[0], last = controls[controls.length - 1];
+            if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+            else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+          }
+        };
+        sync(); $("#cancelTransactionMulti").focus();
+      }
       function transactionFilterControls() {
-        const f = state.transactionFilters,
-          year = settings()?.year || new Date().getFullYear();
+        const f = state.transactionFilters;
         const options = (pairs, selected) =>
           pairs
             .map(
@@ -3417,17 +3583,6 @@
           '">' +
           options(pairs, selected) +
           "</select></label>";
-        // Options come from the full journal, so other active filters never hide choices.
-        const choices = (key) =>
-          [
-            ...new Set(
-              rows()
-                .map((t) => key === "paymentMethod" ? visiblePaymentMethod(t) : t[key])
-                .filter(Boolean),
-            ),
-          ]
-            .sort((a, b) => a.localeCompare(b))
-            .map((value) => [value, value]);
         const date = (key, label) =>
           '<div class="transaction-date-field"><span class="calendar-field-label" id="transactionDateLabel-' +
           key +
@@ -3449,35 +3604,13 @@
         return (
           '<div class="transaction-filters"><div class="transaction-period-fields">' +
           select("period", "Date range", [
-            ["month", "Selected month"],
-            ["quarter", "Quarter"],
+            ["month", "Selected months"],
+            ["quarter", "Selected quarters"],
             ["year", "Entire year"],
             ["custom", "Custom dates"],
           ]) +
-          (f.period === "month"
-            ? select(
-                "month",
-                "Month",
-                MONTHS.map((name, i) => [String(i), name + " " + year]),
-                String(state.month),
-              )
-            : "") +
-          (f.period === "quarter"
-            ? select(
-                "quarter",
-                "Quarter",
-                [1, 2, 3, 4].map((q) => [
-                  String(q),
-                  "Q" +
-                    q +
-                    " · " +
-                    MONTHS[(q - 1) * 3] +
-                    "–" +
-                    MONTHS[q * 3 - 1],
-                ]),
-                f.quarter || String(Math.floor(state.month / 3) + 1),
-              )
-            : "") +
+          (f.period === "month" ? transactionMultiControl("month") : "") +
+          (f.period === "quarter" ? transactionMultiControl("quarter") : "") +
           "</div>" +
           (f.period === "custom"
             ? '<div class="transaction-date-fields">' +
@@ -3485,20 +3618,9 @@
               date("to", "To") +
               "</div>"
             : "") +
-          select("category", "Category", [
-            ["", "All categories"],
-            ...transactionCategoryChoices().map((value) => [value, value]),
-          ]) +
-          select("method", "Payment method", [
-            ["", "All payment methods"],
-            ["__blank__", "Not recorded"],
-            ...choices("paymentMethod"),
-          ]) +
-          select("group", "Expense group", [
-            ["", "All expense groups"],
-            ["__blank__", "No expense group"],
-            ...choices("trip"),
-          ]) +
+          transactionMultiControl("category") +
+          transactionMultiControl("method") +
+          transactionMultiControl("group") +
           '<button type="button" class="button outline" id="clearTransactionFilters">Clear filters</button></div>'
         );
       }
@@ -3507,6 +3629,9 @@
         const f = state.transactionFilters,
           search = state.search.trim().toLowerCase();
         const [from, to] = investments ? ["", ""] : transactionDateRange();
+        const months = investments ? null : transactionDateMonths();
+        const types = transactionTypes(), categories = transactionFilterValues(f.category),
+          methods = transactionFilterValues(f.method), groups = transactionFilterValues(f.group);
         const invalid =
           !investments &&
           f.period === "custom" &&
@@ -3529,16 +3654,13 @@
               );
             return (
               !invalid &&
-              (state.type === "all" || t.type === state.type) &&
+              (!types.length || types.includes(t.type)) &&
               t.date >= from &&
               t.date <= to &&
-              (!f.category || t.category === f.category) &&
-              (!f.method ||
-                (f.method === "__blank__"
-                  ? !visiblePaymentMethod(t)
-                  : visiblePaymentMethod(t) === f.method)) &&
-              (!f.group ||
-                (f.group === "__blank__" ? !t.trip : t.trip === f.group)) &&
+              (!months || months.includes(Number(t.date.slice(5, 7)) - 1)) &&
+              (!categories.length || categories.includes(t.category)) &&
+              (!methods.length || methods.includes(visiblePaymentMethod(t) || "__blank__")) &&
+              (!groups.length || groups.includes(t.trip || "__blank__")) &&
               (!search ||
                 [
                   t.description,
@@ -3567,14 +3689,7 @@
           '" value="' +
           esc(state.search) +
           '">' +
-          (investments
-            ? ""
-            : '<select id="typeFilter" aria-label="Transaction type">' +
-              selectOptions(
-                ["all", "expense", "income", "investment"],
-                state.type,
-              ) +
-              "</select>") +
+          (investments ? "" : transactionMultiControl("type")) +
           "</div>" +
           (investments ? "" : transactionFilterControls()) +
           (invalid
@@ -3608,15 +3723,24 @@
             ) +
             '</div><div class="notice">These figures track contributions. They do not calculate current portfolio value, profit, or return.</div>'
           : "";
+        // Calculate before pagination so changing pages never changes these totals.
+        const summary = investments ? "" :
+          '<section class="card transaction-summary" id="transactionTotals" aria-label="Filtered transaction totals">' +
+          '<div><span>Total transactions</span><strong id="filteredTransactionCount">' +
+          (loaded() ? filtered.length.toLocaleString(settings().locale) : "—") + '</strong></div>' +
+          '<div><span>Total amount</span><strong id="filteredTransactionTotal">' +
+          (loaded() ? money(sum(filtered)) : "—") + '</strong></div>' +
+          '<p>All matching transactions across every page. Amounts are added together.</p></section>';
         return (
           head +
           filter +
+          summary +
           '<div class="card"><div class="cardhead"><h2>' +
           (investments ? "Investment journal" : "Transaction journal") +
           '</h2><span class="pill">' +
           filtered.length +
           " entries</span></div>" +
-          paginatedTransactions(filtered, true, !investments) +
+          paginatedTransactions(filtered, true, !investments, !investments) +
           "</div>"
         );
       }
@@ -5021,19 +5145,9 @@
             render(true);
             restoreViewContext(context);
           };
-        const typeFilter = $("#typeFilter");
-        if (typeFilter)
-          typeFilter.onchange = (e) => {
-            state.type = e.target.value;
-            if (
-              state.view === "transactions" &&
-              !transactionCategoryChoices().includes(
-                state.transactionFilters.category,
-              )
-            )
-              state.transactionFilters.category = "";
-            render();
-          };
+        document.querySelectorAll('[data-transaction-multi]').forEach(button => {
+          button.onclick = () => openTransactionMultiSelect(button.dataset.transactionMulti);
+        });
         document
           .querySelectorAll("[data-transaction-filter]")
           .forEach((control) => {
@@ -5322,10 +5436,10 @@
           (!isConnected
             ? '<div class="notice warning">Preview only. Connect the deployed app before saving transactions.</div>'
             : "") +
-          '<form id="entryForm"><div class="formgrid"><div class="field"><label for="entryType">Journal</label><select id="entryType">' +
+          '<form id="entryForm"><div class="notice warning" id="journalChangeNotice" hidden></div><div class="formgrid"><div class="field"><label for="entryType">Journal</label><select id="entryType">' +
           selectOptions(
-            ["expense", "income", "investment"],
-            state.view === "investments" ? "investment" : "expense",
+            transaction ? (transaction.type === "income" ? ["income"] : ["expense", "investment"]) : ["expense", "income", "investment"],
+            transaction?.type || (state.view === "investments" ? "investment" : "expense"),
           ) +
           '</select></div><div class="field"><label for="entryDate">Date</label><input id="entryDate" type="date" required></div><div class="field full"><label for="entryDescription">Description</label><input id="entryDescription" placeholder="For example, groceries or salary" list="knownDescriptions" autocomplete="off" required><datalist id="knownDescriptions"></datalist><small>Known descriptions select their category automatically.</small></div><div class="field"><label for="entryAmount">Amount</label><input id="entryAmount" type="number" inputmode="decimal" min="0.01" step="0.01" placeholder="0.00" required></div><div class="field"><label for="entryCategory">Category</label><select id="entryCategory" required></select></div><div class="field full" id="tripField"><label for="entryTrip">Expense group (optional)</label><select id="entryTrip"></select><small>Add or remove groups in Manage → Expense groups.</small></div><div class="field" id="paymentMethodField"><label for="entryPaymentMethod">Payment method (optional)</label><select id="entryPaymentMethod"></select><button type="button" class="textlink" id="newEntryPaymentType" aria-expanded="false" aria-controls="entryPaymentTypeCreator" style="margin-top:10px">+ Add payment method</button></div><div class="field full" id="entryPaymentTypeCreator" hidden>' +
           paymentTypeFields("entry") +
@@ -5335,7 +5449,7 @@
         if (transaction) {
           $("#entryTitle").textContent = "Edit transaction";
           $("#entryType").value = transaction.type;
-          $("#entryType").disabled = true;
+          $("#entryType").disabled = transaction.type === "income";
           $("#saveEntry").textContent = "Save changes";
         }
         // Date bounds, field limits, and currency come from the same server configuration.
@@ -5393,8 +5507,27 @@
             $("#entryCategory").value = (state.data?.categories?.investment || [])[0] || "";
         }
         $("#entryType").onchange = () => {
+          const paymentDetail = $("#entryPaymentDetail").value;
           populate();
           populatePayment();
+          if ((state.data?.paymentOptions?.[$("#entryPaymentMethod").value] || []).includes(paymentDetail))
+            $("#entryPaymentDetail").value = paymentDetail;
+          const type = $("#entryType").value;
+          const match = state.data?.mappings?.[type]?.find(m =>
+            m.description.trim().toLowerCase() === $("#entryDescription").value.trim().toLowerCase());
+          if (match && (state.data?.categories?.[type] || []).includes(match.category))
+            $("#entryCategory").value = match.category;
+          else if (transaction && type === transaction.type) {
+            if (transaction.category && !(state.data?.categories?.[type] || []).includes(transaction.category))
+              $("#entryCategory").innerHTML += selectOptions([transaction.category], transaction.category);
+            $("#entryCategory").value = transaction.category;
+          }
+          const moving = transaction && type !== transaction.type;
+          $("#journalChangeNotice").hidden = !moving;
+          $("#journalChangeNotice").textContent = type === "investment"
+            ? "Saving moves this transaction from Expenses to Investments. Its expense group will be cleared."
+            : "Saving moves this transaction from Investments to Expenses. Choose an expense category and, optionally, an expense group.";
+          if (transaction) $("#saveEntry").textContent = moving ? "Move transaction" : "Save changes";
         };
         populate();
         // New expenses opened from a group detail view start with that group selected.
@@ -5561,6 +5694,7 @@
           // On success, close the dialog and refresh the live snapshot to include the saved transaction.
           try {
             if (transaction) {
+              payload.sourceType = transaction.type;
               payload.row = transaction.row;
               payload.fingerprint = transaction.fingerprint;
             }
@@ -5577,7 +5711,9 @@
             $("#modalContainer").innerHTML = "";
             toast(
               transaction
-                ? "Transaction updated. Updating totals and review checks."
+                ? (payload.type !== transaction.type
+                    ? "Transaction moved to " + (payload.type === "investment" ? "Investments" : "Expenses") + ". Updating totals and review checks."
+                    : "Transaction updated. Updating totals and review checks.")
                 : "Saved to your Google Sheet.",
             );
             if (!transaction && payload.type === "investment")
@@ -5585,7 +5721,7 @@
             if (transaction) restoreViewContext(entryContext);
             await refresh(
               transaction
-                ? { incremental: true, editedTransaction: transaction }
+                ? { incremental: true, editedTransaction: payload.type === transaction.type ? transaction : null }
                 : {},
             );
           } catch (e) {
