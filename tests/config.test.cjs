@@ -1822,7 +1822,7 @@ test("payment UI manages optional accounts/apps without losing transaction field
   assert.equal(element("#paymentNameControls").hidden, true);
   assert.equal(element("#entryPaymentMethod").required, false);
   assert.equal(element("#entryPaymentDetail").required, false);
-  assert.equal(element("#knownDescriptions").innerHTML, "");
+  assert.match(element("#knownDescriptions").innerHTML, /Jio recharge/);
   element("#entryType").value = "expense";
   element("#entryType").onchange();
   assert.equal(element("#paymentMethodField").hidden, false);
@@ -6665,4 +6665,66 @@ test("multi-selected filters keep totals stable across pages and reset paging on
   assert.equal(vm.runInContext('state.transactionPage',b),1);
   vm.runInContext('state.search="Needle offpage"',b);
   assert.deepEqual(tableKeys(vm.runInContext('transactions()',b)),['expense:2']);
+});
+
+async function descriptionJournalBrowser() {
+  const f=fixture(), elements=new Map();
+  const element=selector=>{
+    if(!elements.has(selector)) elements.set(selector,{value:"",innerHTML:"",textContent:"",classList:{add(){},remove(){},toggle(){}},addEventListener(){},setAttribute(){},focus(){}});
+    return elements.get(selector);
+  };
+  let submitted;
+  const runner={withSuccessHandler(fn){this.success=fn;return this},withFailureHandler(fn){this.failure=fn;return this},
+    getData(){this.success(JSON.parse(JSON.stringify(f.context.getData())))},
+    addTransaction(input){submitted=input;this.success({ok:true,type:input.type,row:2})}};
+  const google={script:{run:runner}};
+  const browser=vm.createContext({console,Intl,Date,crypto,setTimeout:()=>0,google,window:{google},
+    document:{querySelector:element,querySelectorAll:()=>[],addEventListener(){}}});
+  vm.runInContext(browserSource,browser);await new Promise(resolve=>setImmediate(resolve));
+  vm.runInContext(`state.data.categories={expense:["Food"],income:["Salary"],investment:["Funds"]};
+    state.data.mappings={expense:[{description:"Lunch",category:"Food"}],income:[{description:"Monthly salary",category:"Salary"}],investment:[{description:"Example portfolio",category:"Funds"}]};
+    openEntry()`,browser);
+  element('#entryType').value='expense';element('#entryType').onchange();
+  return {browser,element,submitted:()=>submitted};
+}
+
+test("known descriptions discover other journals and save new entries in the matched journal", async()=>{
+  const {browser:b,element:e,submitted}=await descriptionJournalBrowser();
+  e('#entryDate').value='2026-10-24';e('#entryAmount').value='123.45';e('#entryNotes').value='Fictional note';
+  e('#entryDescription').value='Exam';e('#entryDescription').oninput();
+  assert.match(e('#knownDescriptions').innerHTML,/Example portfolio/);
+  assert.equal(e('#entryType').value,'expense');
+  e('#entryDescription').value=' EXAMPLE PORTFOLIO ';e('#entryDescription').oninput();
+  assert.equal(e('#entryType').value,'investment');assert.equal(e('#entryCategory').value,'Funds');
+  assert.equal(e('#tripField').hidden,true);assert.equal(e('#knownDescriptions').innerHTML,'');
+  assert.equal(e('#entryDate').value,'2026-10-24');assert.equal(e('#entryAmount').value,'123.45');assert.equal(e('#entryNotes').value,'Fictional note');
+  await e('#entryForm').onsubmit({preventDefault(){}});
+  assert.equal(submitted().type,'investment');assert.equal(submitted().category,'Funds');assert.equal(submitted().amount,'123.45');
+});
+
+test("description matching switches between all new-entry journals but leaves partial and unknown text alone",async()=>{
+  const {element:e}=await descriptionJournalBrowser();
+  for(const [description,type,category] of [['Monthly salary','income','Salary'],['Example portfolio','investment','Funds'],['Lunch','expense','Food']]){
+    e('#entryDescription').value=description;e('#entryDescription').oninput();
+    assert.equal(e('#entryType').value,type);assert.equal(e('#entryCategory').value,category);
+    assert.equal(e('#paymentMethodField').hidden,type==='income');assert.equal(e('#tripField').hidden,type!=='expense');
+  }
+  for(const query of ['Monthly','Unknown description','']){
+    e('#entryDescription').value=query;e('#entryDescription').oninput();assert.equal(e('#entryType').value,'expense');
+  }
+  assert.equal(e('#knownDescriptions').innerHTML,'');
+});
+
+test("shared description names prefer the current journal, avoid guessing, and never move edited entries automatically",async()=>{
+  const {browser:b,element:e}=await descriptionJournalBrowser();
+  vm.runInContext(`state.data.mappings.income.push({description:"Shared label",category:"Salary"});
+    state.data.mappings.investment.push({description:"Shared label",category:"Funds"})`,b);
+  e('#entryDescription').value='Shared';e('#entryDescription').oninput();
+  assert.equal([...e('#knownDescriptions').innerHTML.matchAll(/value="Shared label"/g)].length,1);
+  e('#entryDescription').value='Shared label';e('#entryDescription').oninput();assert.equal(e('#entryType').value,'expense');
+  e('#entryType').value='income';e('#entryType').onchange();e('#entryDescription').oninput();
+  assert.equal(e('#entryType').value,'income');assert.equal(e('#entryCategory').value,'Salary');
+  vm.runInContext('openEntry(rows()[0])',b);
+  e('#entryDescription').value='Example';e('#entryDescription').oninput();assert.equal(e('#knownDescriptions').innerHTML,'');
+  e('#entryDescription').value='Example portfolio';e('#entryDescription').oninput();assert.equal(e('#entryType').value,'expense');
 });
