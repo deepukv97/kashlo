@@ -6855,3 +6855,63 @@ test('bulk edits batch consecutive cells, preserve gaps and formula columns, and
   assert.equal(values.find(t=>t.row===fresh[1].row).amount,7);
   assert.equal(values.find(t=>t.row===fresh[0].row).amount,11);
 });
+
+test('amount calculator parses arithmetic with precedence, brackets, decimals and unary signs without executing code',async()=>{
+  const f=await descriptionJournalBrowser(),b=f.browser;
+  for(const [expression,expected] of [['1+3+5',9],['2+3×4',14],['(2+3)×4',20],['10÷4',2.5],['.5+.25',.75],['10−2−3',5],['-2*-3',6],['1+-2',-1],['2*(3+(4/2))',10]]){
+    b.expression=expression;assert.equal(vm.runInContext('calculateAmount(expression)',b),expected);
+  }
+  for(const expression of ['','1+','1/0','0/0','(1+2','1..2','2(3)','1;alert(1)','Math.random()','2**3','Infinity','9'.repeat(161)]){
+    b.expression=expression;assert.throws(()=>vm.runInContext('calculateAmount(expression)',b));
+  }
+});
+
+async function calculatorBrowser() {
+  const f=await descriptionJournalBrowser(),b=f.browser,e=f.element;
+  const keys=['C','(',')','⌫','7','8','9','÷','4','5','6','×','1','2','3','−','0','.','+','='];
+  const buttons=keys.map((key,i)=>{const button=e('#calculatorTestKey-'+i);button.dataset={calculatorKey:key};return button;});
+  const original=b.document.querySelectorAll;
+  b.document.querySelectorAll=selector=>selector==='[data-calculator-key]'?buttons:original(selector);
+  vm.runInContext('bindAmountCalculator()',b);
+  e('#amountCalculator').hidden=true;
+  return {...f,press:key=>buttons[keys.indexOf(key)].onclick()};
+}
+
+test('calculator keypad previews results and fills only Amount after Use amount, while Close preserves the form',async()=>{
+  const f=await calculatorBrowser(),e=f.element;
+  e('#entryAmount').value='';e('#entryDescription').value='Fictional item';e('#entryDate').value='2026-01-02';e('#entryNotes').value='Keep this note';
+  e('#openAmountCalculator').onclick();
+  for(const key of ['1','+','3','+','5','='])f.press(key);
+  assert.equal(e('#entryAmount').value,'');assert.equal(e('#useCalculatedAmount').disabled,false);
+  assert.match(e('#calculatorResult').textContent,/9/);
+  e('#useCalculatedAmount').onclick();assert.equal(e('#entryAmount').value,'9.00');assert.equal(e('#amountCalculator').hidden,true);
+  assert.equal(e('#entryDescription').value,'Fictional item');assert.equal(e('#entryDate').value,'2026-01-02');assert.equal(e('#entryNotes').value,'Keep this note');
+  e('#openAmountCalculator').onclick();f.press('+');f.press('1');f.press('=');e('#closeAmountCalculator').onclick();
+  assert.equal(e('#entryAmount').value,'9.00');
+});
+
+test('calculator rejects zero, negative, excessive and invalid results, rounds cents and supports chained results',async()=>{
+  const f=await calculatorBrowser(),e=f.element;
+  e('#entryAmount').value='';e('#openAmountCalculator').onclick();
+  for(const keys of [['0','='],['1','−','2','='],['1','÷','0','='],['1','+','=']]){
+    f.press('C');keys.forEach(f.press);assert.equal(e('#useCalculatedAmount').disabled,true);
+    e('#useCalculatedAmount').onclick();assert.equal(e('#entryAmount').value,'');assert.ok(e('#calculatorError').textContent);
+  }
+  f.press('C');for(const key of ['1','÷','3','='])f.press(key);
+  assert.equal(e('#useCalculatedAmount').disabled,false);e('#useCalculatedAmount').onclick();assert.equal(e('#entryAmount').value,'0.33');
+  e('#openAmountCalculator').onclick();f.press('C');['2','+','3','=','×','4','='].forEach(f.press);
+  e('#useCalculatedAmount').onclick();assert.equal(e('#entryAmount').value,'20.00');
+  e('#openAmountCalculator').onclick();f.press('C');['1','0','0','0','0','0','0','0','0','+','1','='].forEach(f.press);
+  assert.equal(e('#useCalculatedAmount').disabled,true);
+});
+
+test('calculator keyboard Enter calculates without submitting and Escape closes only the calculator',async()=>{
+  const f=await calculatorBrowser(),e=f.element;
+  e('#entryAmount').value='';e('#openAmountCalculator').onclick();
+  let prevented=0,stopped=0;
+  const keydown=key=>e('#amountCalculator').onkeydown({key,target:{tagName:'INPUT'},preventDefault(){prevented++},stopPropagation(){stopped++}});
+  ['8','/','2','Enter'].forEach(keydown);assert.equal(prevented,4);assert.equal(e('#entryAmount').value,'');
+  assert.equal(e('#useCalculatedAmount').disabled,false);
+  keydown('Escape');assert.equal(stopped,1);assert.equal(e('#amountCalculator').hidden,true);
+  assert.match(e('#modalContainer').innerHTML,/id="entryForm"/);
+});
