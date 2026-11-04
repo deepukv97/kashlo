@@ -109,6 +109,15 @@ class Sheet {
         this.cells[row - 1][col - 1] = value;
         return range;
       },
+      setValues: (matrix) => {
+        assert.equal(matrix.length, height);
+        this.operations.push({ kind: "valuesWrite", row, col, height, width });
+        matrix.forEach((line, r) => {
+          assert.equal(line.length, width);
+          line.forEach((value, c) => { this.cells[row - 1 + r][col - 1 + c] = value; });
+        });
+        return range;
+      },
       setRichTextValue: (value) => range.setValue(value),
       setRichTextValues: (matrix) => {
         this.operations.push({ kind: "richText", row, col, height, width });
@@ -406,6 +415,7 @@ function fixture(overrides = {}) {
           "updateTransaction",
           "deleteTransaction",
           "deleteTransactions",
+          "updateTransactions",
           "setReview",
           "bulkReview",
           "setMonthStatus",
@@ -6727,4 +6737,121 @@ test("shared description names prefer the current journal, avoid guessing, and n
   vm.runInContext('openEntry(rows()[0])',b);
   e('#entryDescription').value='Example';e('#entryDescription').oninput();assert.equal(e('#knownDescriptions').innerHTML,'');
   e('#entryDescription').value='Example portfolio';e('#entryDescription').oninput();assert.equal(e('#entryType').value,'expense');
+});
+
+function bulkEditFixture() {
+  const f=fixture(), api=f.context;
+  api.addTransaction({type:'expense',description:'Second fictional entry',amount:25,date:'2026-01-08',category:'Food',notes:'Keep this note',requestId:'bulk_edit_second_entry'});
+  return {...f,api,entries:()=>api.getData().transactions.map(({type,row,fingerprint})=>({type,row,fingerprint}))};
+}
+
+test('bulk edit updates only selected fields and rows, preserves formulas, and safely replays',()=>{
+  const f=bulkEditFixture(), {api}=f,c=f.config.layout.journal;
+  api.managePaymentOption({action:'add',method:'UPI',name:'Example app',requestId:'bulk_edit_add_account'});
+  const before=api.getData().transactions, selected=f.entries().slice(0,1);
+  const input={entries:selected,changes:{paymentMethod:'UPI',paymentDetail:'Example app'},confirmed:true,requestId:'bulk_edit_payment_request'};
+  assert.equal(api.updateTransactions(input).count,1);
+  const after=api.getData().transactions;
+  const changed=after.find(t=>t.row===selected[0].row);
+  assert.equal(changed.paymentMethod,'UPI');assert.equal(changed.paymentDetail,'Example app');assert.equal(changed.decision,'Pending');
+  for(const key of ['description','amount','date','category','trip','notes'])assert.equal(changed[key],before.find(t=>t.row===changed.row)[key]);
+  assert.equal(JSON.stringify(after.filter(t=>t.row!==changed.row)),JSON.stringify(before.filter(t=>t.row!==changed.row)));
+  const snapshot=JSON.stringify(f.expense.cells);
+  assert.equal(api.updateTransactions(input).count,1);assert.equal(JSON.stringify(f.expense.cells),snapshot);
+  assert.equal(f.expense.cells[changed.row-1][c.paymentMethod-1],'UPI');
+});
+
+test('bulk edit validates every fingerprint and patch before writing and allows corrected validation retries',()=>{
+  const f=bulkEditFixture(),{api}=f,entries=f.entries();
+  const input={entries,changes:{amount:0},confirmed:true,requestId:'bulk_edit_validation_request'};
+  const before=JSON.stringify(Object.values(f.sheets).map(s=>s.cells));
+  for(const changes of [{amount:0},{amount:-5},{amount:'bad'},{date:'2026-02-30'},{date:'2027-01-01'},{category:''},{category:'Missing'},{trip:'Missing'},{notes:'x'.repeat(f.config.limits.noteLength+1)},{paymentMethod:'Unknown'},{paymentMethod:'UPI',paymentDetail:'Unknown'}, {description:'Forbidden'},{}]){
+    assert.throws(()=>api.updateTransactions({...input,changes}));
+  }
+  assert.throws(()=>api.updateTransactions({...input,changes:{amount:10},entries:[entries[0],{...entries[1],fingerprint:'stale'}]}),/changed/);
+  assert.throws(()=>api.updateTransactions({...input,entries:[entries[0],entries[0]],changes:{amount:10}}),/repeated/);
+  assert.throws(()=>api.updateTransactions({...input,confirmed:false}),/Confirm/);
+  assert.throws(()=>api.updateTransactions({...input,entries:[],changes:{amount:10}}),/Select between/);
+  assert.equal(JSON.stringify(Object.values(f.sheets).map(s=>s.cells)),before);
+  assert.equal(f.properties['request:'+input.requestId],undefined);
+  assert.equal(api.updateTransactions({...input,changes:{amount:10,date:'2026-03-02',notes:'=Literal text'}}).count,2);
+  for(const t of api.getData().transactions){assert.equal(t.amount,10);assert.equal(t.date,'2026-03-02');assert.equal(t.notes,'=Literal text');}
+});
+
+test('bulk edit permits explicit clearing, preserves incomplete fields, and enforces journal restrictions',()=>{
+  const f=bulkEditFixture(),{api}=f,c=f.config.layout.journal;
+  f.expense.getRange(2,c.description).setValue('');f.expense.getRange(2,c.category).setValue('');
+  api.updateTransactions({entries:f.entries(),changes:{notes:'',trip:'',paymentMethod:'',paymentDetail:''},confirmed:true,requestId:'bulk_edit_clear_fields'});
+  assert.equal(f.expense.cells[1][c.description-1],'');assert.equal(f.expense.cells[1][c.category-1],'');
+  api.addTransaction({type:'income',description:'Fictional salary',amount:80,date:'2026-01-04',category:'Food',requestId:'bulk_edit_income_setup'});
+  const entries=f.entries();
+  for(const changes of [{category:'Food'},{trip:''},{paymentMethod:'Cash'}]) assert.throws(()=>api.updateTransactions({entries,changes,confirmed:true,requestId:'bulk_edit_mixed_journals'}));
+  assert.equal(api.updateTransactions({entries,changes:{amount:12},confirmed:true,requestId:'bulk_edit_mixed_amounts'}).count,3);
+});
+
+test('bulk edit partial failures retain retry protection',()=>{
+  const f=bulkEditFixture(),{api}=f,c=f.config.layout.journal;
+  api.addTransaction({type:'expense',description:'Third fictional entry',amount:18,date:'2026-01-09',category:'Food',requestId:'bulk_edit_partial_third'});
+  const all=f.entries(),entries=[all[0],all[2]];
+  const original=f.expense.getRange.bind(f.expense);
+  f.expense.getRange=(...args)=>{const range=original(...args);if(args[0]===entries[1].row&&args[1]===c.amount)range.setValues=()=>{throw new Error('Connection lost')};return range;};
+  const input={entries,changes:{amount:9},confirmed:true,requestId:'bulk_edit_partial_failure'};
+  assert.throws(()=>api.updateTransactions(input),/Connection lost/);
+  assert.throws(()=>api.updateTransactions(input),/may already have started/);
+});
+
+async function bulkEditBrowser() {
+  const f=await descriptionJournalBrowser(),b=f.browser,e=f.element;
+  const original=b.document.querySelectorAll;
+  b.document.querySelectorAll=selector=>selector==='[data-bulk-field]' ? ['payment','category','trip','notes','amount','date'].map(key=>{
+    const box=e('#bulkUse-'+key);box.dataset={bulkField:key};box.style={};box.checked=false;box.disabled=false;return box;
+  }):original(selector);
+  for(const key of ['payment','category','trip','notes','amount','date']) e('#bulkFields-'+key).querySelectorAll=()=>[];
+  vm.runInContext('state.data.transactions.push({...rows()[0],row:30,fingerprint:"offpage-30"},{...rows()[0],row:60,fingerprint:"offpage-60"});selectedTransactions.clear();rows().forEach(t=>selectedTransactions.set(t.type+":"+t.row,t));openSelectedEdit()',b);
+  let submitted;
+  b.google.script.run.updateTransactions=input=>{submitted=input;b.google.script.run.success({ok:true,count:input.entries.length});};
+  return {...f,submission:()=>submitted};
+}
+
+test('bulk edit UI stages an explicit payment-only patch, previews selection, and confirms once',async()=>{
+  const f=await bulkEditBrowser(),e=f.element;
+  assert.match(e('#modalContainer').innerHTML,/Only checked fields will change/);
+  e('#bulkUse-payment').checked=true;e('#bulkUse-payment').onchange();
+  e('#bulkPaymentMethod').value='UPI';e('#bulkPaymentDetail').value='';
+  await e('#bulkEditForm').onsubmit({preventDefault(){}});
+  assert.equal(f.submission(),undefined);assert.equal(e('#saveBulkEdit').textContent,'Confirm changes');
+  assert.match(e('#bulkEditPreview').innerHTML,/Payment: UPI/);
+  await e('#bulkEditForm').onsubmit({preventDefault(){}});
+  assert.deepEqual(JSON.parse(JSON.stringify(f.submission().changes)),{paymentMethod:'UPI',paymentDetail:''});
+  assert.equal(f.submission().entries.length,3);assert.equal(f.submission().confirmed,true);
+  assert.deepEqual(Array.from(f.submission().entries,entry=>entry.row),[2,30,60]);
+  assert.equal(e('#modalContainer').innerHTML,'');
+});
+
+test('bulk edit UI requires fields and positive amounts, previews full selected total and supports Back/Cancel',async()=>{
+  const f=await bulkEditBrowser(),e=f.element;
+  await e('#bulkEditForm').onsubmit({preventDefault(){}});assert.match(e('#bulkEditError').textContent,/at least one/);
+  e('#bulkUse-amount').checked=true;e('#bulkAmount').value='0';
+  await e('#bulkEditForm').onsubmit({preventDefault(){}});assert.match(e('#bulkEditError').textContent,/greater than 0/);
+  e('#bulkAmount').value='20';await e('#bulkEditForm').onsubmit({preventDefault(){}});
+  assert.match(e('#bulkEditPreview').innerHTML,/for each transaction/);assert.match(e('#bulkEditPreview').innerHTML,/Selected total/);
+  e('#backBulkEdit').onclick();assert.equal(e('#bulkEditFields').hidden,false);
+  e('#cancelBulkEdit').onclick();assert.equal(f.submission(),undefined);assert.equal(e('#modalContainer').innerHTML,'');
+});
+
+test('bulk edits batch consecutive cells, preserve gaps and formula columns, and reject stale workspaces',()=>{
+  const f=bulkEditFixture(),{api}=f,c=f.config.layout.journal;
+  api.addTransaction({type:'expense',description:'Third fictional purchase',amount:18,date:'2026-01-09',category:'Food',requestId:'bulk_edit_batch_third'});
+  const entries=f.entries(),initial=JSON.stringify(f.expense.cells.map(row=>row[c.duplicateIssue-1]));
+  assert.throws(()=>api.updateTransactions({entries,changes:{amount:7},confirmed:true,workspaceRevision:999,requestId:'bulk_edit_wrong_workspace'}),/settings changed/);
+  const start=f.expense.operations.length;
+  api.updateTransactions({entries,changes:{amount:7,notes:'Fictional bulk note'},confirmed:true,requestId:'bulk_edit_batch_columns'});
+  const writes=f.expense.operations.slice(start).filter(op=>op.kind==='valuesWrite'&&op.col===c.amount);
+  assert.equal(writes.length,1);assert.equal(writes[0].height,3);
+  assert.equal(JSON.stringify(f.expense.cells.map(row=>row[c.duplicateIssue-1])),initial);
+  const fresh=f.entries();
+  api.updateTransactions({entries:[fresh[0],fresh[2]],changes:{amount:11},confirmed:true,requestId:'bulk_edit_gap_untouched'});
+  const values=api.getData().transactions;
+  assert.equal(values.find(t=>t.row===fresh[1].row).amount,7);
+  assert.equal(values.find(t=>t.row===fresh[0].row).amount,11);
 });

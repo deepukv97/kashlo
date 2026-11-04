@@ -30,7 +30,7 @@ No programming, code copying, or software installation is needed for first-time 
 | **Manage**             | Manage descriptions, categories, payment choices, and saved expense groups.                         |
 | **Profile & settings** | Update your name, workspace label, and display preferences.                                              |
 
-Add, edit, and delete transactions from the app. Payment tracking is optional for expenses and investments; income has no payment fields. Kashlo asks only for account, card, or app names, never card numbers or CVVs.
+Add, edit, and delete transactions from the app. Select several entries and use **Edit selected** to update chosen fields together, with a preview before saving. Payment tracking is optional for expenses and investments; income has no payment fields. Kashlo asks only for account, card, or app names, never card numbers or CVVs.
 
 On a phone, open the menu beside the logo to change pages. Tap **Details** on a transaction card for more information and available actions. Pull down from the top to refresh sheet data.
 

@@ -2675,6 +2675,7 @@
             else if (name === "setReview") runner.setReview(args);
             else if (name === "bulkReview") runner.bulkReview(args);
             else if (name === "deleteTransactions") runner.deleteTransactions(args);
+            else if (name === "updateTransactions") runner.updateTransactions(args);
             else if (name === "setMonthStatus") runner.setMonthStatus(args);
             else reject(new Error("Unknown action."));
           });
@@ -2892,7 +2893,8 @@
           );
         return (
           (editable ? '<div class="transaction-selection"><label><input type="checkbox" id="selectPageTransactions"> Select this page</label><span id="transactionSelectionCount" aria-live="polite">' +
-            selectedTransactions.size + ' selected</span><button type="button" class="button danger" id="deleteSelectedTransactions" ' +
+            selectedTransactions.size + ' selected</span><button type="button" class="button outline" id="editSelectedTransactions" ' +
+            (!selectedTransactions.size ? 'disabled' : '') + '>Edit selected</button><button type="button" class="button danger" id="deleteSelectedTransactions" ' +
             (!selectedTransactions.size ? 'disabled' : '') + '>Delete selected</button><button type="button" class="textlink" id="clearTransactionSelection">Clear selection</button></div>' : '') +
           '<div class="tablewrap transaction-list"><table class="transaction-table" role="table"><thead><tr><th>Description</th><th>Date</th><th style="text-align:right">Amount</th><th>Category</th>' +
           (showExpenseGroup ? "<th>Expense group</th>" : "") +
@@ -5768,6 +5770,7 @@
         all.indeterminate = count > 0 && count < boxes.length;
         $("#transactionSelectionCount").textContent = selectedTransactions.size + " selected";
         $("#deleteSelectedTransactions").disabled = !selectedTransactions.size || state.saveBusy;
+        if ($("#editSelectedTransactions")) $("#editSelectedTransactions").disabled = !selectedTransactions.size || state.saveBusy;
       }
       function bindTransactionSelection() {
         const boxes = [...document.querySelectorAll('[data-select-row]')];
@@ -5792,9 +5795,107 @@
           if (!state.saveBusy) selectedTransactions.clear();
           updateTransactionSelection();
         };
+        const editSelection = $("#editSelectedTransactions");
+        if (editSelection) editSelection.onclick = openSelectedEdit;
         const deleteSelection = $("#deleteSelectedTransactions");
         if (deleteSelection) deleteSelection.onclick = openSelectedDeletion;
         updateTransactionSelection();
+      }
+      function openSelectedEdit() {
+        if (state.saveBusy || !loaded() || !selectedTransactions.size) return;
+        const selected = [...selectedTransactions.values()];
+        const entries = selected.map(t => ({ type: t.type, row: t.row, fingerprint: t.fingerprint }));
+        const types = new Set(selected.map(t => t.type));
+        const singleType = types.size === 1 ? selected[0].type : "";
+        const config = settings(), requestId = id();
+        const labels = { payment: "Payment method and account / app", category: "Category", trip: "Expense group", notes: "Notes", amount: "Amount", date: "Date" };
+        const field = (key, controls, disabled = false, help = "") =>
+          '<div class="field full"><label><input type="checkbox" id="bulkUse-' + key + '" data-bulk-field="' + key + '"' + (disabled ? ' disabled' : '') + '> Update ' + esc(labels[key]) + '</label>' +
+          (help ? '<small>' + esc(help) + '</small>' : '') + '<div id="bulkFields-' + key + '" hidden>' + controls + '</div></div>';
+        const select = (id, label, values) => '<label for="' + id + '">' + esc(label) + '</label><select id="' + id + '">' + values + '</select>';
+        $("#modalContainer").innerHTML = '<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="bulkEditTitle"><div class="modal-head"><h2 id="bulkEditTitle">Edit ' + entries.length + ' transactions</h2><button type="button" class="close" aria-label="Close dialog">×</button></div>' +
+          '<p>Only checked fields will change. Your selection includes transactions on other pages.</p><form id="bulkEditForm"><div id="bulkEditFields" class="formgrid">' +
+          field('payment', select('bulkPaymentMethod', 'Payment method', '<option value="">Clear payment details</option>' + selectOptions(paymentMethods(), '')) + select('bulkPaymentDetail', 'Account / app (optional)', '<option value="">No account / app</option>'), types.has('income'), types.has('income') ? 'Select expenses or investments to update payment details.' : 'The chosen method and account / app replace both payment fields.') +
+          field('category', select('bulkCategory', 'Category', '<option value="">Choose a category</option>' + selectOptions(state.data?.categories?.[singleType] || [], '')), !singleType, !singleType ? 'Select one journal to update categories.' : '') +
+          field('trip', select('bulkTrip', 'Expense group', '<option value="">Clear expense group</option>' + selectOptions(state.data?.trips || [], '')), singleType !== 'expense', singleType !== 'expense' ? 'Select expenses only to update expense groups.' : '') +
+          field('notes', select('bulkNotesMode', 'Action', '<option value="replace">Replace notes</option><option value="clear">Clear notes</option>') + '<label for="bulkNotes">Notes</label><textarea id="bulkNotes" maxlength="' + config.limits.noteLength + '"></textarea>') +
+          field('amount', '<label for="bulkAmount">New amount for each transaction</label><input id="bulkAmount" type="number" inputmode="decimal" min="0.01" step="0.01" max="' + config.limits.maximumAmount + '"><small>Every selected transaction will have this same amount.</small>') +
+          field('date', '<label for="bulkDate">New date for each transaction</label><input id="bulkDate" type="date" min="' + config.year + '-01-01" max="' + config.year + '-12-31">') +
+          '</div><div id="bulkEditPreview" hidden></div><p id="bulkEditError" class="formerror" role="alert"></p><div class="modal-footer"><button type="button" class="button outline" id="cancelBulkEdit">Cancel</button><button type="button" class="button outline" id="backBulkEdit" hidden>Back</button><button class="button" id="saveBulkEdit">Review changes</button></div></form></section></div>';
+        // Checkboxes retain their natural size rather than inheriting full-width field inputs.
+        document.querySelectorAll('[data-bulk-field]').forEach(box => {
+          box.style.width = '22px'; box.style.height = '22px'; box.style.padding = '0'; box.style.verticalAlign = 'middle'; box.style.marginRight = '8px';
+          box.onchange = () => {
+            $("#bulkFields-" + box.dataset.bulkField).hidden = !box.checked;
+            $("#bulkFields-" + box.dataset.bulkField).querySelectorAll('input,select,textarea').forEach(control => { control.disabled = !box.checked; });
+          };
+          box.onchange();
+        });
+        $("#bulkPaymentMethod").onchange = () => {
+          const method = $("#bulkPaymentMethod").value;
+          $("#bulkPaymentDetail").innerHTML = '<option value="">No account / app</option>' + selectOptions(state.data?.paymentOptions?.[method] || [], '');
+          $("#bulkPaymentDetail").value = '';
+          $("#bulkPaymentDetail").disabled = !method || method === 'Cash';
+        };
+        $("#bulkNotesMode").onchange = () => { $("#bulkNotes").hidden = $("#bulkNotesMode").value === 'clear'; };
+        let patch = null;
+        const close = () => { if (!state.saveBusy) $("#modalContainer").innerHTML = ''; };
+        $(".close").onclick = close; $("#cancelBulkEdit").onclick = close;
+        $("#backBulkEdit").onclick = () => {
+          if (state.saveBusy) return;
+          patch = null; $("#bulkEditFields").hidden = false; $("#bulkEditPreview").hidden = true;
+          $("#backBulkEdit").hidden = true; $("#saveBulkEdit").textContent = 'Review changes';
+        };
+        $("#bulkEditForm").onsubmit = async event => {
+          event.preventDefault();
+          if (state.saveBusy) return;
+          $("#bulkEditError").textContent = '';
+          if (!patch) {
+            const changes = {}, summary = [];
+            const use = key => $("#bulkUse-" + key).checked && !$("#bulkUse-" + key).disabled;
+            if (use('payment')) {
+              changes.paymentMethod = $("#bulkPaymentMethod").value;
+              changes.paymentDetail = !changes.paymentMethod || changes.paymentMethod === 'Cash' ? '' : $("#bulkPaymentDetail").value;
+              summary.push('Payment: ' + (changes.paymentMethod ? changes.paymentMethod + (changes.paymentDetail ? ' · ' + changes.paymentDetail : ' · no account / app') : 'Clear payment details'));
+            }
+            if (use('category')) {
+              changes.category = $("#bulkCategory").value;
+              if (!changes.category) { $("#bulkEditError").textContent = 'Choose a category.'; return; }
+              summary.push('Category: ' + changes.category);
+            }
+            if (use('trip')) { changes.trip = $("#bulkTrip").value; summary.push('Expense group: ' + (changes.trip || 'Clear expense group')); }
+            if (use('notes')) {
+              changes.notes = $("#bulkNotesMode").value === 'clear' ? '' : $("#bulkNotes").value;
+              if ($("#bulkNotesMode").value !== 'clear' && !changes.notes.trim()) { $("#bulkEditError").textContent = 'Enter notes or choose Clear notes.'; return; }
+              summary.push('Notes: ' + (changes.notes || 'Clear notes'));
+            }
+            if (use('amount')) {
+              const value = Number($("#bulkAmount").value);
+              if (!Number.isFinite(value) || value <= 0 || value > config.limits.maximumAmount) { $("#bulkEditError").textContent = 'Enter a valid amount greater than 0.'; return; }
+              changes.amount = value; summary.push('Amount: ' + money(value) + ' for each transaction. Selected total: ' + money(sum(selected)) + ' → ' + money(value * entries.length));
+            }
+            if (use('date')) {
+              changes.date = $("#bulkDate").value;
+              if (!changes.date || changes.date < config.year + '-01-01' || changes.date > config.year + '-12-31') { $("#bulkEditError").textContent = 'Choose a date within ' + config.year + '.'; return; }
+              summary.push('Date: ' + dateLabel(changes.date) + ' for every selected transaction');
+            }
+            if (!Object.keys(changes).length) { $("#bulkEditError").textContent = 'Check at least one field to update.'; return; }
+            patch = changes;
+            $("#bulkEditFields").hidden = true; $("#bulkEditPreview").hidden = false; $("#backBulkEdit").hidden = false;
+            $("#bulkEditPreview").innerHTML = '<div class="notice warning"><strong>Update ' + entries.length + ' selected transactions?</strong><ul>' + summary.map(text => '<li>' + esc(text) + '</li>').join('') + '</ul>Other fields stay unchanged. These entries will be checked again in Review.</div>' +
+              '<details><summary>Selected transactions (' + entries.length + ')</summary><ul>' + selected.map(t => '<li>' + esc(t.description || 'Missing description') + ' · ' + esc(dateLabel(t.date)) + ' · ' + esc(t.type) + ' · ' + esc(money(t.amount)) + '</li>').join('') + '</ul></details>';
+            $("#saveBulkEdit").textContent = 'Confirm changes'; return;
+          }
+          state.saveBusy = true; $("#saveBulkEdit").disabled = true; $("#saveBulkEdit").textContent = 'Saving…';
+          try {
+            const result = await rpc('updateTransactions', { entries, changes: patch, requestId, confirmed: true });
+            selectedTransactions.clear(); $("#modalContainer").innerHTML = ''; toast(result.count + ' transactions updated.'); await refresh();
+          } catch (error) {
+            $("#bulkEditError").textContent = error.message + ' If the result is uncertain, refresh and check the sheet before starting another edit.';
+            $("#saveBulkEdit").disabled = false; $("#saveBulkEdit").textContent = 'Retry same changes';
+          } finally { state.saveBusy = false; updateTransactionSelection(); }
+        };
+        $("#cancelBulkEdit").focus();
       }
       function openSelectedDeletion() {
         if (state.saveBusy || !loaded() || !selectedTransactions.size) return;
