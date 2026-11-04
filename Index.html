@@ -3522,7 +3522,9 @@
         if (state.saveBusy || !settings()) return;
         const spec = transactionMultiSpec(key);
         if (!spec) return;
-        const selected = new Set(spec.selected);
+        // Store the visible checkbox choices locally; an empty saved filter means All.
+        const values = spec.options.map(([value]) => value);
+        const selected = new Set(spec.selected.length ? spec.selected.filter(value => values.includes(value)) : values);
         const triggerId = key === "type" ? "typeFilter" : "transactionFilter-" + key;
         const close = () => { $("#modalContainer").innerHTML = ""; $("#" + triggerId)?.focus({preventScroll:true}); };
         $("#modalContainer").innerHTML = '<div class="modal-backdrop"><section class="modal" id="transactionMultiDialog" role="dialog" aria-modal="true" aria-labelledby="transactionMultiTitle">' +
@@ -3538,14 +3540,21 @@
         const boxes = [...document.querySelectorAll('[data-multi-choice]')];
         const sync = () => {
           boxes.forEach(box => { box.checked = selected.has(box.dataset.multiChoice); });
-          $("#transactionMultiAll").checked = !selected.size;
-          $("#transactionMultiCount").textContent = selected.size ? selected.size + " selected" : spec.all;
+          const all = selected.size === values.length;
+          $("#transactionMultiAll").checked = all;
+          $("#transactionMultiAll").indeterminate = selected.size > 0 && !all;
+          $("#transactionMultiCount").textContent = all ? spec.all : selected.size ? selected.size + " selected" : "Choose at least one option.";
+          $("#applyTransactionMulti").disabled = values.length > 0 && !selected.size;
         };
         boxes.forEach(box => { box.onchange = () => {
           if (box.checked) selected.add(box.dataset.multiChoice); else selected.delete(box.dataset.multiChoice);
           sync();
         }; });
-        $("#transactionMultiAll").onchange = () => { selected.clear(); sync(); };
+        $("#transactionMultiAll").onchange = event => {
+          selected.clear();
+          if (event.target.checked) values.forEach(value => selected.add(value));
+          sync();
+        };
         $("#transactionMultiSearch").oninput = event => {
           const query = event.target.value.trim().toLowerCase(); let visible = 0;
           document.querySelectorAll('[data-multi-label]').forEach(label => {
@@ -3555,7 +3564,10 @@
         };
         $(".close").onclick = close;
         $("#cancelTransactionMulti").onclick = close;
-        $("#applyTransactionMulti").onclick = () => { setTransactionFilterValues(key, [...selected]); close(); };
+        $("#applyTransactionMulti").onclick = () => {
+          if (values.length && !selected.size) return;
+          setTransactionFilterValues(key, selected.size === values.length ? [] : [...selected]); close();
+        };
         $("#transactionMultiDialog").onkeydown = event => {
           if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(); }
           if (event.key === "Tab") {

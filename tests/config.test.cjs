@@ -6646,18 +6646,20 @@ test("multi-select dialog stages changes until Apply and supports cancelling and
     return original(selector);
   };
   vm.runInContext('state.transactionFilters.period="year";openTransactionMultiSelect("category")',b);
+  f.element('#transactionMultiAll').onchange({target:{checked:false}});
   const food = boxes.find(node => node.dataset.multiChoice === 'Food');
   food.checked=true; food.onchange();
   assert.equal(vm.runInContext('state.transactionFilters.category',b), '');
   f.element('#cancelTransactionMulti').onclick();
   assert.equal(vm.runInContext('state.transactionFilters.category',b), '');
   vm.runInContext('openTransactionMultiSelect("category")',b);
+  f.element('#transactionMultiAll').onchange({target:{checked:false}});
   for (const value of ['Food','Travel']) { const box=boxes.find(node=>node.dataset.multiChoice===value);box.checked=true;box.onchange(); }
   f.element('#applyTransactionMulti').onclick();
   assert.deepEqual(Array.from(vm.runInContext('state.transactionFilters.category',b)), ['Food','Travel']);
   assert.equal(tableKeys(f.element('#content').innerHTML).length,4);
   vm.runInContext('openTransactionMultiSelect("category")',b);
-  f.element('#transactionMultiAll').onchange();
+  f.element('#transactionMultiAll').onchange({target:{checked:true}});
   f.element('#applyTransactionMulti').onclick();
   assert.deepEqual(Array.from(vm.runInContext('state.transactionFilters.category',b)), []);
   assert.equal(tableKeys(f.element('#content').innerHTML).length,7);
@@ -6965,3 +6967,36 @@ test('both calculator actions remain disabled until a valid positive result is c
     e('#useCalculatedAmountWithNotes').onclick();assert.equal(e('#entryNotes').value,'Keep notes');assert.equal(e('#entryAmount').value,'');
   }
 });
+
+for(const key of ['type','category','method','group','month','quarter']) {
+  test(`All checks every ${key} option, supports excluding items and clears the filter on Apply`,async()=>{
+    const f=await transactionFiltersBrowser(),b=f.browser,e=f.element;
+    let boxes=[];
+    const original=b.document.querySelectorAll.bind(b.document);
+    b.document.querySelectorAll=selector=>{
+      if(selector==='[data-multi-choice]') {
+        boxes=[...e('#modalContainer').innerHTML.matchAll(/id="(transactionChoice-\d+)" data-multi-choice="([^"]+)"/g)].map(([,id,value])=>{
+          const node=e('#'+id);node.dataset.multiChoice=value;return node;
+        });return boxes;
+      }
+      return original(selector);
+    };
+    b.filterKey=key;
+    vm.runInContext('if(filterKey==="type")state.type=[];else state.transactionFilters[filterKey]=[];openTransactionMultiSelect(filterKey)',b);
+    assert.ok(boxes.length>1);assert.ok(boxes.every(box=>box.checked));assert.equal(e('#transactionMultiAll').checked,true);
+    boxes[0].checked=false;boxes[0].onchange();
+    assert.equal(e('#transactionMultiAll').checked,false);assert.equal(e('#transactionMultiAll').indeterminate,true);
+    assert.ok(boxes.slice(1).every(box=>box.checked));
+    const excluded=boxes[0].dataset.multiChoice;
+    e('#applyTransactionMulti').onclick();
+    assert.ok(!Array.from(vm.runInContext('filterKey==="type"?state.type:state.transactionFilters[filterKey]',b)).includes(excluded));
+    vm.runInContext('openTransactionMultiSelect(filterKey)',b);
+    e('#transactionMultiAll').onchange({target:{checked:true}});
+    assert.ok(boxes.every(box=>box.checked));assert.equal(e('#transactionMultiAll').indeterminate,false);
+    e('#transactionMultiAll').onchange({target:{checked:false}});
+    assert.ok(boxes.every(box=>!box.checked));assert.equal(e('#applyTransactionMulti').disabled,true);
+    e('#transactionMultiAll').onchange({target:{checked:true}});e('#applyTransactionMulti').onclick();
+    assert.deepEqual(Array.from(vm.runInContext('filterKey==="type"?state.type:state.transactionFilters[filterKey]',b)),[]);
+    vm.runInContext('openTransactionMultiSelect(filterKey)',b);assert.ok(boxes.every(box=>box.checked));
+  });
+}
