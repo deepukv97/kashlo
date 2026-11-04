@@ -6930,3 +6930,38 @@ test('editing a transaction starts the calculator with its current amount and re
   assert.equal(e('#calculatorExpression').value,'250');assert.match(e('#calculatorResult').textContent,/250\.00/);
   e('#closeAmountCalculator').onclick();assert.equal(e('#entryAmount').value,'250');
 });
+
+test('calculator offers amount only or amount with the calculation appended to existing notes',async()=>{
+  const f=await calculatorBrowser(),e=f.element;
+  e('#entryAmount').value='';e('#entryNotes').value='Fictional purchase note';e('#openAmountCalculator').onclick();
+  ['1','+','3','+','5','='].forEach(f.press);
+  assert.equal(e('#useCalculatedAmountWithNotes').disabled,false);
+  e('#useCalculatedAmountWithNotes').onclick();
+  assert.equal(e('#entryAmount').value,'9.00');
+  assert.equal(e('#entryNotes').value,'Fictional purchase note\nCalculation: 1 + 3 + 5 = 9.00');
+  e('#openAmountCalculator').onclick();['+','1','='].forEach(f.press);e('#useCalculatedAmount').onclick();
+  assert.equal(e('#entryAmount').value,'10.00');assert.equal(e('#entryNotes').value,'Fictional purchase note\nCalculation: 1 + 3 + 5 = 9.00');
+});
+
+test('calculator note action handles blank notes, duplicate lines and note limits without losing amount or notes',async()=>{
+  const f=await calculatorBrowser(),e=f.element,b=f.browser;
+  e('#entryAmount').value='';e('#entryNotes').value='';e('#openAmountCalculator').onclick();['2','×','5','='].forEach(f.press);
+  e('#useCalculatedAmountWithNotes').onclick();assert.equal(e('#entryNotes').value,'Calculation: 2 × 5 = 10.00');
+  e('#openAmountCalculator').onclick();f.press('C');['2','×','5','='].forEach(f.press);e('#useCalculatedAmountWithNotes').onclick();
+  assert.equal(e('#entryNotes').value,'Calculation: 2 × 5 = 10.00');
+  vm.runInContext('state.data.config.limits.noteLength=20',b);
+  e('#entryNotes').value='Existing note';e('#openAmountCalculator').onclick();['+','5','='].forEach(f.press);
+  e('#useCalculatedAmountWithNotes').onclick();
+  assert.equal(e('#entryAmount').value,'10.00');assert.equal(e('#entryNotes').value,'Existing note');assert.equal(e('#amountCalculator').hidden,false);
+  assert.match(e('#calculatorError').textContent,/not enough space/);
+  e('#useCalculatedAmount').onclick();assert.equal(e('#entryAmount').value,'15.00');assert.equal(e('#entryNotes').value,'Existing note');
+});
+
+test('both calculator actions remain disabled until a valid positive result is calculated',async()=>{
+  const f=await calculatorBrowser(),e=f.element;
+  e('#entryAmount').value='';e('#entryNotes').value='Keep notes';e('#openAmountCalculator').onclick();
+  for(const keys of [['1','+'],['0','='],['1','÷','0','=']]) {
+    f.press('C');keys.forEach(f.press);assert.equal(e('#useCalculatedAmountWithNotes').disabled,true);
+    e('#useCalculatedAmountWithNotes').onclick();assert.equal(e('#entryNotes').value,'Keep notes');assert.equal(e('#entryAmount').value,'');
+  }
+});

@@ -951,6 +951,8 @@
       .amount-calculator { background: #1b201d; border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
       .calculator-keys { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
       .calculator-keys button { min-height: 46px; padding: 10px; font-size: 18px; }
+      .calculator-actions { flex-wrap: wrap; }
+      .calculator-actions .button { flex: 1 1 150px; white-space: normal; }
       .calculator-display { font-size: 18px; text-align: right; }
       .calculator-result { display: block; margin-top: 10px; font-size: 18px; overflow-wrap: anywhere; }
       .transaction-summary {
@@ -5479,14 +5481,14 @@
         return '<div class="field full amount-calculator" id="amountCalculator" hidden>' + '<label for="calculatorExpression">Amount calculator</label><input class="calculator-display" id="calculatorExpression" type="text" readonly autocomplete="off" placeholder="0" aria-label="Calculation"><output class="calculator-result" id="calculatorResult" aria-live="polite"></output><div class="calculator-keys">' +
           ['C','(',')','⌫','7','8','9','÷','4','5','6','×','1','2','3','−','0','.','+','='].map(key =>
             '<button type="button" class="button outline" data-calculator-key="' + esc(key) + '" aria-label="' + esc(({C:'Clear calculation','⌫':'Backspace','÷':'Divide','×':'Multiply','−':'Subtract','+':'Add','=':'Calculate result'})[key] || key) + '">' + esc(key) + '</button>').join('') +
-          '</div><p id="calculatorError" class="formerror" role="alert"></p><small>Use = to calculate, then Use amount. Results are rounded to two decimal places.</small><div class="modal-footer"><button type="button" class="button outline" id="closeAmountCalculator">Close</button><button type="button" class="button" id="useCalculatedAmount" disabled>Use amount</button></div>' + '</div>';
+          '</div><p id="calculatorError" class="formerror" role="alert"></p><small>Use = to calculate, then choose an option below. Results are rounded to two decimal places.</small><div class="modal-footer calculator-actions"><button type="button" class="textlink" id="closeAmountCalculator">Close</button><button type="button" class="button outline" id="useCalculatedAmount" disabled>Use amount only</button><button type="button" class="button" id="useCalculatedAmountWithNotes" disabled>Use amount + calculation in notes</button></div>' + '</div>';
       }
       function bindAmountCalculator() {
         const trigger = $("#openAmountCalculator"), amount = $("#entryAmount");
         const panel = $("#amountCalculator");
         let expression = '', result = null;
-        const display = $("#calculatorExpression"), output = $("#calculatorResult"), error = $("#calculatorError"), use = $("#useCalculatedAmount");
-        const draw = () => { display.value = expression; output.textContent = ''; error.textContent = ''; use.disabled = true; };
+        const display = $("#calculatorExpression"), output = $("#calculatorResult"), error = $("#calculatorError"), use = $("#useCalculatedAmount"), useWithNotes = $("#useCalculatedAmountWithNotes");
+        const draw = () => { display.value = expression; output.textContent = ''; error.textContent = ''; use.disabled = useWithNotes.disabled = true; };
         const close = () => { panel.hidden = true; trigger.setAttribute('aria-expanded', 'false'); trigger.focus({preventScroll:true}); };
         trigger.onclick = () => {
           if (state.saveBusy) return;
@@ -5504,9 +5506,9 @@
               result = Math.round((value + Number.EPSILON) * 100) / 100;
               output.textContent = '= ' + money(result);
               if (result <= 0 || result > (settings()?.limits.maximumAmount || Infinity)) {
-                use.disabled = true; error.textContent = 'Use an amount greater than 0 and within the allowed limit.';
-              } else { use.disabled = false; error.textContent = ''; }
-            } catch (e) { result = null; use.disabled = true; error.textContent = e.message; }
+                use.disabled = useWithNotes.disabled = true; error.textContent = 'Use an amount greater than 0 and within the allowed limit.';
+              } else { use.disabled = useWithNotes.disabled = false; error.textContent = ''; }
+            } catch (e) { result = null; use.disabled = useWithNotes.disabled = true; error.textContent = e.message; }
             return;
           }
           if (key === 'C') expression = '';
@@ -5528,10 +5530,24 @@
           if (/^[0-9.()+−×÷=]$/.test(key) || ['C','⌫'].includes(key)) { event.preventDefault(); press(key); }
         };
         $("#closeAmountCalculator").onclick = close;
-        use.onclick = () => {
+        function applyAmount(includeNotes) {
           if (state.saveBusy || use.disabled || result === null) return;
+          if (includeNotes) {
+            const notes = $("#entryNotes");
+            const calculation = 'Calculation: ' + expression.replace(/([+−×÷*/])/g, ' $1 ').replace(/\s+/g, ' ').trim() + ' = ' + result.toFixed(2);
+            const previous = notes.value || '';
+            const next = previous.split('\n').includes(calculation) ? previous : previous +
+              (previous && !previous.endsWith('\n') ? '\n' : '') + calculation;
+            if (next.length > (settings()?.limits.noteLength ?? Infinity)) {
+              error.textContent = 'There is not enough space in Notes. Shorten the notes or choose Use amount only.';
+              return;
+            }
+            notes.value = next;
+          }
           amount.value = result.toFixed(2); close();
-        };
+        }
+        use.onclick = () => applyAmount(false);
+        useWithNotes.onclick = () => applyAmount(true);
       }
       // Build the add-transaction dialog using current lookup data.
       // New entries start with a blank required date; corrections retain their recorded date.
