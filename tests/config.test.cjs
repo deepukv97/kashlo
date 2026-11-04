@@ -6915,3 +6915,18 @@ test('calculator keyboard Enter calculates without submitting and Escape closes 
   keydown('Escape');assert.equal(stopped,1);assert.equal(e('#amountCalculator').hidden,true);
   assert.match(e('#modalContainer').innerHTML,/id="entryForm"/);
 });
+
+test('editing a transaction starts the calculator with its current amount and refreshes it on reopening',async()=>{
+  const f=await calculatorBrowser(),e=f.element,b=f.browser;
+  vm.runInContext('openEntry({...rows()[0],amount:125.5,notes:"Keep saved notes"})',b);
+  e('#amountCalculator').hidden=true;
+  e('#openAmountCalculator').onclick();
+  assert.equal(e('#calculatorExpression').value,'125.5');
+  assert.match(e('#calculatorResult').textContent,/125\.50/);
+  assert.equal(e('#useCalculatedAmount').disabled,false);
+  f.press('+');f.press('5');f.press('=');e('#useCalculatedAmount').onclick();
+  assert.equal(e('#entryAmount').value,'130.50');assert.equal(e('#entryNotes').value,'Keep saved notes');
+  e('#entryAmount').value='250';e('#openAmountCalculator').onclick();
+  assert.equal(e('#calculatorExpression').value,'250');assert.match(e('#calculatorResult').textContent,/250\.00/);
+  e('#closeAmountCalculator').onclick();assert.equal(e('#entryAmount').value,'250');
+});

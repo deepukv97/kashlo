@@ -5491,7 +5491,9 @@
         trigger.onclick = () => {
           if (state.saveBusy) return;
           if (!panel.hidden) { close(); return; }
-          expression = amount.value || ''; result = null; draw(); panel.hidden = false;
+          // Read the live Amount each time, including an edited transaction's saved value.
+          expression = String(amount.value || ''); result = null; draw(); panel.hidden = false;
+          if (expression) press('=');
           trigger.setAttribute('aria-expanded', 'true'); display.focus({preventScroll:true});
         };
         function press(key) {

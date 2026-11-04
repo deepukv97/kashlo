@@ -70,7 +70,7 @@ Choose **Validate & connect workbook**. Kashlo prepares the template’s tab nam
 2. Choose **expense**, **income**, or **investment**.
 3. Choose the transaction’s date. It starts blank so you can enter the correct day.
 4. Enter a description and an amount greater than zero, then choose the category. This applies to expenses, income, and investments. For new entries, an exact known description selects its journal and category automatically. Suggestions include descriptions from all journals. If a description belongs to multiple journals, Kashlo uses the current journal when it has a match. If the matches are only in other journals, choose the journal yourself. Editing an existing entry keeps journal changes manual.
-   To add several costs together, choose **Calculator** below Amount. Enter a calculation such as `1 + 3 + 5`, tap **=**, then **Use amount** to fill the result. You can also use subtraction, multiplication, division, and brackets. Results round to two decimal places and must be greater than zero. **Close** keeps the original amount.
+   To add several costs together, choose **Calculator** below Amount. Enter a calculation such as `1 + 3 + 5`, tap **=**, then **Use amount** to fill the result. You can also use subtraction, multiplication, division, and brackets. Results round to two decimal places and must be greater than zero. **Close** keeps the original amount. When editing a transaction, the calculator starts with the current Amount value.
 5. For an expense, optionally choose an **expense group**. For an expense or investment, optionally record how you paid.
 6. Click **Save to Google Sheet**. Wait for the operation to finish, then find the entry under its recorded month.
 
