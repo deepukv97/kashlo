@@ -109,6 +109,15 @@ class Sheet {
         this.cells[row - 1][col - 1] = value;
         return range;
       },
+      setValues: (matrix) => {
+        assert.equal(matrix.length, height);
+        this.operations.push({ kind: "valuesWrite", row, col, height, width });
+        matrix.forEach((line, r) => {
+          assert.equal(line.length, width);
+          line.forEach((value, c) => { this.cells[row - 1 + r][col - 1 + c] = value; });
+        });
+        return range;
+      },
       setRichTextValue: (value) => range.setValue(value),
       setRichTextValues: (matrix) => {
         this.operations.push({ kind: "richText", row, col, height, width });
@@ -406,6 +415,7 @@ function fixture(overrides = {}) {
           "updateTransaction",
           "deleteTransaction",
           "deleteTransactions",
+          "updateTransactions",
           "setReview",
           "bulkReview",
           "setMonthStatus",
@@ -1822,7 +1832,7 @@ test("payment UI manages optional accounts/apps without losing transaction field
   assert.equal(element("#paymentNameControls").hidden, true);
   assert.equal(element("#entryPaymentMethod").required, false);
   assert.equal(element("#entryPaymentDetail").required, false);
-  assert.equal(element("#knownDescriptions").innerHTML, "");
+  assert.match(element("#knownDescriptions").innerHTML, /Jio recharge/);
   element("#entryType").value = "expense";
   element("#entryType").onchange();
   assert.equal(element("#paymentMethodField").hidden, false);
@@ -6636,18 +6646,20 @@ test("multi-select dialog stages changes until Apply and supports cancelling and
     return original(selector);
   };
   vm.runInContext('state.transactionFilters.period="year";openTransactionMultiSelect("category")',b);
+  f.element('#transactionMultiAll').onchange({target:{checked:false}});
   const food = boxes.find(node => node.dataset.multiChoice === 'Food');
   food.checked=true; food.onchange();
   assert.equal(vm.runInContext('state.transactionFilters.category',b), '');
   f.element('#cancelTransactionMulti').onclick();
   assert.equal(vm.runInContext('state.transactionFilters.category',b), '');
   vm.runInContext('openTransactionMultiSelect("category")',b);
+  f.element('#transactionMultiAll').onchange({target:{checked:false}});
   for (const value of ['Food','Travel']) { const box=boxes.find(node=>node.dataset.multiChoice===value);box.checked=true;box.onchange(); }
   f.element('#applyTransactionMulti').onclick();
   assert.deepEqual(Array.from(vm.runInContext('state.transactionFilters.category',b)), ['Food','Travel']);
   assert.equal(tableKeys(f.element('#content').innerHTML).length,4);
   vm.runInContext('openTransactionMultiSelect("category")',b);
-  f.element('#transactionMultiAll').onchange();
+  f.element('#transactionMultiAll').onchange({target:{checked:true}});
   f.element('#applyTransactionMulti').onclick();
   assert.deepEqual(Array.from(vm.runInContext('state.transactionFilters.category',b)), []);
   assert.equal(tableKeys(f.element('#content').innerHTML).length,7);
@@ -6666,3 +6678,325 @@ test("multi-selected filters keep totals stable across pages and reset paging on
   vm.runInContext('state.search="Needle offpage"',b);
   assert.deepEqual(tableKeys(vm.runInContext('transactions()',b)),['expense:2']);
 });
+
+async function descriptionJournalBrowser() {
+  const f=fixture(), elements=new Map();
+  const element=selector=>{
+    if(!elements.has(selector)) elements.set(selector,{value:"",innerHTML:"",textContent:"",classList:{add(){},remove(){},toggle(){}},addEventListener(){},setAttribute(){},focus(){}});
+    return elements.get(selector);
+  };
+  let submitted;
+  const runner={withSuccessHandler(fn){this.success=fn;return this},withFailureHandler(fn){this.failure=fn;return this},
+    getData(){this.success(JSON.parse(JSON.stringify(f.context.getData())))},
+    addTransaction(input){submitted=input;this.success({ok:true,type:input.type,row:2})}};
+  const google={script:{run:runner}};
+  const browser=vm.createContext({console,Intl,Date,crypto,setTimeout:()=>0,google,window:{google},
+    document:{querySelector:element,querySelectorAll:()=>[],addEventListener(){}}});
+  vm.runInContext(browserSource,browser);await new Promise(resolve=>setImmediate(resolve));
+  vm.runInContext(`state.data.categories={expense:["Food"],income:["Salary"],investment:["Funds"]};
+    state.data.mappings={expense:[{description:"Lunch",category:"Food"}],income:[{description:"Monthly salary",category:"Salary"}],investment:[{description:"Example portfolio",category:"Funds"}]};
+    openEntry()`,browser);
+  element('#entryType').value='expense';element('#entryType').onchange();
+  return {browser,element,submitted:()=>submitted};
+}
+
+test("known descriptions discover other journals and save new entries in the matched journal", async()=>{
+  const {browser:b,element:e,submitted}=await descriptionJournalBrowser();
+  e('#entryDate').value='2026-10-24';e('#entryAmount').value='123.45';e('#entryNotes').value='Fictional note';
+  e('#entryDescription').value='Exam';e('#entryDescription').oninput();
+  assert.match(e('#knownDescriptions').innerHTML,/Example portfolio/);
+  assert.equal(e('#entryType').value,'expense');
+  e('#entryDescription').value=' EXAMPLE PORTFOLIO ';e('#entryDescription').oninput();
+  assert.equal(e('#entryType').value,'investment');assert.equal(e('#entryCategory').value,'Funds');
+  assert.equal(e('#tripField').hidden,true);assert.equal(e('#knownDescriptions').innerHTML,'');
+  assert.equal(e('#entryDate').value,'2026-10-24');assert.equal(e('#entryAmount').value,'123.45');assert.equal(e('#entryNotes').value,'Fictional note');
+  await e('#entryForm').onsubmit({preventDefault(){}});
+  assert.equal(submitted().type,'investment');assert.equal(submitted().category,'Funds');assert.equal(submitted().amount,'123.45');
+});
+
+test("description matching switches between all new-entry journals but leaves partial and unknown text alone",async()=>{
+  const {element:e}=await descriptionJournalBrowser();
+  for(const [description,type,category] of [['Monthly salary','income','Salary'],['Example portfolio','investment','Funds'],['Lunch','expense','Food']]){
+    e('#entryDescription').value=description;e('#entryDescription').oninput();
+    assert.equal(e('#entryType').value,type);assert.equal(e('#entryCategory').value,category);
+    assert.equal(e('#paymentMethodField').hidden,type==='income');assert.equal(e('#tripField').hidden,type!=='expense');
+  }
+  for(const query of ['Monthly','Unknown description','']){
+    e('#entryDescription').value=query;e('#entryDescription').oninput();assert.equal(e('#entryType').value,'expense');
+  }
+  assert.equal(e('#knownDescriptions').innerHTML,'');
+});
+
+test("shared description names prefer the current journal, avoid guessing, and never move edited entries automatically",async()=>{
+  const {browser:b,element:e}=await descriptionJournalBrowser();
+  vm.runInContext(`state.data.mappings.income.push({description:"Shared label",category:"Salary"});
+    state.data.mappings.investment.push({description:"Shared label",category:"Funds"})`,b);
+  e('#entryDescription').value='Shared';e('#entryDescription').oninput();
+  assert.equal([...e('#knownDescriptions').innerHTML.matchAll(/value="Shared label"/g)].length,1);
+  e('#entryDescription').value='Shared label';e('#entryDescription').oninput();assert.equal(e('#entryType').value,'expense');
+  e('#entryType').value='income';e('#entryType').onchange();e('#entryDescription').oninput();
+  assert.equal(e('#entryType').value,'income');assert.equal(e('#entryCategory').value,'Salary');
+  vm.runInContext('openEntry(rows()[0])',b);
+  e('#entryDescription').value='Example';e('#entryDescription').oninput();assert.equal(e('#knownDescriptions').innerHTML,'');
+  e('#entryDescription').value='Example portfolio';e('#entryDescription').oninput();assert.equal(e('#entryType').value,'expense');
+});
+
+function bulkEditFixture() {
+  const f=fixture(), api=f.context;
+  api.addTransaction({type:'expense',description:'Second fictional entry',amount:25,date:'2026-01-08',category:'Food',notes:'Keep this note',requestId:'bulk_edit_second_entry'});
+  return {...f,api,entries:()=>api.getData().transactions.map(({type,row,fingerprint})=>({type,row,fingerprint}))};
+}
+
+test('bulk edit updates only selected fields and rows, preserves formulas, and safely replays',()=>{
+  const f=bulkEditFixture(), {api}=f,c=f.config.layout.journal;
+  api.managePaymentOption({action:'add',method:'UPI',name:'Example app',requestId:'bulk_edit_add_account'});
+  const before=api.getData().transactions, selected=f.entries().slice(0,1);
+  const input={entries:selected,changes:{paymentMethod:'UPI',paymentDetail:'Example app'},confirmed:true,requestId:'bulk_edit_payment_request'};
+  assert.equal(api.updateTransactions(input).count,1);
+  const after=api.getData().transactions;
+  const changed=after.find(t=>t.row===selected[0].row);
+  assert.equal(changed.paymentMethod,'UPI');assert.equal(changed.paymentDetail,'Example app');assert.equal(changed.decision,'Pending');
+  for(const key of ['description','amount','date','category','trip','notes'])assert.equal(changed[key],before.find(t=>t.row===changed.row)[key]);
+  assert.equal(JSON.stringify(after.filter(t=>t.row!==changed.row)),JSON.stringify(before.filter(t=>t.row!==changed.row)));
+  const snapshot=JSON.stringify(f.expense.cells);
+  assert.equal(api.updateTransactions(input).count,1);assert.equal(JSON.stringify(f.expense.cells),snapshot);
+  assert.equal(f.expense.cells[changed.row-1][c.paymentMethod-1],'UPI');
+});
+
+test('bulk edit validates every fingerprint and patch before writing and allows corrected validation retries',()=>{
+  const f=bulkEditFixture(),{api}=f,entries=f.entries();
+  const input={entries,changes:{amount:0},confirmed:true,requestId:'bulk_edit_validation_request'};
+  const before=JSON.stringify(Object.values(f.sheets).map(s=>s.cells));
+  for(const changes of [{amount:0},{amount:-5},{amount:'bad'},{date:'2026-02-30'},{date:'2027-01-01'},{category:''},{category:'Missing'},{trip:'Missing'},{notes:'x'.repeat(f.config.limits.noteLength+1)},{paymentMethod:'Unknown'},{paymentMethod:'UPI',paymentDetail:'Unknown'}, {description:'Forbidden'},{}]){
+    assert.throws(()=>api.updateTransactions({...input,changes}));
+  }
+  assert.throws(()=>api.updateTransactions({...input,changes:{amount:10},entries:[entries[0],{...entries[1],fingerprint:'stale'}]}),/changed/);
+  assert.throws(()=>api.updateTransactions({...input,entries:[entries[0],entries[0]],changes:{amount:10}}),/repeated/);
+  assert.throws(()=>api.updateTransactions({...input,confirmed:false}),/Confirm/);
+  assert.throws(()=>api.updateTransactions({...input,entries:[],changes:{amount:10}}),/Select between/);
+  assert.equal(JSON.stringify(Object.values(f.sheets).map(s=>s.cells)),before);
+  assert.equal(f.properties['request:'+input.requestId],undefined);
+  assert.equal(api.updateTransactions({...input,changes:{amount:10,date:'2026-03-02',notes:'=Literal text'}}).count,2);
+  for(const t of api.getData().transactions){assert.equal(t.amount,10);assert.equal(t.date,'2026-03-02');assert.equal(t.notes,'=Literal text');}
+});
+
+test('bulk edit permits explicit clearing, preserves incomplete fields, and enforces journal restrictions',()=>{
+  const f=bulkEditFixture(),{api}=f,c=f.config.layout.journal;
+  f.expense.getRange(2,c.description).setValue('');f.expense.getRange(2,c.category).setValue('');
+  api.updateTransactions({entries:f.entries(),changes:{notes:'',trip:'',paymentMethod:'',paymentDetail:''},confirmed:true,requestId:'bulk_edit_clear_fields'});
+  assert.equal(f.expense.cells[1][c.description-1],'');assert.equal(f.expense.cells[1][c.category-1],'');
+  api.addTransaction({type:'income',description:'Fictional salary',amount:80,date:'2026-01-04',category:'Food',requestId:'bulk_edit_income_setup'});
+  const entries=f.entries();
+  for(const changes of [{category:'Food'},{trip:''},{paymentMethod:'Cash'}]) assert.throws(()=>api.updateTransactions({entries,changes,confirmed:true,requestId:'bulk_edit_mixed_journals'}));
+  assert.equal(api.updateTransactions({entries,changes:{amount:12},confirmed:true,requestId:'bulk_edit_mixed_amounts'}).count,3);
+});
+
+test('bulk edit partial failures retain retry protection',()=>{
+  const f=bulkEditFixture(),{api}=f,c=f.config.layout.journal;
+  api.addTransaction({type:'expense',description:'Third fictional entry',amount:18,date:'2026-01-09',category:'Food',requestId:'bulk_edit_partial_third'});
+  const all=f.entries(),entries=[all[0],all[2]];
+  const original=f.expense.getRange.bind(f.expense);
+  f.expense.getRange=(...args)=>{const range=original(...args);if(args[0]===entries[1].row&&args[1]===c.amount)range.setValues=()=>{throw new Error('Connection lost')};return range;};
+  const input={entries,changes:{amount:9},confirmed:true,requestId:'bulk_edit_partial_failure'};
+  assert.throws(()=>api.updateTransactions(input),/Connection lost/);
+  assert.throws(()=>api.updateTransactions(input),/may already have started/);
+});
+
+async function bulkEditBrowser() {
+  const f=await descriptionJournalBrowser(),b=f.browser,e=f.element;
+  const original=b.document.querySelectorAll;
+  b.document.querySelectorAll=selector=>selector==='[data-bulk-field]' ? ['payment','category','trip','notes','amount','date'].map(key=>{
+    const box=e('#bulkUse-'+key);box.dataset={bulkField:key};box.style={};box.checked=false;box.disabled=false;return box;
+  }):original(selector);
+  for(const key of ['payment','category','trip','notes','amount','date']) e('#bulkFields-'+key).querySelectorAll=()=>[];
+  vm.runInContext('state.data.transactions.push({...rows()[0],row:30,fingerprint:"offpage-30"},{...rows()[0],row:60,fingerprint:"offpage-60"});selectedTransactions.clear();rows().forEach(t=>selectedTransactions.set(t.type+":"+t.row,t));openSelectedEdit()',b);
+  let submitted;
+  b.google.script.run.updateTransactions=input=>{submitted=input;b.google.script.run.success({ok:true,count:input.entries.length});};
+  return {...f,submission:()=>submitted};
+}
+
+test('bulk edit UI stages an explicit payment-only patch, previews selection, and confirms once',async()=>{
+  const f=await bulkEditBrowser(),e=f.element;
+  assert.match(e('#modalContainer').innerHTML,/Only checked fields will change/);
+  e('#bulkUse-payment').checked=true;e('#bulkUse-payment').onchange();
+  e('#bulkPaymentMethod').value='UPI';e('#bulkPaymentDetail').value='';
+  await e('#bulkEditForm').onsubmit({preventDefault(){}});
+  assert.equal(f.submission(),undefined);assert.equal(e('#saveBulkEdit').textContent,'Confirm changes');
+  assert.match(e('#bulkEditPreview').innerHTML,/Payment: UPI/);
+  await e('#bulkEditForm').onsubmit({preventDefault(){}});
+  assert.deepEqual(JSON.parse(JSON.stringify(f.submission().changes)),{paymentMethod:'UPI',paymentDetail:''});
+  assert.equal(f.submission().entries.length,3);assert.equal(f.submission().confirmed,true);
+  assert.deepEqual(Array.from(f.submission().entries,entry=>entry.row),[2,30,60]);
+  assert.equal(e('#modalContainer').innerHTML,'');
+});
+
+test('bulk edit UI requires fields and positive amounts, previews full selected total and supports Back/Cancel',async()=>{
+  const f=await bulkEditBrowser(),e=f.element;
+  await e('#bulkEditForm').onsubmit({preventDefault(){}});assert.match(e('#bulkEditError').textContent,/at least one/);
+  e('#bulkUse-amount').checked=true;e('#bulkAmount').value='0';
+  await e('#bulkEditForm').onsubmit({preventDefault(){}});assert.match(e('#bulkEditError').textContent,/greater than 0/);
+  e('#bulkAmount').value='20';await e('#bulkEditForm').onsubmit({preventDefault(){}});
+  assert.match(e('#bulkEditPreview').innerHTML,/for each transaction/);assert.match(e('#bulkEditPreview').innerHTML,/Selected total/);
+  e('#backBulkEdit').onclick();assert.equal(e('#bulkEditFields').hidden,false);
+  e('#cancelBulkEdit').onclick();assert.equal(f.submission(),undefined);assert.equal(e('#modalContainer').innerHTML,'');
+});
+
+test('bulk edits batch consecutive cells, preserve gaps and formula columns, and reject stale workspaces',()=>{
+  const f=bulkEditFixture(),{api}=f,c=f.config.layout.journal;
+  api.addTransaction({type:'expense',description:'Third fictional purchase',amount:18,date:'2026-01-09',category:'Food',requestId:'bulk_edit_batch_third'});
+  const entries=f.entries(),initial=JSON.stringify(f.expense.cells.map(row=>row[c.duplicateIssue-1]));
+  assert.throws(()=>api.updateTransactions({entries,changes:{amount:7},confirmed:true,workspaceRevision:999,requestId:'bulk_edit_wrong_workspace'}),/settings changed/);
+  const start=f.expense.operations.length;
+  api.updateTransactions({entries,changes:{amount:7,notes:'Fictional bulk note'},confirmed:true,requestId:'bulk_edit_batch_columns'});
+  const writes=f.expense.operations.slice(start).filter(op=>op.kind==='valuesWrite'&&op.col===c.amount);
+  assert.equal(writes.length,1);assert.equal(writes[0].height,3);
+  assert.equal(JSON.stringify(f.expense.cells.map(row=>row[c.duplicateIssue-1])),initial);
+  const fresh=f.entries();
+  api.updateTransactions({entries:[fresh[0],fresh[2]],changes:{amount:11},confirmed:true,requestId:'bulk_edit_gap_untouched'});
+  const values=api.getData().transactions;
+  assert.equal(values.find(t=>t.row===fresh[1].row).amount,7);
+  assert.equal(values.find(t=>t.row===fresh[0].row).amount,11);
+});
+
+test('amount calculator parses arithmetic with precedence, brackets, decimals and unary signs without executing code',async()=>{
+  const f=await descriptionJournalBrowser(),b=f.browser;
+  for(const [expression,expected] of [['1+3+5',9],['2+3×4',14],['(2+3)×4',20],['10÷4',2.5],['.5+.25',.75],['10−2−3',5],['-2*-3',6],['1+-2',-1],['2*(3+(4/2))',10]]){
+    b.expression=expression;assert.equal(vm.runInContext('calculateAmount(expression)',b),expected);
+  }
+  for(const expression of ['','1+','1/0','0/0','(1+2','1..2','2(3)','1;alert(1)','Math.random()','2**3','Infinity','9'.repeat(161)]){
+    b.expression=expression;assert.throws(()=>vm.runInContext('calculateAmount(expression)',b));
+  }
+});
+
+async function calculatorBrowser() {
+  const f=await descriptionJournalBrowser(),b=f.browser,e=f.element;
+  const keys=['C','(',')','⌫','7','8','9','÷','4','5','6','×','1','2','3','−','0','.','+','='];
+  const buttons=keys.map((key,i)=>{const button=e('#calculatorTestKey-'+i);button.dataset={calculatorKey:key};return button;});
+  const original=b.document.querySelectorAll;
+  b.document.querySelectorAll=selector=>selector==='[data-calculator-key]'?buttons:original(selector);
+  vm.runInContext('bindAmountCalculator()',b);
+  e('#amountCalculator').hidden=true;
+  return {...f,press:key=>buttons[keys.indexOf(key)].onclick()};
+}
+
+test('calculator keypad previews results and fills only Amount after Use amount, while Close preserves the form',async()=>{
+  const f=await calculatorBrowser(),e=f.element;
+  e('#entryAmount').value='';e('#entryDescription').value='Fictional item';e('#entryDate').value='2026-01-02';e('#entryNotes').value='Keep this note';
+  e('#openAmountCalculator').onclick();
+  for(const key of ['1','+','3','+','5','='])f.press(key);
+  assert.equal(e('#entryAmount').value,'');assert.equal(e('#useCalculatedAmount').disabled,false);
+  assert.match(e('#calculatorResult').textContent,/9/);
+  e('#useCalculatedAmount').onclick();assert.equal(e('#entryAmount').value,'9.00');assert.equal(e('#amountCalculator').hidden,true);
+  assert.equal(e('#entryDescription').value,'Fictional item');assert.equal(e('#entryDate').value,'2026-01-02');assert.equal(e('#entryNotes').value,'Keep this note');
+  e('#openAmountCalculator').onclick();f.press('+');f.press('1');f.press('=');e('#closeAmountCalculator').onclick();
+  assert.equal(e('#entryAmount').value,'9.00');
+});
+
+test('calculator rejects zero, negative, excessive and invalid results, rounds cents and supports chained results',async()=>{
+  const f=await calculatorBrowser(),e=f.element;
+  e('#entryAmount').value='';e('#openAmountCalculator').onclick();
+  for(const keys of [['0','='],['1','−','2','='],['1','÷','0','='],['1','+','=']]){
+    f.press('C');keys.forEach(f.press);assert.equal(e('#useCalculatedAmount').disabled,true);
+    e('#useCalculatedAmount').onclick();assert.equal(e('#entryAmount').value,'');assert.ok(e('#calculatorError').textContent);
+  }
+  f.press('C');for(const key of ['1','÷','3','='])f.press(key);
+  assert.equal(e('#useCalculatedAmount').disabled,false);e('#useCalculatedAmount').onclick();assert.equal(e('#entryAmount').value,'0.33');
+  e('#openAmountCalculator').onclick();f.press('C');['2','+','3','=','×','4','='].forEach(f.press);
+  e('#useCalculatedAmount').onclick();assert.equal(e('#entryAmount').value,'20.00');
+  e('#openAmountCalculator').onclick();f.press('C');['1','0','0','0','0','0','0','0','0','+','1','='].forEach(f.press);
+  assert.equal(e('#useCalculatedAmount').disabled,true);
+});
+
+test('calculator keyboard Enter calculates without submitting and Escape closes only the calculator',async()=>{
+  const f=await calculatorBrowser(),e=f.element;
+  e('#entryAmount').value='';e('#openAmountCalculator').onclick();
+  let prevented=0,stopped=0;
+  const keydown=key=>e('#amountCalculator').onkeydown({key,target:{tagName:'INPUT'},preventDefault(){prevented++},stopPropagation(){stopped++}});
+  ['8','/','2','Enter'].forEach(keydown);assert.equal(prevented,4);assert.equal(e('#entryAmount').value,'');
+  assert.equal(e('#useCalculatedAmount').disabled,false);
+  keydown('Escape');assert.equal(stopped,1);assert.equal(e('#amountCalculator').hidden,true);
+  assert.match(e('#modalContainer').innerHTML,/id="entryForm"/);
+});
+
+test('editing a transaction starts the calculator with its current amount and refreshes it on reopening',async()=>{
+  const f=await calculatorBrowser(),e=f.element,b=f.browser;
+  vm.runInContext('openEntry({...rows()[0],amount:125.5,notes:"Keep saved notes"})',b);
+  e('#amountCalculator').hidden=true;
+  e('#openAmountCalculator').onclick();
+  assert.equal(e('#calculatorExpression').value,'125.5');
+  assert.match(e('#calculatorResult').textContent,/125\.50/);
+  assert.equal(e('#useCalculatedAmount').disabled,false);
+  f.press('+');f.press('5');f.press('=');e('#useCalculatedAmount').onclick();
+  assert.equal(e('#entryAmount').value,'130.50');assert.equal(e('#entryNotes').value,'Keep saved notes');
+  e('#entryAmount').value='250';e('#openAmountCalculator').onclick();
+  assert.equal(e('#calculatorExpression').value,'250');assert.match(e('#calculatorResult').textContent,/250\.00/);
+  e('#closeAmountCalculator').onclick();assert.equal(e('#entryAmount').value,'250');
+});
+
+test('calculator offers amount only or amount with the calculation appended to existing notes',async()=>{
+  const f=await calculatorBrowser(),e=f.element;
+  e('#entryAmount').value='';e('#entryNotes').value='Fictional purchase note';e('#openAmountCalculator').onclick();
+  ['1','+','3','+','5','='].forEach(f.press);
+  assert.equal(e('#useCalculatedAmountWithNotes').disabled,false);
+  e('#useCalculatedAmountWithNotes').onclick();
+  assert.equal(e('#entryAmount').value,'9.00');
+  assert.equal(e('#entryNotes').value,'Fictional purchase note\nCalculation: 1 + 3 + 5 = 9.00');
+  e('#openAmountCalculator').onclick();['+','1','='].forEach(f.press);e('#useCalculatedAmount').onclick();
+  assert.equal(e('#entryAmount').value,'10.00');assert.equal(e('#entryNotes').value,'Fictional purchase note\nCalculation: 1 + 3 + 5 = 9.00');
+});
+
+test('calculator note action handles blank notes, duplicate lines and note limits without losing amount or notes',async()=>{
+  const f=await calculatorBrowser(),e=f.element,b=f.browser;
+  e('#entryAmount').value='';e('#entryNotes').value='';e('#openAmountCalculator').onclick();['2','×','5','='].forEach(f.press);
+  e('#useCalculatedAmountWithNotes').onclick();assert.equal(e('#entryNotes').value,'Calculation: 2 × 5 = 10.00');
+  e('#openAmountCalculator').onclick();f.press('C');['2','×','5','='].forEach(f.press);e('#useCalculatedAmountWithNotes').onclick();
+  assert.equal(e('#entryNotes').value,'Calculation: 2 × 5 = 10.00');
+  vm.runInContext('state.data.config.limits.noteLength=20',b);
+  e('#entryNotes').value='Existing note';e('#openAmountCalculator').onclick();['+','5','='].forEach(f.press);
+  e('#useCalculatedAmountWithNotes').onclick();
+  assert.equal(e('#entryAmount').value,'10.00');assert.equal(e('#entryNotes').value,'Existing note');assert.equal(e('#amountCalculator').hidden,false);
+  assert.match(e('#calculatorError').textContent,/not enough space/);
+  e('#useCalculatedAmount').onclick();assert.equal(e('#entryAmount').value,'15.00');assert.equal(e('#entryNotes').value,'Existing note');
+});
+
+test('both calculator actions remain disabled until a valid positive result is calculated',async()=>{
+  const f=await calculatorBrowser(),e=f.element;
+  e('#entryAmount').value='';e('#entryNotes').value='Keep notes';e('#openAmountCalculator').onclick();
+  for(const keys of [['1','+'],['0','='],['1','÷','0','=']]) {
+    f.press('C');keys.forEach(f.press);assert.equal(e('#useCalculatedAmountWithNotes').disabled,true);
+    e('#useCalculatedAmountWithNotes').onclick();assert.equal(e('#entryNotes').value,'Keep notes');assert.equal(e('#entryAmount').value,'');
+  }
+});
+
+for(const key of ['type','category','method','group','month','quarter']) {
+  test(`All checks every ${key} option, supports excluding items and clears the filter on Apply`,async()=>{
+    const f=await transactionFiltersBrowser(),b=f.browser,e=f.element;
+    let boxes=[];
+    const original=b.document.querySelectorAll.bind(b.document);
+    b.document.querySelectorAll=selector=>{
+      if(selector==='[data-multi-choice]') {
+        boxes=[...e('#modalContainer').innerHTML.matchAll(/id="(transactionChoice-\d+)" data-multi-choice="([^"]+)"/g)].map(([,id,value])=>{
+          const node=e('#'+id);node.dataset.multiChoice=value;return node;
+        });return boxes;
+      }
+      return original(selector);
+    };
+    b.filterKey=key;
+    vm.runInContext('if(filterKey==="type")state.type=[];else state.transactionFilters[filterKey]=[];openTransactionMultiSelect(filterKey)',b);
+    assert.ok(boxes.length>1);assert.ok(boxes.every(box=>box.checked));assert.equal(e('#transactionMultiAll').checked,true);
+    boxes[0].checked=false;boxes[0].onchange();
+    assert.equal(e('#transactionMultiAll').checked,false);assert.equal(e('#transactionMultiAll').indeterminate,true);
+    assert.ok(boxes.slice(1).every(box=>box.checked));
+    const excluded=boxes[0].dataset.multiChoice;
+    e('#applyTransactionMulti').onclick();
+    assert.ok(!Array.from(vm.runInContext('filterKey==="type"?state.type:state.transactionFilters[filterKey]',b)).includes(excluded));
+    vm.runInContext('openTransactionMultiSelect(filterKey)',b);
+    e('#transactionMultiAll').onchange({target:{checked:true}});
+    assert.ok(boxes.every(box=>box.checked));assert.equal(e('#transactionMultiAll').indeterminate,false);
+    e('#transactionMultiAll').onchange({target:{checked:false}});
+    assert.ok(boxes.every(box=>!box.checked));assert.equal(e('#applyTransactionMulti').disabled,true);
+    e('#transactionMultiAll').onchange({target:{checked:true}});e('#applyTransactionMulti').onclick();
+    assert.deepEqual(Array.from(vm.runInContext('filterKey==="type"?state.type:state.transactionFilters[filterKey]',b)),[]);
+    vm.runInContext('openTransactionMultiSelect(filterKey)',b);assert.ok(boxes.every(box=>box.checked));
+  });
+}

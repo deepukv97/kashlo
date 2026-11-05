@@ -69,7 +69,8 @@ Choose **Validate & connect workbook**. Kashlo prepares the template’s tab nam
 1. Click **Add transaction**.
 2. Choose **expense**, **income**, or **investment**.
 3. Choose the transaction’s date. It starts blank so you can enter the correct day.
-4. Enter a description and an amount greater than zero, then choose the category. This applies to expenses, income, and investments. Known descriptions suggest their category automatically.
+4. Enter a description and an amount greater than zero, then choose the category. This applies to expenses, income, and investments. For new entries, an exact known description selects its journal and category automatically. Suggestions include descriptions from all journals. If a description belongs to multiple journals, Kashlo uses the current journal when it has a match. If the matches are only in other journals, choose the journal yourself. Editing an existing entry keeps journal changes manual.
+   To add several costs together, choose **Calculator** below Amount. Enter a calculation such as `1 + 3 + 5`, tap **=**, then choose **Use amount only**, or **Use amount + calculation in notes** to also append the calculation and result to Notes. Existing notes are kept. You can also use subtraction, multiplication, division, and brackets. Results round to two decimal places and must be greater than zero. **Close** keeps the original amount. When editing a transaction, the calculator starts with the current Amount value.
 5. For an expense, optionally choose an **expense group**. For an expense or investment, optionally record how you paid.
 6. Click **Save to Google Sheet**. Wait for the operation to finish, then find the entry under its recorded month.
 
@@ -83,7 +84,7 @@ Open **Transactions**. Search can find descriptions, categories, expense groups,
 
 Below the filters, **Total transactions** and **Total amount** summarize all matching entries across every page. They stay the same when you change pages and update when you change filters or search. Total amount adds matching amounts together; it is not income minus expenses. Transaction notes appear in the journal and directly on mobile cards.
 
-Combine search with these filters. Tap a type, month, quarter, category, payment method, or expense-group selector, tick one or more choices, then choose **Apply selection**. Choices within one filter are combined; different filters narrow the results together. **All** removes that filter. The **Date range** preset and custom **From/To** dates remain single selections. Selected months or quarters can be separated (for example, January and March); entries from the gap are excluded.
+Combine search with these filters. Tap a type, month, quarter, category, payment method, or expense-group selector, tick one or more choices, then choose **Apply selection**. Choices within one filter are combined; different filters narrow the results together. **All** checks every option and removes that filter. Uncheck individual items to narrow the selection. The **Date range** preset and custom **From/To** dates remain single selections. Selected months or quarters can be separated (for example, January and March); entries from the gap are excluded.
 
 - **Journal type:** choose any combination of expense, income, and investment, or **All types**. Category choices include the selected types; **All categories** is always available.
 - **Date range:** selected month, quarter, entire year, or custom dates. Month and quarter selection appear beside the date-range preset.
@@ -103,6 +104,10 @@ Closing the calendar with **×** cancels an unconfirmed choice. **Reset**, follo
 ### Edit or delete an entry
 
 Use **Edit** or **Delete** beside an entry on Overview, Transactions, or Investments. On a phone, tap **Details** first.
+
+To edit several entries, tick their checkboxes and choose **Edit selected**. Check only the fields you want to change, enter their new values, then choose **Review changes → Confirm changes**. Selections on other pages are included. Payment changes replace both the method and account/app; an account/app is optional. Use **Clear payment details**, **Clear expense group**, or **Clear notes** to remove those values explicitly. Unchecked fields stay unchanged.
+
+Category edits require a selection from one journal. Expense groups apply to expenses only, and payment fields apply to expenses and investments. An amount or date change applies the same new value to every selected transaction; the preview shows the selected total before and after an amount change. Individual **Edit** buttons still edit only that transaction.
 
 To delete several entries, tick their checkboxes on Overview, Transactions, or Investments, then choose **Delete selected**. **Select this page** selects only the visible page. Selections stay when moving between pages (up to 500 entries) and reset when changing views or filters, or refreshing. Review the confirmation list before deleting; all selected entries are permanently removed from the sheet.
 

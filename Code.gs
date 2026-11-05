@@ -416,6 +416,7 @@ function clientConfig_(zone) {
     monthStatuses: workspaceConfig_().monthStatuses,
     paymentMethods: workspaceConfig_().paymentMethods,
     limits: {
+      maximumAmount: workspaceConfig_().limits.maximumAmount,
       descriptionLength: workspaceConfig_().limits.descriptionLength,
       noteLength: workspaceConfig_().limits.noteLength,
       groupNameLength: workspaceConfig_().limits.groupNameLength,
@@ -1634,6 +1635,95 @@ function deleteTransactions(input) {
       journals.get(current.sheet).push(current.row);
     });
     return journals;
+  });
+}
+
+// Bulk corrections validate the entire selection before recording a started receipt.
+// Only explicit patch fields are written; unrelated incomplete or historical values survive.
+function updateTransactions(input) {
+  if (!input || input.confirmed !== true) throw new Error("Confirm the selected changes first.");
+  return withWorkspaceWrite_(input, plan => {
+    const c = workspaceConfig_().layout.journal;
+    const journals = new Map();
+    plan.forEach(({ current, patch }) => {
+      if (!journals.has(current.sheet)) journals.set(current.sheet, []);
+      journals.get(current.sheet).push({ row: current.row, patch });
+    });
+    journals.forEach((entries, sheet) => {
+      const fields = [...new Set(entries.flatMap(entry => Object.keys(entry.patch)))];
+      fields.forEach(field => {
+        const values = new Map(entries.filter(entry => Object.prototype.hasOwnProperty.call(entry.patch, field))
+          .map(entry => [entry.row, entry.patch[field]]));
+        consecutiveRows_([...values.keys()]).forEach(({ start, count }) => {
+          const range = sheet.getRange(start, c[field], count, 1);
+          const cells = Array.from({ length: count }, (_, offset) => [values.get(start + offset)]);
+          if (field === "amount" || field === "date") {
+            range.setValues(cells);
+            if (field === "date") range.setNumberFormat(c.dateFormat);
+          } else range.setRichTextValues(cells.map(([value]) =>
+            [SpreadsheetApp.newRichTextValue().setText(String(value)).build()]));
+        });
+      });
+      writeReviewDecisions_(sheet, entries.map(entry => entry.row), "Pending");
+    });
+    return { ok: true, count: plan.length };
+  }, () => {
+    if (!Array.isArray(input.entries) || !input.entries.length || input.entries.length > 500)
+      throw new Error("Select between 1 and 500 transactions.");
+    const changes = input.changes;
+    const fields = ["paymentMethod", "paymentDetail", "category", "trip", "notes", "amount", "date"];
+    if (!changes || typeof changes !== "object" || Array.isArray(changes) ||
+        !Object.keys(changes).length || Object.keys(changes).some(key => !fields.includes(key)))
+      throw new Error("Choose valid fields to update.");
+    const has = key => Object.prototype.hasOwnProperty.call(changes, key);
+    const types = new Set(input.entries.map(entry => entry?.type));
+    if (has("category") && types.size !== 1) throw new Error("Edit categories for one journal at a time.");
+    if (has("trip") && (types.size !== 1 || !types.has("expense"))) throw new Error("Expense groups apply only to expenses.");
+    if ((has("paymentMethod") || has("paymentDetail")) && types.has("income"))
+      throw new Error("Payment details do not apply to income. Select expenses or investments.");
+    const book = book_(), seen = new Set(), choices = new Map();
+    return input.entries.map(entry => {
+      if (!entry || !Object.prototype.hasOwnProperty.call(workspaceConfig_().sheets, entry.type)) throw new Error("Choose a valid journal.");
+      const key = entry.type + ":" + Number(entry.row);
+      if (seen.has(key)) throw new Error("The selection contains a repeated transaction.");
+      seen.add(key);
+      const current = checkedTransaction_(book, entry), patch = {}, c = workspaceConfig_().layout.journal;
+      if (has("amount")) {
+        const amount = Number(changes.amount);
+        if (!isFinite(amount) || amount <= 0 || amount > workspaceConfig_().limits.maximumAmount)
+          throw new Error("Enter a positive amount greater than 0 and within the allowed limit.");
+        patch.amount = amount;
+      }
+      if (has("date")) patch.date = dateSerial_(changes.date);
+      if (has("notes")) {
+        if (typeof changes.notes !== "string" || changes.notes.length > workspaceConfig_().limits.noteLength)
+          throw new Error("Enter notes within the allowed length.");
+        patch.notes = changes.notes;
+      }
+      if (has("category") || has("trip")) {
+        if (!choices.has(entry.type)) {
+          const lookup = requiredSheet_(book, workspaceConfig_().lookupSheets[entry.type]);
+          const lc = workspaceConfig_().layout.lookup;
+          const mappings = mappingRows_(lookup, [lc.categoryOptions, ...(entry.type === "expense" ? [lc.trips] : [])]);
+          choices.set(entry.type, { categories: lookupCategories_(lookup, entry.type, mappings), groups: entry.type === "expense" ? options_(lookup, lc.trips, mappings) : [] });
+        }
+        const allowed = choices.get(entry.type);
+        if (has("category")) {
+          if (typeof changes.category !== "string" || !allowed.categories.includes(changes.category)) throw new Error("Choose a valid category.");
+          patch.category = changes.category;
+        }
+        if (has("trip")) {
+          if (typeof changes.trip !== "string" || (changes.trip && !allowed.groups.includes(changes.trip))) throw new Error("Choose an existing expense group.");
+          patch.trip = changes.trip;
+        }
+      }
+      if (has("paymentMethod") || has("paymentDetail")) {
+        Object.assign(patch, paymentValues_(book, { type: entry.type,
+          paymentMethod: has("paymentMethod") ? changes.paymentMethod : current.values[c.paymentMethod - 1],
+          paymentDetail: has("paymentDetail") ? changes.paymentDetail : has("paymentMethod") ? "" : current.values[c.paymentDetail - 1] }));
+      }
+      return { current, patch };
+    });
   });
 }
 
