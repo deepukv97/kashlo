@@ -1222,8 +1222,22 @@ function withWrite_(requestId, action, prepare) {
   }
 }
 
+// A reusable description belongs to one journal, independent of casing or edge spaces.
+function otherDescriptionJournal_(book, type, name) {
+  const key = normalized_(name), c = workspaceConfig_().layout.lookup;
+  return Object.keys(workspaceConfig_().lookupSheets).find(journal => journal !== type &&
+    mappingRows_(requiredSheet_(book, workspaceConfig_().lookupSheets[journal]))
+      .some(row => normalized_(row[c.description - 1]) === key));
+}
+function assertDescriptionJournal_(book, type, name) {
+  const journal = otherDescriptionJournal_(book, type, name);
+  if (journal) throw new Error('This description already belongs to ' +
+    ({expense:'Expenses',income:'Income',investment:'Investments'})[journal] +
+    '. Choose a different description or use that journal.');
+}
+
 // Share the same validation for new entries and corrections. No cells are changed here.
-function transactionValues_(book, input) {
+function transactionValues_(book, input, recordedDescription = null) {
   const description = String(input.description || "").trim(),
     amount = Number(input.amount),
     date = dateSerial_(input.date),
@@ -1269,6 +1283,10 @@ function transactionValues_(book, input) {
       normalized_(r[lookupColumns.description - 1]) ===
       normalized_(description),
   );
+  const otherJournal = !match && otherDescriptionJournal_(book, input.type, description);
+  // Historical labels can survive a correction/move, but must not create a second mapping.
+  if (otherJournal && normalized_(recordedDescription) !== normalized_(description))
+    assertDescriptionJournal_(book, input.type, description);
   // Removed master choices may be retained only on the same existing transaction.
   const category = String(input.category ||
     (match && match[lookupColumns.category - 1]) ||
@@ -1296,6 +1314,7 @@ function transactionValues_(book, input) {
   return {
     ...payment,
     legacyDescription,
+    rememberDescription: !otherJournal,
     description,
     amount,
     date,
@@ -1360,7 +1379,7 @@ function appendTransaction_(book, sheet, values, type) {
   writeTransaction_(sheet, row, values, type);
   // Remember a genuinely new description once for subsequent automatic categorization.
   // Append a new description/category pair to lookup A:B, extending the lookup sheet if necessary.
-  if (!match && !values.legacyDescription) {
+  if (!match && !values.legacyDescription && values.rememberDescription !== false) {
     let mappingLast = lookupColumns.firstDataRow - 1;
     mappings.forEach((r, i) => {
       if (r[lookupColumns.description - 1].trim())
@@ -1591,7 +1610,7 @@ function updateTransaction(input) {
       target.paymentMethod = current.values[c.paymentMethod - 1];
       target.paymentDetail = current.values[c.paymentDetail - 1];
     }
-    return { book, current, values: transactionValues_(book, target) };
+    return { book, current, values: transactionValues_(book, target, current.values[workspaceConfig_().layout.journal.description - 1]) };
   });
 }
 
@@ -2435,6 +2454,13 @@ function addLookupOption(input) {
         ]);
     }
     return { ok: true, created: true, name };
+  }, () => {
+    if (input.kind === "description") {
+      const book = book_(), c = workspaceConfig_().layout.lookup;
+      const exists = mappingRows_(requiredSheet_(book, workspaceConfig_().lookupSheets[input.type]))
+        .some(row => normalized_(row[c.description - 1]) === normalized_(name));
+      if (!exists) assertDescriptionJournal_(book, input.type, name);
+    }
   });
 }
 
@@ -2570,6 +2596,7 @@ function managedChoicePlan_(input) {
     if (matches.some(r => r[c.category - 1].trim() !== input.previousCategory))
       throw new Error("This description changed. Refresh the app.");
     if (input.action === "edit") {
+      if (!same(name, newName)) assertDescriptionJournal_(book, input.type, newName);
       category = String(input.category || "").trim();
       if (!categories.includes(category)) throw new Error("Choose a valid category.");
       const aliases = input.type === "expense" && book.getSheetByName(workspaceConfig_().legacyItemAliasesSheet);

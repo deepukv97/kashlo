@@ -506,6 +506,7 @@ for (const year of [2026, 2027, 2028]) {
     const investment = api.addTransaction({
       ...input,
       requestId: `investment_request_${year}`,
+      description: "New investment item",
       type: "investment",
       category: "",
     });
@@ -518,6 +519,7 @@ for (const year of [2026, 2027, 2028]) {
     api.addTransaction({
       ...input,
       requestId: `income_request_${year}`,
+      description: "New income item",
       type: "income",
       amount: 10,
       trip: "",
@@ -1977,7 +1979,7 @@ test("payment storage expands trimmed journals without moving existing cells and
     );
     const result = api.addTransaction({
       type,
-      description: "Paid in cash",
+      description: "Paid in cash " + type,
       amount: "25",
       date: "2026-10-15",
       category: type === "investment" ? "Investments" : "Food",
@@ -2329,6 +2331,7 @@ test("income saves without payment metadata and expenses can leave payment optio
   api.addTransaction({
     ...payload,
     type: "expense",
+    description: "Optional payment expense",
     paymentMethod: "",
     paymentDetail: "",
     requestId: "expense_optional_payment",
@@ -2339,7 +2342,7 @@ test("income saves without payment metadata and expenses can leave payment optio
       .transactions.some(
         (t) =>
           t.type === "expense" &&
-          t.description === "Income source" &&
+          t.description === "Optional payment expense" &&
           t.paymentMethod === "",
       ),
   );
@@ -2430,7 +2433,7 @@ test("Manage adds journal-specific choices, rejects remapping, and preserves adj
     const request = {
       kind: "description",
       type,
-      name: "  New choice  ",
+      name: "  New choice " + type + "  ",
       category: type === "investment" ? "Investments" : "Food",
       requestId: "manage_description_" + type,
     };
@@ -2438,7 +2441,7 @@ test("Manage adds journal-specific choices, rejects remapping, and preserves adj
     assert.equal(api.addLookupOption(request).created, true); // Cached receipt, no second write.
     const data = api.getData();
     assert.equal(
-      data.mappings[type].filter((r) => r.description === "New choice").length,
+      data.mappings[type].filter((r) => r.description === "New choice " + type).length,
       1,
     );
     assert.deepEqual(
@@ -2448,7 +2451,7 @@ test("Manage adds journal-specific choices, rejects remapping, and preserves adj
     assert.equal(
       api.addLookupOption({
         ...request,
-        name: "new CHOICE",
+        name: "new CHOICE " + type,
         requestId: "manage_duplicate_" + type,
       }).created,
       false,
@@ -2714,7 +2717,7 @@ test("custom payment types persist separately, deduplicate, and work with option
   for (const type of ["expense", "investment"]) {
     const payload = {
       type,
-      description: "Custom type purchase",
+      description: "Custom type purchase " + type,
       amount: "200",
       date: "2026-10-18",
       category: type === "expense" ? "Food" : "Investments",
@@ -6448,7 +6451,8 @@ for (const [sourceType,type] of [["expense","investment"],["investment","expense
     assert.equal(moved.description,source.description);assert.equal(moved.amount,123.45);assert.equal(moved.date,source.date);
     assert.equal(moved.notes,"Preserve notes");assert.equal(moved.paymentMethod,"UPI");assert.equal(moved.paymentDetail,"Example app");
     assert.equal(moved.trip,type==="expense"?"2026 Holiday":"");assert.equal(moved.decision,"Pending");assert.equal(moved.reviewNote,"Preserve review note");
-    assert.ok(data.mappings[type].some(m=>m.description===source.description));
+    assert.ok(!data.mappings[type].some(m=>m.description===source.description));
+    assert.ok(data.mappings[sourceType].some(m=>m.description===source.description));
     assert.equal(data.transactions.filter(t=>t.description===source.description).length,1);
   });
 }
@@ -7000,3 +7004,57 @@ for(const key of ['type','category','method','group','month','quarter']) {
     vm.runInContext('openTransactionMultiSelect(filterKey)',b);assert.ok(boxes.every(box=>box.checked));
   });
 }
+
+for(const owner of ['expense','income','investment']) {
+  for(const target of ['expense','income','investment'].filter(type=>type!==owner)) {
+    test(`saved descriptions cannot be copied from ${owner} to ${target}, ignoring case and surrounding spaces`,()=>{
+      const f=fixture(),api=f.context;
+      api.addLookupOption({kind:'description',type:owner,name:'Exclusive fictional name',category:owner==='investment'?'Investments':'Food',requestId:'unique_owner_'+owner});
+      const before=JSON.stringify(Object.values(f.sheets).map(s=>s.cells));
+      const input={kind:'description',type:target,name:'  EXCLUSIVE FICTIONAL NAME  ',newCategory:'Blocked category',requestId:'unique_target_'+target};
+      assert.throws(()=>api.addLookupOption(input),/already belongs to/);
+      assert.equal(JSON.stringify(Object.values(f.sheets).map(s=>s.cells)),before);
+      assert.equal(f.properties['request:'+input.requestId],undefined);
+      assert.equal(api.addLookupOption({...input,name:'Different fictional name'}).created,true);
+      assert.equal(api.addLookupOption({...input,name:'Different fictional name'}).created,true);
+    });
+  }
+}
+
+test('renaming a saved description rejects names owned by another journal without changing mappings or consuming the request',()=>{
+  const f=fixture(),api=f.context;
+  api.addLookupOption({kind:'description',type:'investment',name:'Portfolio contribution',category:'Investments',requestId:'unique_rename_owner'});
+  const input={kind:'description',action:'edit',type:'expense',name:'Known item',newName:' portfolio CONTRIBUTION ',previousCategory:'Food',category:'Food',requestId:'unique_rename_attempt'};
+  const before=JSON.stringify(Object.values(f.sheets).map(s=>s.cells));
+  assert.throws(()=>api.manageChoice(input),/already belongs to Investments/);
+  assert.equal(JSON.stringify(Object.values(f.sheets).map(s=>s.cells)),before);
+  assert.equal(f.properties['request:'+input.requestId],undefined);
+  assert.equal(api.manageChoice({...input,newName:'Lunch purchase'}).ok,true);
+});
+
+test('transactions cannot create a description in another journal, including edits, but can retry corrected names',()=>{
+  const f=fixture(),api=f.context;
+  api.addLookupOption({kind:'description',type:'investment',name:'Portfolio contribution',category:'Investments',requestId:'unique_transaction_owner'});
+  const input={type:'expense',description:' PORTFOLIO Contribution ',amount:10,date:'2026-01-04',category:'Food',requestId:'unique_transaction_save'};
+  api.getData();
+  const before=JSON.stringify(Object.values(f.sheets).map(s=>s.cells));
+  assert.throws(()=>api.addTransaction(input),/already belongs to Investments/);
+  const entry=api.getData().transactions[0];
+  assert.throws(()=>api.updateTransaction({...input,row:entry.row,fingerprint:entry.fingerprint,requestId:'unique_transaction_edit'}),/already belongs to/);
+  assert.equal(JSON.stringify(Object.values(f.sheets).map(s=>s.cells)),before);
+  assert.equal(f.properties['request:'+input.requestId],undefined);
+  assert.equal(api.addTransaction({...input,description:'Distinct purchase'}).ok,true);
+});
+
+test('moving a transaction preserves its historical name without creating a duplicate saved description',()=>{
+  const f=fixture(),api=f.context;
+  const created=api.addTransaction({type:'expense',description:'Fictional journal move',amount:30,date:'2026-01-04',category:'Food',requestId:'unique_move_setup'});
+  const current=api.getData().transactions.find(t=>t.type==='expense'&&t.row===created.row);
+  const result=api.updateTransaction({...current,sourceType:'expense',type:'investment',category:'Investments',requestId:'unique_move_transaction'});
+  const data=api.getData();
+  assert.ok(data.mappings.expense.some(m=>m.description===current.description));
+  assert.ok(!data.mappings.investment.some(m=>m.description===current.description));
+  const moved=data.transactions.find(t=>t.type==='investment'&&t.row===result.row);
+  assert.equal(moved.description,current.description);
+  assert.equal(api.updateTransaction({...moved,amount:35,requestId:'unique_move_correction'}).ok,true);
+});
