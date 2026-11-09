@@ -6771,7 +6771,7 @@ test('bulk edit validates every fingerprint and patch before writing and allows 
   const f=bulkEditFixture(),{api}=f,entries=f.entries();
   const input={entries,changes:{amount:0},confirmed:true,requestId:'bulk_edit_validation_request'};
   const before=JSON.stringify(Object.values(f.sheets).map(s=>s.cells));
-  for(const changes of [{amount:0},{amount:-5},{amount:'bad'},{date:'2026-02-30'},{date:'2027-01-01'},{category:''},{category:'Missing'},{trip:'Missing'},{notes:'x'.repeat(f.config.limits.noteLength+1)},{paymentMethod:'Unknown'},{paymentMethod:'UPI',paymentDetail:'Unknown'}, {description:'Forbidden'},{}]){
+  for(const changes of [{amount:0},{amount:-5},{amount:'bad'},{date:'2026-02-30'},{date:'2027-01-01'},{category:''},{category:'Missing'},{trip:'Missing'},{notes:'x'.repeat(f.config.limits.noteLength+1)},{paymentMethod:'Unknown'},{paymentMethod:'UPI',paymentDetail:'Unknown'}, {unsupportedField:'Forbidden'},{}]){
     assert.throws(()=>api.updateTransactions({...input,changes}));
   }
   assert.throws(()=>api.updateTransactions({...input,changes:{amount:10},entries:[entries[0],{...entries[1],fingerprint:'stale'}]}),/changed/);
@@ -6809,10 +6809,10 @@ test('bulk edit partial failures retain retry protection',()=>{
 async function bulkEditBrowser() {
   const f=await descriptionJournalBrowser(),b=f.browser,e=f.element;
   const original=b.document.querySelectorAll;
-  b.document.querySelectorAll=selector=>selector==='[data-bulk-field]' ? ['payment','category','trip','notes','amount','date'].map(key=>{
+  b.document.querySelectorAll=selector=>selector==='[data-bulk-field]' ? ['description','payment','category','trip','notes','amount','date'].map(key=>{
     const box=e('#bulkUse-'+key);box.dataset={bulkField:key};box.style={};box.checked=false;box.disabled=false;return box;
   }):original(selector);
-  for(const key of ['payment','category','trip','notes','amount','date']) e('#bulkFields-'+key).querySelectorAll=()=>[];
+  for(const key of ['description','payment','category','trip','notes','amount','date']) e('#bulkFields-'+key).querySelectorAll=()=>[];
   vm.runInContext('state.data.transactions.push({...rows()[0],row:30,fingerprint:"offpage-30"},{...rows()[0],row:60,fingerprint:"offpage-60"});selectedTransactions.clear();rows().forEach(t=>selectedTransactions.set(t.type+":"+t.row,t));openSelectedEdit()',b);
   let submitted;
   b.google.script.run.updateTransactions=input=>{submitted=input;b.google.script.run.success({ok:true,count:input.entries.length});};
@@ -7057,4 +7057,74 @@ test('moving a transaction preserves its historical name without creating a dupl
   const moved=data.transactions.find(t=>t.type==='investment'&&t.row===result.row);
   assert.equal(moved.description,current.description);
   assert.equal(api.updateTransaction({...moved,amount:35,requestId:'unique_move_correction'}).ok,true);
+});
+
+test('bulk description edits update selected records only, preserve other fields and mappings, and replay safely',()=>{
+  const f=bulkEditFixture(),{api}=f,c=f.config.layout.journal;
+  api.addTransaction({type:'expense',description:'Keep separate record',amount:18,date:'2026-01-09',category:'Food',requestId:'bulk_description_unselected'});
+  const before=api.getData(),entries=f.entries().slice(0,2),other=before.transactions.find(t=>t.row===4);
+  const input={entries,changes:{description:'  Corrected purchase  '},confirmed:true,requestId:'bulk_description_correct'};
+  const start=f.expense.operations.length;
+  assert.equal(api.updateTransactions(input).count,2);
+  const after=api.getData();
+  for(const t of after.transactions.filter(t=>t.row!==4)) {
+    const old=before.transactions.find(x=>x.row===t.row);
+    assert.equal(t.description,'Corrected purchase');assert.equal(t.decision,'Pending');
+    for(const field of ['date','amount','category','trip','notes','paymentMethod','paymentDetail'])assert.equal(t[field],old[field]);
+  }
+  assert.equal(JSON.stringify(after.transactions.find(t=>t.row===4)),JSON.stringify(other));
+  assert.equal(JSON.stringify(after.mappings),JSON.stringify(before.mappings));
+  assert.ok(f.expense.operations.slice(start).some(op=>op.kind==='richText'&&op.col===c.description&&op.height===2));
+  const snapshot=JSON.stringify(f.expense.cells);assert.equal(api.updateTransactions(input).count,2);assert.equal(JSON.stringify(f.expense.cells),snapshot);
+});
+
+test('bulk description validation rejects blanks, oversized names, cross-journal conflicts, mixed journals, and stale rows before writes',()=>{
+  const f=bulkEditFixture(),{api}=f;
+  api.addLookupOption({kind:'description',type:'investment',name:'Fictional fund',category:'Investments',requestId:'bulk_description_other_owner'});
+  api.addTransaction({type:'income',description:'Fictional salary',category:'Food',amount:90,date:'2026-01-06',requestId:'bulk_description_mixed_setup'});
+  const entries=f.entries().filter(t=>t.type==='expense'),input={entries,changes:{description:''},confirmed:true,requestId:'bulk_description_validation'};
+  const snapshot=JSON.stringify(Object.values(f.sheets).map(s=>s.cells));
+  for(const description of ['', '  ',null,42,'x'.repeat(f.config.limits.descriptionLength+1),' FICTIONAL FUND '])assert.throws(()=>api.updateTransactions({...input,changes:{description}}));
+  assert.throws(()=>api.updateTransactions({...input,entries:f.entries(),changes:{description:'New name'}}),/one journal/);
+  assert.throws(()=>api.updateTransactions({...input,entries:[entries[0],{...entries[1],fingerprint:'stale'}],changes:{description:'New name'}}),/changed/);
+  assert.equal(JSON.stringify(Object.values(f.sheets).map(s=>s.cells)),snapshot);assert.equal(f.properties['request:'+input.requestId],undefined);
+  assert.equal(api.updateTransactions({...input,changes:{description:'=Literal purchase'}}).count,2);
+  assert.ok(api.getData().transactions.filter(t=>t.type==='expense').every(t=>t.description==='=Literal purchase'));
+});
+
+test('bulk description edits freeze formula-derived categories unless Category is explicitly selected',()=>{
+  const f=bulkEditFixture(),{api}=f,c=f.config.layout.journal;
+  api.getData();const entries=f.entries(),original=f.expense.getRange.bind(f.expense);
+  f.expense.getRange(2,c.category).setFormula('=IF(B2="Known item","Food","Different category")');
+  f.expense.getRange=(...args)=>{
+    const range=original(...args),read=range.getValues;
+    if(args[0]===2&&args[1]===1&&args[3]===api.journalWidth_())range.getValues=()=>{const values=read();values[0][c.category-1]='Food';return values;};
+    return range;
+  };
+  // Compute a fresh fingerprint from the effective row, as Sheets does in production.
+  const values=f.expense.getRange(2,1,1,api.journalWidth_()).getValues()[0];
+  entries[0].fingerprint=api.fingerprint_(values,f.book.getSpreadsheetTimeZone(),f.expense.getMaxRows());
+  const start=f.expense.operations.length;
+  api.updateTransactions({entries,changes:{description:'Another purchase'},confirmed:true,requestId:'bulk_description_freeze_category'});
+  assert.equal(f.expense.cells[1][c.category-1],'Food');
+  const writes=f.expense.operations.slice(start).filter(op=>op.kind==='richText');
+  assert.ok(writes.findIndex(op=>op.col===c.category)<writes.findIndex(op=>op.col===c.description));
+  assert.equal(f.expense.getRange(2,c.category).getFormula(),'');
+  f.expense.getRange=original;
+  api.addLookupOption({kind:'category',type:'expense',name:'Travel',requestId:'bulk_description_new_category'});
+  const fresh=f.entries();
+  api.updateTransactions({entries:fresh,changes:{description:'Travel purchase',category:'Travel'},confirmed:true,requestId:'bulk_description_and_category'});
+  assert.ok(api.getData().transactions.every(t=>t.description==='Travel purchase'&&t.category==='Travel'));
+});
+
+test('bulk description UI requires a name, escapes its preview, and submits only the chosen field across pages',async()=>{
+  const f=await bulkEditBrowser(),e=f.element;
+  assert.match(e('#modalContainer').innerHTML,/Update Description/);
+  e('#bulkUse-description').checked=true;e('#bulkUse-description').onchange();
+  e('#bulkDescription').value='  ';await e('#bulkEditForm').onsubmit({preventDefault(){}});assert.match(e('#bulkEditError').textContent,/Enter a description/);
+  e('#bulkDescription').value=' <b>Corrected purchase</b> ';await e('#bulkEditForm').onsubmit({preventDefault(){}});
+  assert.match(e('#bulkEditPreview').innerHTML,/Description: &lt;b&gt;Corrected purchase&lt;\/b&gt;/);assert.equal(f.submission(),undefined);
+  await e('#bulkEditForm').onsubmit({preventDefault(){}});
+  assert.deepEqual(JSON.parse(JSON.stringify(f.submission().changes)),{description:'<b>Corrected purchase</b>'});
+  assert.equal(f.submission().entries.length,3);
 });

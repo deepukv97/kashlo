@@ -5944,13 +5944,14 @@
         const types = new Set(selected.map(t => t.type));
         const singleType = types.size === 1 ? selected[0].type : "";
         const config = settings(), requestId = id();
-        const labels = { payment: "Payment method and account / app", category: "Category", trip: "Expense group", notes: "Notes", amount: "Amount", date: "Date" };
+        const labels = { description: "Description", payment: "Payment method and account / app", category: "Category", trip: "Expense group", notes: "Notes", amount: "Amount", date: "Date" };
         const field = (key, controls, disabled = false, help = "") =>
           '<div class="field full"><label><input type="checkbox" id="bulkUse-' + key + '" data-bulk-field="' + key + '"' + (disabled ? ' disabled' : '') + '> Update ' + esc(labels[key]) + '</label>' +
           (help ? '<small>' + esc(help) + '</small>' : '') + '<div id="bulkFields-' + key + '" hidden>' + controls + '</div></div>';
         const select = (id, label, values) => '<label for="' + id + '">' + esc(label) + '</label><select id="' + id + '">' + values + '</select>';
         $("#modalContainer").innerHTML = '<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="bulkEditTitle"><div class="modal-head"><h2 id="bulkEditTitle">Edit ' + entries.length + ' transactions</h2><button type="button" class="close" aria-label="Close dialog">×</button></div>' +
           '<p>Only checked fields will change. Your selection includes transactions on other pages.</p><form id="bulkEditForm"><div id="bulkEditFields" class="formgrid">' +
+          field('description', '<label for="bulkDescription">New description for every selected transaction</label><input id="bulkDescription" type="text" maxlength="' + config.limits.descriptionLength + '" autocomplete="off" placeholder="Enter a description">', !singleType, !singleType ? 'Select one journal to update descriptions.' : 'The same description will be applied to all selected transactions. Categories stay unchanged unless you also select Category.') +
           field('payment', select('bulkPaymentMethod', 'Payment method', '<option value="">Clear payment details</option>' + selectOptions(paymentMethods(), '')) + select('bulkPaymentDetail', 'Account / app (optional)', '<option value="">No account / app</option>'), types.has('income'), types.has('income') ? 'Select expenses or investments to update payment details.' : 'The chosen method and account / app replace both payment fields.') +
           field('category', select('bulkCategory', 'Category', '<option value="">Choose a category</option>' + selectOptions(state.data?.categories?.[singleType] || [], '')), !singleType, !singleType ? 'Select one journal to update categories.' : '') +
           field('trip', select('bulkTrip', 'Expense group', '<option value="">Clear expense group</option>' + selectOptions(state.data?.trips || [], '')), singleType !== 'expense', singleType !== 'expense' ? 'Select expenses only to update expense groups.' : '') +
@@ -5989,6 +5990,13 @@
           if (!patch) {
             const changes = {}, summary = [];
             const use = key => $("#bulkUse-" + key).checked && !$("#bulkUse-" + key).disabled;
+            if (use('description')) {
+              changes.description = $("#bulkDescription").value.trim();
+              if (!changes.description || changes.description.length > config.limits.descriptionLength) {
+                $("#bulkEditError").textContent = 'Enter a description up to ' + config.limits.descriptionLength + ' characters.'; return;
+              }
+              summary.push('Description: ' + changes.description + ' for every selected transaction');
+            }
             if (use('payment')) {
               changes.paymentMethod = $("#bulkPaymentMethod").value;
               changes.paymentDetail = !changes.paymentMethod || changes.paymentMethod === 'Cash' ? '' : $("#bulkPaymentDetail").value;

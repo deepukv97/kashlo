@@ -1669,7 +1669,10 @@ function updateTransactions(input) {
       journals.get(current.sheet).push({ row: current.row, patch });
     });
     journals.forEach((entries, sheet) => {
-      const fields = [...new Set(entries.flatMap(entry => Object.keys(entry.patch)))];
+      // Freeze/replace categories before descriptions so a later write failure cannot
+      // leave a category formula recalculated from a new description.
+      const fields = [...new Set(entries.flatMap(entry => Object.keys(entry.patch)))]
+        .sort((a, b) => Number(b === "category") - Number(a === "category"));
       fields.forEach(field => {
         const values = new Map(entries.filter(entry => Object.prototype.hasOwnProperty.call(entry.patch, field))
           .map(entry => [entry.row, entry.patch[field]]));
@@ -1690,23 +1693,39 @@ function updateTransactions(input) {
     if (!Array.isArray(input.entries) || !input.entries.length || input.entries.length > 500)
       throw new Error("Select between 1 and 500 transactions.");
     const changes = input.changes;
-    const fields = ["paymentMethod", "paymentDetail", "category", "trip", "notes", "amount", "date"];
+    const fields = ["description", "paymentMethod", "paymentDetail", "category", "trip", "notes", "amount", "date"];
     if (!changes || typeof changes !== "object" || Array.isArray(changes) ||
         !Object.keys(changes).length || Object.keys(changes).some(key => !fields.includes(key)))
       throw new Error("Choose valid fields to update.");
     const has = key => Object.prototype.hasOwnProperty.call(changes, key);
     const types = new Set(input.entries.map(entry => entry?.type));
+    if (has("description") && types.size !== 1) throw new Error("Edit descriptions for one journal at a time.");
     if (has("category") && types.size !== 1) throw new Error("Edit categories for one journal at a time.");
     if (has("trip") && (types.size !== 1 || !types.has("expense"))) throw new Error("Expense groups apply only to expenses.");
     if ((has("paymentMethod") || has("paymentDetail")) && types.has("income"))
       throw new Error("Payment details do not apply to income. Select expenses or investments.");
     const book = book_(), seen = new Set(), choices = new Map();
+    let description;
+    if (has("description")) {
+      if (typeof changes.description !== "string" || !changes.description.trim() ||
+          changes.description.trim().length > workspaceConfig_().limits.descriptionLength)
+        throw new Error("Enter a description within the allowed length.");
+      description = changes.description.trim();
+      assertDescriptionJournal_(book, input.entries[0]?.type, description);
+    }
     return input.entries.map(entry => {
       if (!entry || !Object.prototype.hasOwnProperty.call(workspaceConfig_().sheets, entry.type)) throw new Error("Choose a valid journal.");
       const key = entry.type + ":" + Number(entry.row);
       if (seen.has(key)) throw new Error("The selection contains a repeated transaction.");
       seen.add(key);
       const current = checkedTransaction_(book, entry), patch = {}, c = workspaceConfig_().layout.journal;
+      if (has("description")) {
+        patch.description = description;
+        // A native sheet formula may derive category from description. Preserve its
+        // recorded value when Category was not explicitly selected for this edit.
+        if (!has("category") && current.sheet.getRange(current.row, c.category).getFormula())
+          patch.category = current.values[c.category - 1] ?? "";
+      }
       if (has("amount")) {
         const amount = Number(changes.amount);
         if (!isFinite(amount) || amount <= 0 || amount > workspaceConfig_().limits.maximumAmount)
