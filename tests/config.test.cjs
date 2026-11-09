@@ -7128,3 +7128,31 @@ test('bulk description UI requires a name, escapes its preview, and submits only
   assert.deepEqual(JSON.parse(JSON.stringify(f.submission().changes)),{description:'<b>Corrected purchase</b>'});
   assert.equal(f.submission().entries.length,3);
 });
+
+test('bulk descriptions prefill the shared existing name and suggest only saved descriptions from that journal',async()=>{
+  const f=await bulkEditBrowser(),e=f.element,b=f.browser;
+  assert.equal(e('#bulkDescription').value,'Known item');
+  assert.match(e('#modalContainer').innerHTML,/list="bulkKnownDescriptions"/);
+  e('#bulkDescription').value='';e('#bulkDescription').oninput();
+  assert.match(e('#bulkKnownDescriptions').innerHTML,/Lunch/);
+  assert.doesNotMatch(e('#bulkKnownDescriptions').innerHTML,/Monthly salary|Example portfolio/);
+  vm.runInContext('state.data.mappings.expense.push({description:"Luggage",category:"Food"},{description:"<Lunch & drink>",category:"Food"})',b);
+  vm.runInContext('openSelectedEdit()',b);
+  e('#bulkDescription').value=' lu ';e('#bulkDescription').oninput();
+  assert.match(e('#bulkKnownDescriptions').innerHTML,/Lunch|Luggage/);
+  e('#bulkDescription').value='LUNCH';e('#bulkDescription').oninput();assert.equal(e('#bulkKnownDescriptions').innerHTML,'');
+  e('#bulkDescription').value='';e('#bulkDescription').oninput();
+  assert.match(e('#bulkKnownDescriptions').innerHTML,/&lt;Lunch &amp; drink&gt;/);
+  e('#bulkDescription').value='xyz';e('#bulkDescription').oninput();assert.equal(e('#bulkKnownDescriptions').innerHTML,'');
+});
+
+test('bulk descriptions leave mixed names blank and preserve categories when a saved suggestion is chosen',async()=>{
+  const f=await bulkEditBrowser(),e=f.element,b=f.browser;
+  vm.runInContext('state.data.transactions[1].description="Different entry";selectedTransactions.clear();rows().forEach(t=>selectedTransactions.set(t.type+":"+t.row,t));openSelectedEdit()',b);
+  assert.equal(e('#bulkDescription').value,'');assert.match(e('#bulkKnownDescriptions').innerHTML,/Lunch/);
+  e('#bulkUse-description').checked=true;e('#bulkDescription').value='Lunch';e('#bulkDescription').oninput();
+  await e('#bulkEditForm').onsubmit({preventDefault(){}});
+  assert.match(e('#bulkEditPreview').innerHTML,/Description: Lunch/);
+  await e('#bulkEditForm').onsubmit({preventDefault(){}});
+  assert.deepEqual(JSON.parse(JSON.stringify(f.submission().changes)),{description:'Lunch'});
+});

@@ -5951,7 +5951,7 @@
         const select = (id, label, values) => '<label for="' + id + '">' + esc(label) + '</label><select id="' + id + '">' + values + '</select>';
         $("#modalContainer").innerHTML = '<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="bulkEditTitle"><div class="modal-head"><h2 id="bulkEditTitle">Edit ' + entries.length + ' transactions</h2><button type="button" class="close" aria-label="Close dialog">×</button></div>' +
           '<p>Only checked fields will change. Your selection includes transactions on other pages.</p><form id="bulkEditForm"><div id="bulkEditFields" class="formgrid">' +
-          field('description', '<label for="bulkDescription">New description for every selected transaction</label><input id="bulkDescription" type="text" maxlength="' + config.limits.descriptionLength + '" autocomplete="off" placeholder="Enter a description">', !singleType, !singleType ? 'Select one journal to update descriptions.' : 'The same description will be applied to all selected transactions. Categories stay unchanged unless you also select Category.') +
+          field('description', '<label for="bulkDescription">Description for selected transactions</label><input id="bulkDescription" type="text" maxlength="' + config.limits.descriptionLength + '" list="bulkKnownDescriptions" autocomplete="off" placeholder="Choose or type a description"><datalist id="bulkKnownDescriptions"></datalist><small>Type to find a saved description, or clear the field to see all saved descriptions.</small>', !singleType, !singleType ? 'Select one journal to update descriptions.' : 'The same description will be applied to all selected transactions. Categories stay unchanged unless you also select Category.') +
           field('payment', select('bulkPaymentMethod', 'Payment method', '<option value="">Clear payment details</option>' + selectOptions(paymentMethods(), '')) + select('bulkPaymentDetail', 'Account / app (optional)', '<option value="">No account / app</option>'), types.has('income'), types.has('income') ? 'Select expenses or investments to update payment details.' : 'The chosen method and account / app replace both payment fields.') +
           field('category', select('bulkCategory', 'Category', '<option value="">Choose a category</option>' + selectOptions(state.data?.categories?.[singleType] || [], '')), !singleType, !singleType ? 'Select one journal to update categories.' : '') +
           field('trip', select('bulkTrip', 'Expense group', '<option value="">Clear expense group</option>' + selectOptions(state.data?.trips || [], '')), singleType !== 'expense', singleType !== 'expense' ? 'Select expenses only to update expense groups.' : '') +
@@ -5959,6 +5959,21 @@
           field('amount', '<label for="bulkAmount">New amount for each transaction</label><input id="bulkAmount" type="number" inputmode="decimal" min="0.01" step="0.01" max="' + config.limits.maximumAmount + '"><small>Every selected transaction will have this same amount.</small>') +
           field('date', '<label for="bulkDate">New date for each transaction</label><input id="bulkDate" type="date" min="' + config.year + '-01-01" max="' + config.year + '-12-31">') +
           '</div><div id="bulkEditPreview" hidden></div><p id="bulkEditError" class="formerror" role="alert"></p><div class="modal-footer"><button type="button" class="button outline" id="cancelBulkEdit">Cancel</button><button type="button" class="button outline" id="backBulkEdit" hidden>Back</button><button class="button" id="saveBulkEdit">Review changes</button></div></form></section></div>';
+        const description = $("#bulkDescription");
+        const normalizedDescription = text => String(text || '').trim().toLowerCase();
+        const existing = String(selected[0].description || '').trim();
+        description.value = selected.every(entry => normalizedDescription(entry.description) === normalizedDescription(existing)) ? existing : '';
+        const names = [...new Map((state.data?.mappings?.[singleType] || []).map(mapping =>
+          [normalizedDescription(mapping.description), String(mapping.description || '').trim()]))
+          .values()].filter(Boolean).sort((a, b) => a.localeCompare(b));
+        const suggestDescriptions = () => {
+          const query = normalizedDescription(description.value);
+          $("#bulkKnownDescriptions").innerHTML = query && names.some(name => normalizedDescription(name) === query) ? '' :
+            names.filter(name => normalizedDescription(name).startsWith(query))
+              .map(name => '<option value="' + esc(name) + '"></option>').join('');
+        };
+        description.oninput = suggestDescriptions;
+        suggestDescriptions();
         // Checkboxes retain their natural size rather than inheriting full-width field inputs.
         document.querySelectorAll('[data-bulk-field]').forEach(box => {
           box.style.width = '22px'; box.style.height = '22px'; box.style.padding = '0'; box.style.verticalAlign = 'middle'; box.style.marginRight = '8px';
