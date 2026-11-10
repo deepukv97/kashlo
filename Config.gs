@@ -41,7 +41,7 @@ const FINANCE = Object.freeze({
   categories: { investment: "Investments", travel: "Travel" },
   // These describe checks implemented in the workbook's formulas, not in this script.
   reviewHelp:
-    "Possible duplicates have the same journal, date, description, amount, and recorded payment details. Description and payment text ignore case and extra whitespace. “Okay” accepts the matching duplicate group and keeps every amount. Use “Correct transaction” to edit an entry, or “Delete duplicate” to remove only the selected entry after confirmation.",
+    "Possible duplicates are grouped by matching journal, date, description, amount, and recorded payment details. “Okay” keeps the whole duplicate group. “Delete duplicate” removes the chosen entry after confirmation. Missing or invalid details appear under Needs correction; use “Correct transaction” to fix them.",
   monthStatuses: ["Not reviewed", "In progress", "Complete", "Not started"],
 
   // Worksheet coordinates are one-based: A = 1, B = 2, etc.

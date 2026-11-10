@@ -107,7 +107,7 @@ Use **Edit** or **Delete** beside an entry on Overview, Transactions, or Investm
 
 To edit several entries, tick their checkboxes and choose **Edit selected**. Check only the fields you want to change, enter their new values, then choose **Review changes → Confirm changes**. Selections on other pages are included. Payment changes replace both the method and account/app; an account/app is optional. Use **Clear payment details**, **Clear expense group**, or **Clear notes** to remove those values explicitly. Unchecked fields stay unchanged.
 
-Category edits require a selection from one journal. Expense groups apply to expenses only, and payment fields apply to expenses and investments. An amount or date change applies the same new value to every selected transaction; the preview shows the selected total before and after an amount change. Individual **Edit** buttons still edit only that transaction.
+Description and category edits require a selection from one journal. **Update Description** applies the same name to every selected entry. It starts with the existing description when all selected entries share it. Type to find a saved description from that journal, or clear the field to see all saved choices. It keeps each recorded category unless you also check **Update Category**; saved description lists are not renamed by this action. Names already saved in another journal are rejected. Expense groups apply to expenses only, and payment fields apply to expenses and investments. An amount or date change applies the same new value to every selected transaction; the preview shows the selected total before and after an amount change. Individual **Edit** buttons still edit only that transaction.
 
 To delete several entries, tick their checkboxes on Overview, Transactions, or Investments, then choose **Delete selected**. **Select this page** selects only the visible page. Selections stay when moving between pages (up to 500 entries) and reset when changing views or filters, or refreshing. Review the confirmation list before deleting; all selected entries are permanently removed from the sheet.
 
@@ -129,7 +129,7 @@ Removing a payment account / app deletes it from the reusable list and clears it
 
 ### Organize descriptions, categories, and expense groups
 
-**Manage → Descriptions:** choose the journal, enter a description, and choose its category. Saved descriptions appear A–Z. Use the search box above the saved list to find a description or category. For any journal, **+ Add new category** lets you create the category without leaving this section.
+**Manage → Descriptions:** choose the journal, enter a description, and choose its category. Each saved description name can belong to only one journal; capitalisation and surrounding spaces do not make it a different name. Kashlo checks this when adding or renaming descriptions and when new transactions create a saved description. Saved descriptions appear A–Z. Use the search box above the saved list to find a description or category. For any journal, **+ Add new category** lets you create the category without leaving this section.
 
 **Manage → Categories:** add categories for expenses, income, or investments. Use **Edit** or **Remove** beside any saved description or category, including the initial choices. Editing a description lets you change its name and category. Renaming a category updates its saved description mappings and all matching existing transactions in that journal, for expenses, income, and investments. Removing a description or category clears that field from matching transactions in the selected journal. Those transactions appear in **Review** as **Missing description** or **Missing category**. Removing a category also clears it from saved description mappings, which remain available to edit. Confirm removals in the pop-up.
 
@@ -149,16 +149,16 @@ Select a saved group when adding an expense. **Dashboards → Expense groups →
 
 Investment totals show money contributed, not current portfolio value or returns. Surplus/shortfall is recorded income minus expenses and investment contributions, not your bank balance. Avoid counting an aggregate group payment and its itemized expenses twice.
 
-### Review possible duplicates
+### Review issues and possible duplicates
 
-Open **Review**. A possible duplicate means the same journal has matching date, description, amount, and recorded payment details. Repeating a description on another day or for a different amount is allowed.
+Open **Review**. **Needs correction** lists missing or invalid details with an explanation and a **Correct transaction** button. It does not show Okay or Delete duplicate actions. **Possible duplicate groups** shows matching entries together in separate boxes, including accepted entries for comparison when needed. A possible duplicate means the same journal has matching date, description, amount, and recorded payment details. Repeating a description on another day or for a different amount is allowed. Each duplicate group has one optional review note, saved for its members when accepted.
 
 | Action                    | What happens                                                                                                                                    |
 | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Okay**                  | Accepts the matching duplicate group. All entries and amounts stay.                                                                             |
 | **Correct transaction**   | Opens the chosen entry for editing.                                                                                                             |
 | **Delete duplicate**      | Asks for confirmation before removing that chosen entry.                                                                                        |
-| **Okay all**              | Asks for confirmation, then accepts the current review entries without deleting amounts.                                                        |
+| **Okay all duplicate groups** | Asks for confirmation, then accepts pending duplicate groups without changing correction-only entries or amounts.                                                        |
 | **Delete all duplicates** | Asks for confirmation, then removes extra copies in each pending duplicate group, keeping the earliest sheet row. Already accepted groups stay. |
 
 Other problems, such as a missing category, still need correction even after Okay. Kashlo does not automatically delete entries. If a save or deletion has an uncertain result, refresh and check the sheet before starting another attempt.

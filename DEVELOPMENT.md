@@ -128,4 +128,14 @@ Google Sheets does not provide an atomic operation across journals. If destinati
 
 ## Bulk transaction corrections
 
-`updateTransactions` accepts up to 500 fingerprinted entries and an explicit field patch. It validates workspace revision, every selected row, journal restrictions, and all changed values before recording the started write receipt. Unchecked fields, formulas, mappings, and review notes are preserved. Compatible consecutive cells are written together; changed transactions return to Pending review. Text uses rich-text writes to prevent formula execution. Completed requests replay their saved result. If a write fails partway through, earlier writes may remain and the started receipt blocks replay; users must refresh and inspect the results before starting a new edit.
+`updateTransactions` accepts up to 500 fingerprinted entries and an explicit field patch. It validates workspace revision, every selected row, journal restrictions, and all changed values before recording the started write receipt. Unchecked fields, mappings, and review notes are preserved. Description patches require one journal and enforce cross-journal naming checks. When Category is unchecked, a formula-derived category is frozen to its recorded value before the description changes; explicitly selected categories replace it. Other formulas remain intact. Compatible consecutive cells are written together; changed transactions return to Pending review. Text uses rich-text writes to prevent formula execution. Completed requests replay their saved result. If a write fails partway through, earlier writes may remain and the started receipt blocks replay; users must refresh and inspect the results before starting a new edit.
+
+
+## Unique saved descriptions
+
+New reusable descriptions and description renames are checked across the other journal lookup lists under the write lock, using trimmed, case-insensitive names. Category names can still be reused. Existing mappings are not migrated automatically. Corrections and journal moves may retain their recorded description; a move does not create a second saved mapping when another journal already owns that name. Client payloads cannot opt out of this check.
+
+
+## Review presentation
+
+Review uses server-provided `duplicateGroup` identifiers to draw separate matching groups, including accepted members as comparison context. Visual grouping preserves the flagged snapshot's action indexes and note IDs. Only pending duplicate candidates offer deletion, and a lone loaded member offers no duplicate deletion. Missing/invalid details show correction guidance instead of Okay or duplicate deletion. Bulk Okay changes only exact pending duplicate groups; standalone correction decisions and notes remain untouched. Monthly completeness remains below the review queue.
