@@ -28,7 +28,7 @@ Owner and workbook settings live under `kashlo:workspace:v1` in Script Propertie
 
 ## Share or deploy the project
 
-Each person needs their own copied workbook and Apps Script project, deployed while signed into their own Google account with access **Only myself**. Do not publish one owner-executed deployment for multiple people's finances. If using clasp, copy **.clasp.example.json** to **.clasp.json** and replace the placeholder with **your own Apps Script project ID** from Apps Script → Project settings before uploading. The workbook URL is selected later during first-time setup. The real `.clasp.json` is local deployment configuration and must not be committed.
+Make your own copy of the Kashlo workbook. Open its attached Apps Script project and deploy it using your Google account. Under **Who has access**, select **Only myself** so only the Google account you use to deploy the app can open your finance app. Do not publish one owner-executed deployment for multiple people's finances. If using clasp, copy **.clasp.example.json** to **.clasp.json** and replace the placeholder with **your own Apps Script project ID** from Apps Script → Project settings before uploading. The workbook URL is selected later during first-time setup. The real `.clasp.json` is local deployment configuration and must not be committed.
 
 ```sh
 cp .clasp.example.json .clasp.json
