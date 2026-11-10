@@ -149,16 +149,16 @@ Select a saved group when adding an expense. **Dashboards → Expense groups →
 
 Investment totals show money contributed, not current portfolio value or returns. Surplus/shortfall is recorded income minus expenses and investment contributions, not your bank balance. Avoid counting an aggregate group payment and its itemized expenses twice.
 
-### Review possible duplicates
+### Review issues and possible duplicates
 
-Open **Review**. A possible duplicate means the same journal has matching date, description, amount, and recorded payment details. Repeating a description on another day or for a different amount is allowed.
+Open **Review**. **Needs correction** lists missing or invalid details with an explanation and a **Correct transaction** button. It does not show Okay or Delete duplicate actions. **Possible duplicate groups** shows matching entries together in separate boxes, including accepted entries for comparison when needed. A possible duplicate means the same journal has matching date, description, amount, and recorded payment details. Repeating a description on another day or for a different amount is allowed. Each duplicate group has one optional review note, saved for its members when accepted.
 
 | Action                    | What happens                                                                                                                                    |
 | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Okay**                  | Accepts the matching duplicate group. All entries and amounts stay.                                                                             |
 | **Correct transaction**   | Opens the chosen entry for editing.                                                                                                             |
 | **Delete duplicate**      | Asks for confirmation before removing that chosen entry.                                                                                        |
-| **Okay all**              | Asks for confirmation, then accepts the current review entries without deleting amounts.                                                        |
+| **Okay all duplicate groups** | Asks for confirmation, then accepts pending duplicate groups without changing correction-only entries or amounts.                                                        |
 | **Delete all duplicates** | Asks for confirmation, then removes extra copies in each pending duplicate group, keeping the earliest sheet row. Already accepted groups stay. |
 
 Other problems, such as a missing category, still need correction even after Okay. Kashlo does not automatically delete entries. If a save or deletion has an uncertain result, refresh and check the sheet before starting another attempt.

@@ -4267,8 +4267,8 @@ test("bulk Okay accepts all exact groups and preserves amounts and other validat
     entries: f.entries,
     requestId: "bulk_okay_request",
   };
-  assert.equal(f.api.bulkReview(input).count, 10);
-  assert.equal(f.api.bulkReview(input).count, 10);
+  assert.equal(f.api.bulkReview(input).count, 9);
+  assert.equal(f.api.bulkReview(input).count, 9);
   const after = f.api.getData().transactions;
   assert.deepEqual(
     Array.from(after, (t) => t.amount),
@@ -4283,6 +4283,7 @@ test("bulk Okay accepts all exact groups and preserves amounts and other validat
     1,
   );
   assert.equal(after[0].reviewNote, "Intentional payments");
+  assert.equal(after.find(t => t.type === "expense" && t.row === 5).decision, "Pending");
 });
 
 test("bulk delete keeps one per group across all journals, preserves unrelated records and retries safely", () => {
@@ -4464,6 +4465,7 @@ test("bulk Review UI confirms counts, sends notes and snapshot, and reuses reque
     browser.calls[1].payload.entries[0].note,
     "Keep this review note",
   );
+  assert.ok(browser.calls[1].payload.entries.every(entry => entry.note === "Keep this review note"));
   assert.equal(element("#modalContainer").innerHTML, "");
   vm.runInContext('openBulkReview("okay", reviewRows());', browser);
   assert.match(
@@ -7155,4 +7157,84 @@ test('bulk descriptions leave mixed names blank and preserve categories when a s
   assert.match(e('#bulkEditPreview').innerHTML,/Description: Lunch/);
   await e('#bulkEditForm').onsubmit({preventDefault(){}});
   assert.deepEqual(JSON.parse(JSON.stringify(f.submission().changes)),{description:'Lunch'});
+});
+
+const reviewRecord = (row, overrides = {}) => ({type:'expense',row,description:'Fictional purchase',date:'2026-01-05',amount:25,category:'Food',paymentMethod:'',paymentDetail:'',issues:[],decision:'Pending',reviewNote:'',fingerprint:'review-fp-'+row,duplicateGroup:'',...overrides});
+
+test('correction-only Review shows issue explanations and correction without duplicate actions',async()=>{
+  const f=await transactionFiltersBrowser(),b=f.browser;
+  b.data.transactions=[reviewRecord(2,{category:'',issues:['Missing category']})];
+  const html=vm.runInContext('review()',b);
+  assert.match(html,/Needs correction/);assert.match(html,/Choose the correct category/);
+  assert.match(html,/data-correct="0"/);assert.match(html,/Monthly completeness/);
+  assert.doesNotMatch(html,/data-delete=|data-okay=|id="okayAll"|id="deleteAllDuplicates"/);
+  assert.doesNotMatch(html,/class="review-duplicate-group"/);
+});
+
+test('Review separates exact server duplicate groups, shows accepted context, and retains other issues inside a group',async()=>{
+  const f=await transactionFiltersBrowser(),b=f.browser;
+  b.data.transactions=[
+    reviewRecord(2,{duplicateGroup:'exact-a',decision:'Okay'}),
+    reviewRecord(8,{duplicateGroup:'exact-b',paymentMethod:'Cash',issues:['Possible duplicate']}),
+    reviewRecord(4,{issues:['Missing description'],description:''}),
+    reviewRecord(9,{duplicateGroup:'exact-a',category:'',issues:['Possible duplicate','Missing category']}),
+    reviewRecord(10,{duplicateGroup:'exact-b',paymentMethod:'Cash',issues:['Possible duplicate']}),
+    reviewRecord(12,{description:'<Invalid & item>',issues:['Invalid date'],date:''}),
+  ];
+  const html=vm.runInContext('review()',b);
+  const groups=[...html.matchAll(/<section class="review-duplicate-group"[\s\S]*?<\/section>/g)].map(m=>m[0]);
+  assert.equal(groups.length,2);
+  const a=groups.find(group=>group.includes('row 2')),other=groups.find(group=>group.includes('row 8'));
+  assert.ok(a.includes('row 9'));assert.ok(!a.includes('row 8'));assert.match(a,/Already accepted/);assert.match(a,/Missing category/);
+  assert.ok(other.includes('row 10'));assert.ok(!other.includes('row 9'));
+  assert.equal((html.match(/data-okay=/g)||[]).length,2);
+  assert.equal((html.match(/id="note_\d+"/g)||[]).length,2);
+  assert.equal((html.match(/data-delete=/g)||[]).length,3);
+  assert.match(html,/&lt;Invalid &amp; item&gt;/);assert.match(html,/Check and correct the transaction date/);
+  const correctionSection=html.slice(html.indexOf('<section aria-label="Transactions needing correction">'));
+  assert.doesNotMatch(correctionSection,/data-delete=|data-okay=/);
+  assert.equal((html.match(/data-review-key="expense:9"/g)||[]).length,1);
+  assert.deepEqual(b.data.transactions.map(t=>t.row),[2,8,4,9,10,12]);
+});
+
+test('grouped Review buttons use the original flagged indexes for edits, deletions, and group acceptance',async()=>{
+  const f=await transactionFiltersBrowser(),b=f.browser,e=f.element;
+  b.data.transactions=[reviewRecord(3,{description:'A correction',issues:['Missing category'],category:''}),
+    reviewRecord(7,{duplicateGroup:'exact-group',issues:['Possible duplicate']}),
+    reviewRecord(9,{duplicateGroup:'exact-group',issues:['Possible duplicate']})];
+  const original=b.document.querySelectorAll.bind(b.document),buttons={};
+  b.document.querySelectorAll=selector=>{
+    const action=selector.match(/^\[data-(okay|correct|delete)\]$/)?.[1];
+    if(!action)return original(selector);
+    buttons[action]=[...e('#content').innerHTML.matchAll(new RegExp('data-'+action+'="(\\d+)"','g'))].map(([,index])=>{
+      const button=e('#review-'+action+'-'+index);button.dataset={[action]:index};return button;
+    });return buttons[action];
+  };
+  vm.runInContext('state.view="review";render();openEntry=t=>{selectedEntry=t};openDelete=t=>{selectedEntry=t};refresh=async()=>{};rpc=async(name,payload)=>{captured={name,payload}}',b);
+  buttons.correct[0].onclick();assert.equal(b.selectedEntry.row,7);
+  buttons.delete[1].onclick();assert.equal(b.selectedEntry.row,9);
+  buttons.correct[2].onclick();assert.equal(b.selectedEntry.row,3);
+  await buttons.okay[0].onclick();assert.equal(b.captured.name,'setReview');
+  assert.equal(b.captured.payload.row,7);assert.deepEqual(Array.from(b.captured.payload.entries,t=>t.row),[7,9]);
+});
+
+test('a lone duplicate flag cannot offer deleting the only loaded matching entry',async()=>{
+  const f=await transactionFiltersBrowser(),b=f.browser;
+  b.data.transactions=[reviewRecord(2,{duplicateGroup:'stale-group',issues:['Possible duplicate']})];
+  const html=vm.runInContext('review()',b);
+  assert.match(html,/Only one matching entry is loaded/);assert.match(html,/data-okay=/);
+  assert.doesNotMatch(html,/data-delete=|id="deleteAllDuplicates"/);
+});
+
+test('bulk Okay leaves a correction-only queue and its saved notes unchanged',()=>{
+  const f=fixture(),api=f.context,c=f.config.layout.journal;
+  f.expense.getRange(2,c.duplicateIssue).setValue('');
+  f.expense.getRange(2,c.category).setValue('');
+  f.expense.getRange(2,c.reviewNote).setValue('Fictional correction note');
+  const loaded=api.getData(),entry=loaded.transactions[0];
+  const entries=loaded.transactions.map(({type,row,fingerprint,decision,reviewNote,duplicateGroup})=>({type,row,fingerprint,decision,reviewNote,duplicateGroup,note:'Must not replace correction note'}));
+  const before=JSON.stringify(f.expense.cells);
+  assert.equal(api.bulkReview({action:'okay',entries,requestId:'review_corrections_only_okay'}).count,0);
+  assert.equal(JSON.stringify(f.expense.cells),before);
+  assert.ok(entry.issues.includes('Missing category'));
 });

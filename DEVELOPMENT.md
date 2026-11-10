@@ -134,3 +134,8 @@ Google Sheets does not provide an atomic operation across journals. If destinati
 ## Unique saved descriptions
 
 New reusable descriptions and description renames are checked across the other journal lookup lists under the write lock, using trimmed, case-insensitive names. Category names can still be reused. Existing mappings are not migrated automatically. Corrections and journal moves may retain their recorded description; a move does not create a second saved mapping when another journal already owns that name. Client payloads cannot opt out of this check.
+
+
+## Review presentation
+
+Review uses server-provided `duplicateGroup` identifiers to draw separate matching groups, including accepted members as comparison context. Visual grouping preserves the flagged snapshot's action indexes and note IDs. Only pending duplicate candidates offer deletion, and a lone loaded member offers no duplicate deletion. Missing/invalid details show correction guidance instead of Okay or duplicate deletion. Bulk Okay changes only exact pending duplicate groups; standalone correction decisions and notes remain untouched. Monthly completeness remains below the review queue.

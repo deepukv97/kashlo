@@ -1921,9 +1921,9 @@ function bulkReview(input) {
     );
     let affected;
     if (input.action === "okay") {
-      affected = entries.filter(
-        (entry) => entry.pending || entry.other || groups.has(entry.group),
-      );
+      // Okay is meaningful only for exact duplicate groups; correction-only rows
+      // must retain their decisions and notes until their underlying data is fixed.
+      affected = entries.filter((entry) => groups.has(entry.group));
       const notes = new Map(
         input.entries.map((entry) => [
           entry.type + ":" + entry.row,

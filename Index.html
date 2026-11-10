@@ -1271,6 +1271,15 @@
         letter-spacing: -0.6px;
         font-weight: 600;
       }
+      .review-section-title { font-size: 17px; margin: 24px 0 10px; }
+      .review-section-help { color: var(--muted); font-size: 12px; line-height: 1.7; margin: 10px 0 16px; }
+      .review-duplicate-group { border: 1px solid #596442; background: #b7eb6710; border-radius: 14px; padding: 16px; margin-bottom: 20px; min-width: 0; }
+      .review-duplicate-group .cardhead { flex-wrap: wrap; align-items: center; }
+      .review-duplicate-group h3 { font-size: 14px; margin: 0; }
+      .review-amount { float: right; margin-left: 12px; font-variant-numeric: tabular-nums; }
+      .review-issues { display: flex; flex-wrap: wrap; gap: 6px; }
+      .review-guidance { color: var(--muted); font-size: 12px; line-height: 1.7; padding-left: 18px; }
+      .reviewitem > div { min-width: 0; overflow-wrap: anywhere; }
       .reviewitem {
         display: grid;
         grid-template-columns: 1fr auto;
@@ -4567,79 +4576,79 @@
           )
           .map(({ entry }) => entry);
       }
+      const pendingReviewDuplicate = entry => !!entry.duplicateGroup && entry.decision !== "Okay" &&
+        (entry.issues || []).some(issue => /duplicate/i.test(issue));
+      function reviewIssueHelp(issue) {
+        const text = String(issue).toLowerCase();
+        if (text.includes('description')) return 'Enter a description for this transaction.';
+        if (text.includes('category')) return 'Choose the correct category for this transaction.';
+        if (text.includes('date')) return 'Check and correct the transaction date.';
+        if (text.includes('amount')) return 'Enter the correct amount, greater than zero.';
+        if (text.includes('incomplete')) return 'Fill in the missing transaction details.';
+        return 'Check the transaction details and correct this issue.';
+      }
+      // Group only by the server's exact duplicate key; accepted members are comparison context.
+      function reviewSections(flagged) {
+        const members = new Map(), groups = new Map(), corrections = [];
+        rows().forEach(entry => {
+          if (entry.duplicateGroup) {
+            if (!members.has(entry.duplicateGroup)) members.set(entry.duplicateGroup, []);
+            members.get(entry.duplicateGroup).push(entry);
+          }
+        });
+        flagged.forEach(entry => {
+          if (pendingReviewDuplicate(entry)) {
+            if (!groups.has(entry.duplicateGroup)) groups.set(entry.duplicateGroup,
+              members.get(entry.duplicateGroup) || [entry]);
+          } else corrections.push(entry);
+        });
+        // A row with another issue may also be shown inside a pending duplicate group.
+        const grouped = new Set([...groups.values()].flat().map(entry => entry.type + ':' + entry.row));
+        return { groups: [...groups.values()].map(entries => entries.slice().sort((a,b) => a.row - b.row)),
+          corrections: corrections.filter(entry => !grouped.has(entry.type + ':' + entry.row)) };
+      }
       // Render records with nonempty server-supplied issues and the twelve month-completeness controls.
       // Duplicate/check rules are evaluated by the source sheet and getData, not recalculated here.
       function review(flagged = reviewRows()) {
-        // Use the shared grouped order so button indexes match the rendered entries and notes.
-        let output =
-          '<div class="notice">' +
-          esc(
-            settings()?.reviewHelp ||
-              "Connect to load the workbook review guidance.",
-          ) +
-          '</div><div class="card"><div class="cardhead"><div><h2>Entries to look over</h2><p>The exact date and amount, with a decision you control.</p></div><span class="pill warn">' +
-          flagged.length +
-          " entries</span></div>";
-        if (flagged.length)
-          output +=
-            '<div class="reviewactions" style="margin-bottom:20px"><button class="button light" id="okayAll">✓ Okay all</button><button class="button outline" id="deleteAllDuplicates" ' +
-            (flagged.some(
-              (entry) => entry.duplicateGroup && entry.decision !== "Okay",
-            )
-              ? ""
-              : "disabled") +
-            ">Delete all duplicates</button></div>";
-        // Each review button stores its index into flagged; notes preserve the last saved review text.
-        output += flagged.length
-          ? flagged
-              .map(
-                (t, i) =>
-                  '<article class="reviewitem"><div><span class="pill warn">' +
-                  esc(t.issues.join(" · ")) +
-                  "</span><h3>" +
-                  esc(t.description || "Missing description") +
-                  ' <span style="float:right;margin-right:15px">' +
-                  money(t.amount) +
-                  "</span></h3><p>" +
-                  esc(dateLabel(t.date)) +
-                  " · " +
-                  esc(t.type) +
-                  " · " +
-                  esc(t.category || "Missing category") +
-                  (visiblePaymentMethod(t)
-                    ? " · " +
-                      esc(visiblePaymentMethod(t)) +
-                      (visiblePaymentDetail(t)
-                        ? " · " + esc(visiblePaymentDetail(t))
-                        : "")
-                    : "") +
-                  " · row " +
-                  t.row +
-                  '</p><input aria-label="Review note for ' +
-                  esc(t.description) +
-                  '" id="note_' +
-                  i +
-                  '" placeholder="Optional note" value="' +
-                  esc(t.reviewNote) +
-                  '"></div><div class="reviewactions"><button class="button light" data-okay="' +
-                  i +
-                  '" ' +
-                  (!loaded() ? "disabled" : "") +
-                  '>✓ Okay</button><button class="button outline" data-correct="' +
-                  i +
-                  '">Correct transaction</button><button class="button outline" data-delete="' +
-                  i +
-                  '">Delete duplicate</button></div></article>',
-              )
-              .join("")
-          : empty(
-              loaded()
-                ? "Nothing pending here"
-                : "Your review queue will appear here",
-              loaded()
-                ? "No entries currently need review. Acknowledged duplicates remain in the original journals."
-                : "Connect the app to see dates, amounts, and unresolved checks.",
-            );
+        const sections = reviewSections(flagged);
+        const indexes = new Map(flagged.map((entry, i) => [entry.type + ':' + entry.row, i]));
+        const rowMarkup = (t, duplicate = false, deletable = false) => {
+          const i = indexes.get(t.type + ':' + t.row);
+          const context = i === undefined;
+          const issues = (t.issues || []).filter(issue => !/duplicate/i.test(issue));
+          return '<article class="reviewitem" data-review-key="' + esc(t.type + ':' + t.row) + '"><div>' +
+            (issues.length ? '<div class="review-issues">' + issues.map(issue => '<span class="pill red">' + esc(issue) + '</span>').join(' ') + '</div>' :
+              '<span class="pill ' + (context ? 'green' : 'warn') + '">' + (context ? 'Already accepted' : 'Possible duplicate') + '</span>') +
+            '<h3>' + esc(t.description || 'Missing description') + '<span class="review-amount">' + money(t.amount) + '</span></h3><p>' +
+            esc(dateLabel(t.date)) + ' · ' + esc(t.type) + ' · ' + esc(t.category || 'Missing category') +
+            (visiblePaymentMethod(t) ? ' · ' + esc(visiblePaymentMethod(t)) + (visiblePaymentDetail(t) ? ' · ' + esc(visiblePaymentDetail(t)) : '') : '') +
+            ' · row ' + t.row + '</p>' +
+            (issues.length ? '<ul class="review-guidance">' + [...new Set(issues.map(reviewIssueHelp))].map(help => '<li>' + esc(help) + '</li>').join('') + '</ul>' : '') +
+            (t.reviewNote ? '<p>Review note: ' + esc(t.reviewNote) + '</p>' : '') +
+            (context ? '<p>Shown for comparison with the entries needing review.</p>' : '') +
+            '</div>' + (context ? '' : '<div class="reviewactions"><button class="button outline" data-correct="' + i + '">Correct transaction</button>' +
+              (duplicate && deletable && pendingReviewDuplicate(t) ? '<button class="button danger" data-delete="' + i + '">Delete duplicate</button>' : '') + '</div>') + '</article>';
+        };
+        let output = '<div class="notice">' + esc(settings()?.reviewHelp || 'Connect to load the workbook review guidance.') +
+          '</div><div class="card"><div class="cardhead"><div><h2>Entries to look over</h2><p>Resolve missing details or compare matching entries before deciding.</p></div><span class="pill warn">' +
+          flagged.length + (flagged.length === 1 ? ' entry' : ' entries') + '</span></div>';
+        if (sections.groups.length) output += '<div class="reviewactions" style="margin-bottom:20px"><button class="button light" id="okayAll">✓ Okay all duplicate groups</button>' +
+          (sections.groups.some(group => group.length > 1) ? '<button class="button danger" id="deleteAllDuplicates">Delete all duplicates</button>' : '') + '</div>';
+        if (sections.groups.length) {
+          output += '<h3 class="review-section-title">Possible duplicate groups <span class="pill warn">' + sections.groups.length + '</span></h3><p class="review-section-help">Compare the entries in each box. Okay keeps the whole group. Delete duplicate removes only the chosen entry after confirmation.</p>';
+          sections.groups.forEach((group, index) => {
+            const pending = group.find(pendingReviewDuplicate), i = indexes.get(pending.type + ':' + pending.row);
+            output += '<section class="review-duplicate-group" aria-labelledby="duplicateGroupTitle-' + index + '"><div class="cardhead"><div><h3 id="duplicateGroupTitle-' + index + '">Duplicate group ' + (index + 1) + ' · ' + group.length + (group.length === 1 ? ' entry' : ' matching entries') + '</h3><p>Same journal, date, description, amount and recorded payment details.</p></div><button class="button light" data-okay="' + i + '">✓ Okay — keep ' + (group.length > 1 ? 'all entries' : 'entry') + '</button></div>' +
+              (group.length < 2 ? '<p class="review-section-help">Only one matching entry is loaded. Refresh before deleting any duplicate.</p>' : '') +
+              (group.some(entry => (entry.issues || []).some(issue => !/duplicate/i.test(issue))) ? '<p class="review-section-help">This group also has details to correct. Okay accepts the duplicate warning; other issues still need correction.</p>' : '') +
+              '<div class="field"><label for="note_' + i + '">Review note for this duplicate group (optional)</label><input id="note_' + i + '" maxlength="' + (settings()?.limits?.noteLength ?? '') + '" value="' + esc(pending.reviewNote) + '"></div>' +
+              group.map(entry => rowMarkup(entry, true, group.length > 1)).join('') + '</section>';
+          });
+        }
+        if (sections.corrections.length) output += '<section aria-label="Transactions needing correction"><h3 class="review-section-title">Needs correction <span class="pill red">' + sections.corrections.length + '</span></h3><p class="review-section-help">Fix the details below to clear these issues. Accepting a duplicate warning does not resolve missing or invalid information.</p>' +
+          sections.corrections.map(entry => rowMarkup(entry)).join('') + '</section>';
+        if (!flagged.length) output += empty(loaded() ? 'Nothing pending here' : 'Your review queue will appear here',
+          loaded() ? 'No entries currently need review. Acknowledged duplicates remain in the original journals.' : 'Connect the app to see dates, amounts, and unresolved checks.');
         // Month controls use zero-based data-month indexes locally; handlers convert them before calling the server.
         output +=
           '</div><div class="card" style="margin-top:23px"><div class="cardhead"><div><h2>Monthly completeness</h2><p>Only you can confirm that every transaction has been entered.</p></div></div><div class="tablewrap"><table><thead><tr><th>Month</th><th>Record status</th></tr></thead><tbody>' +
@@ -5218,7 +5227,7 @@
           state.trip = "";
           render();
         });
-        // Use the same records and ordering as the rendered review list.
+        // Review actions keep indexes into the flagged snapshot even when grouped visually.
         // Handle review actions using the matching issue record, physical row, and loaded fingerprint.
         $("#okayAll")?.addEventListener("click", () =>
           openBulkReview("okay", flagged),
@@ -5233,6 +5242,7 @@
               const i = Number(b.dataset.okay),
                 t = flagged[i],
                 decision = "Okay";
+              if (!t || !pendingReviewDuplicate(t)) return;
               // Block another review/entry save while this review request is in flight.
               state.saveBusy = true;
               b.disabled = true;
@@ -5241,8 +5251,7 @@
                 row: t.row,
                 fingerprint: t.fingerprint,
                 decision,
-                // Use server-defined groups so monthly investment checks use the
-                // same membership as the worksheet; include fingerprints for every row.
+                // Use the exact server-defined group and include every member's fingerprint.
                 entries: (t.duplicateGroup
                   ? rows().filter(
                       (entry) => entry.duplicateGroup === t.duplicateGroup,
@@ -5280,8 +5289,8 @@
         });
         document.querySelectorAll("[data-delete]").forEach((button) => {
           button.onclick = () => {
-            if (!state.saveBusy)
-              openDelete(flagged[Number(button.dataset.delete)]);
+            const entry = flagged[Number(button.dataset.delete)];
+            if (!state.saveBusy && entry && pendingReviewDuplicate(entry)) openDelete(entry);
           };
         });
         // Send month index + 1 to the server; restore the previous displayed status if saving fails.
@@ -6138,13 +6147,14 @@
       }
       // Capture one immutable snapshot and request ID per confirmation, including unsaved review notes.
       function openBulkReview(action, flagged) {
-        if (state.saveBusy || !loaded()) return;
-        const notes = new Map(
-          flagged.map((entry, i) => [
-            entry.type + ":" + entry.row,
-            $("#note_" + i).value,
-          ]),
-        );
+        if (state.saveBusy || !loaded() || !flagged.some(pendingReviewDuplicate)) return;
+        const notes = new Map();
+        reviewSections(flagged).groups.forEach(group => {
+          const first = group.find(pendingReviewDuplicate);
+          const i = flagged.findIndex(entry => entry.type === first.type && entry.row === first.row);
+          const note = $("#note_" + i)?.value;
+          group.forEach(entry => notes.set(entry.type + ':' + entry.row, note));
+        });
         const entries = rows().map((entry) => ({
           type: entry.type,
           row: entry.row,
@@ -6158,7 +6168,7 @@
         const pending = new Set(
           flagged
             .filter(
-              (entry) => entry.duplicateGroup && entry.decision !== "Okay",
+              pendingReviewDuplicate,
             )
             .map((entry) => entry.duplicateGroup),
         );
@@ -6178,7 +6188,7 @@
           deleting = action === "delete";
         $("#modalContainer").innerHTML =
           '<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="bulkTitle"><div class="modal-head"><h2 id="bulkTitle">' +
-          (deleting ? "Delete all duplicates?" : "Mark all as Okay?") +
+          (deleting ? "Delete all duplicates?" : "Accept all duplicate groups?") +
           '</h2><button class="close" aria-label="Close dialog">×</button></div><div class="notice warning">' +
           (deleting
             ? "Permanently delete " +
@@ -6186,11 +6196,11 @@
               " extra transaction(s) from your sheet and totals. Keep the earliest entry in each of " +
               groups.size +
               " matching duplicate group(s). Other entries are kept."
-            : "Accept all entries currently in Review, keeping every transaction and amount unchanged. Duplicate warnings will clear. Missing or invalid details still need correction, just as with the individual Okay button.") +
+            : "Accept all pending duplicate groups, keeping every transaction and amount unchanged. Duplicate warnings will clear. Missing or invalid details still need correction.") +
           '</div><div class="formerror" id="bulkError"></div><div class="modal-footer"><button class="button outline" id="cancelBulk">Cancel</button><button class="button ' +
           (deleting ? "danger" : "") +
           '" id="confirmBulk">' +
-          (deleting ? "Delete " + count + " duplicate(s)" : "Okay all") +
+          (deleting ? "Delete " + count + " duplicate(s)" : "Okay all duplicate groups") +
           "</button></div></section></div>";
         const close = () => {
           if (!state.saveBusy) $("#modalContainer").innerHTML = "";
@@ -6215,7 +6225,7 @@
               deleting
                 ? result.count +
                     " duplicate(s) deleted. One entry per group kept."
-                : "Entries marked Okay. All amounts are unchanged.",
+                : "Duplicate groups marked Okay. All amounts are unchanged.",
             );
             await refresh();
           } catch (error) {
