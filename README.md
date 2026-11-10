@@ -53,3 +53,7 @@ Run the regression checks with Node.js:
 ```sh
 node --test tests/config.test.cjs
 ```
+
+## License
+
+Kashlo is available under the [MIT License](LICENSE).
