@@ -2,6 +2,34 @@
 
 For ordinary installation and daily use, follow [SETUP.md](SETUP.md). This reference is for people changing the code or adapting the workbook layout.
 
+## Modern web guidance and browser checks
+
+UI changes follow [Google's Modern Web Guidance](https://github.com/GoogleChrome/modern-web-guidance-src), using its [published skill](https://github.com/GoogleChrome/modern-web-guidance/tree/main/skills/modern-web-guidance). The skill is a development aid, not a dependency downloaded by Kashlo users. Repository instructions require consulting relevant guides for future browser UI work.
+
+In Codex, ask: **“Use Modern Web Guidance to improve this screen, keeping Kashlo's existing behaviour and Apps Script compatibility.”** When the skill is installed locally, it is available starting with the next turn. On another computer, install it using the repository's skill installer, or run `npx modern-web-guidance@latest install` and select your coding agent. The guidance CLI requires Node.js 22 or newer; the app itself still runs in the browser and Apps Script.
+
+To look up a pattern yourself:
+
+```sh
+npx -y modern-web-guidance@latest search "modal dialog focus"
+npx -y modern-web-guidance@latest retrieve "dialog"
+```
+
+For local verification, use Node.js 20 or newer and run:
+
+```sh
+npm ci
+npx playwright install chromium webkit
+npm test
+npm run test:browser
+```
+
+The browser suite runs Chromium on desktop and an Android-sized viewport, plus WebKit with an iPhone viewport. It tests native dialog focus and dismissal, save guards, positive-amount validation, calendar confirmation, filters and pagination, deletion confirmation, navigation resizing, reduced motion, and small viewports. It also exercises Manage and bulk actions and runs the UI inside a sandboxed test iframe. RPCs use fictional records; the suite does not access Google or a real workbook. Screenshots, traces, and reports stay ignored by Git.
+
+Dialogs use `showModal()` and the native backdrop; calendar redraws retain the same dialog element so native focus return survives. Saves use `closedby="none"` plus a `cancel` guard for browsers without `closedby`. Dialog scroll containment is progressive enhancement: Safari may still scroll the background over a non-scrolling backdrop. Root overflow is not changed for dialogs. The mobile navigation uses a manual popover with the existing focus and inert handling because it becomes a normal sidebar on desktop. Unsupported Popover APIs retain the fixed-position menu behaviour. Viewport sizing responds to the visual viewport as mobile browser chrome or the keyboard changes.
+
+Before release, also check a real iPhone and Android phone inside the deployed Apps Script app: open the keyboard, scroll to Save/Cancel, use the calendar checkmark, exercise pull-to-refresh, and verify pinch zoom. Check VoiceOver/Safari and TalkBack/Chrome announcements and keyboard navigation. Browser emulation cannot establish physical keyboard, assistive-technology, or Google iframe behaviour.
+
 ## Shared schema in Config.gs
 
 Keep journal keys `expense`, `income`, and `investment`. Customize worksheet names and coordinates only when adapting the workbook layout:

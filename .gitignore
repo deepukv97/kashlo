@@ -36,6 +36,8 @@ backups/
 # Dependencies, generated output, and machine-specific files.
 node_modules/
 coverage/
+playwright-report/
+test-results/
 .cache/
 tmp/
 *.log

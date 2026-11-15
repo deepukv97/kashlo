@@ -5466,7 +5466,7 @@ test("calendar day taps remain pending until its checkmark, then both confirmed 
   ]);
 });
 
-test("calendar Cancel, Escape and pending Reset leave confirmed dates and results unchanged", async () => {
+test("calendar Cancel, native dismissal and pending Reset leave confirmed dates and results unchanged", async () => {
   const f = await calendarBrowser(),
     b = f.browser;
   vm.runInContext(
@@ -5487,11 +5487,9 @@ test("calendar Cancel, Escape and pending Reset leave confirmed dates and result
     vm.runInContext("state.transactionFilters.from", b),
     "2026-01-15",
   );
-  f.element("#transactionCalendar").onkeydown({
-    key: "Escape",
-    preventDefault() {},
-    stopPropagation() {},
-  });
+  // The real-browser suite exercises native Escape/cancel. This adapter has no
+  // HTMLDialogElement, so exercise its shared cleanup path here.
+  vm.runInContext("closeModal()", b);
   assert.equal(f.element("#modalContainer").innerHTML, "");
   assert.equal(f.element("#content").innerHTML, before);
   vm.runInContext('openTransactionCalendar("from")', b);
