@@ -220,6 +220,38 @@ test('dialog fits a narrow and reduced-height viewport, with reachable touch con
   expect(await page.locator('#content').evaluate(node => node.getAnimations().length)).toBe(0);
 });
 
+test('blank and selected dates stay aligned and contained on narrow phones', async ({ page }) => {
+  await page.locator('#newButton').click();
+  for (const width of [320, 393, 430]) {
+    await page.setViewportSize({ width, height: 740 });
+    for (const value of ['', date(15)]) {
+      await page.locator('#entryDate').fill(value);
+      const geometry = await page.evaluate(() => {
+        const date = document.querySelector('#entryDate');
+        const style = getComputedStyle(date);
+        const box = node => {
+          const { x, y, width, height, right } = node.getBoundingClientRect();
+          return { x, y, width, height, right };
+        };
+        return { date: box(date), field: box(date.closest('.field')),
+          journal: box(document.querySelector('#entryType')),
+          appearance: style.appearance, paddingTop: style.paddingTop, paddingBottom: style.paddingBottom,
+          overflow: document.querySelector('dialog').scrollWidth - document.querySelector('dialog').clientWidth };
+      });
+      expect(Math.abs(geometry.date.y - geometry.journal.y)).toBeLessThanOrEqual(1);
+      expect(Math.abs(geometry.date.height - geometry.journal.height)).toBeLessThanOrEqual(2);
+      expect(geometry.date.right).toBeLessThanOrEqual(geometry.field.right + 1);
+      expect(Math.abs(geometry.date.width - geometry.journal.width)).toBeLessThanOrEqual(1);
+      expect(geometry.overflow).toBeLessThanOrEqual(1);
+      expect(geometry.appearance).toBe('none');
+      expect(geometry.paddingTop).toBe('0px');
+      expect(geometry.paddingBottom).toBe('0px');
+    }
+  }
+  await expect(page.locator('#entryDate')).toHaveValue(date(15));
+  expect(await page.locator('#entryDate').evaluate(node => node.checkValidity())).toBe(true);
+});
+
 test('Manage and bulk-action dialogs retain their safe actions and confirmation flow', async ({ page }) => {
   await navigate(page, 'payments');
   await page.getByRole('button', { name: 'Edit Sample meal', exact: true }).click();

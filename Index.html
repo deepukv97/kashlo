@@ -1555,7 +1555,7 @@
       .payment-method-row .reviewactions { flex-direction: column; }
       .formgrid {
         display: grid;
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 18px;
       }
       .field {
@@ -2247,6 +2247,27 @@
         select {
           min-height: 48px;
           height: 48px;
+        }
+        /* iOS date buttons can impose intrinsic width and native padding even
+           with a declared height. Keep the native picker, but size its box
+           exactly like the adjacent control, including after choosing a date. */
+        .field input[type="date"] {
+          -webkit-appearance: none;
+          appearance: none;
+          display: block;
+          max-width: 100%;
+          height: 48px;
+          min-height: 48px;
+          padding-block: 0;
+          text-align: start;
+        }
+        .field input[type="date"]::-webkit-date-and-time-value {
+          min-width: 0;
+          min-height: 1em;
+          text-align: start;
+        }
+        .field input[type="date"]::-webkit-datetime-edit {
+          padding: 0;
         }
         input,
         select,
