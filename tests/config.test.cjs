@@ -11,6 +11,34 @@ const browserSource = fs
   .readFileSync("Index.html", "utf8")
   .match(/<script>\s*([\s\S]*?)<\/script>/)[1];
 
+test('submission status reads rejected, completed and uncertain saves without writing', () => {
+  const f = fixture(), api = f.context;
+  const revision = api.getData().workspaceRevision;
+  const input = { requestId: 'background_receipt_check', workspaceRevision: revision };
+  const before = JSON.stringify(f.expense.cells);
+  assert.equal(api.getSubmissionStatus(input).status, 'notStarted');
+  assert.equal(f.properties['request:' + input.requestId], undefined);
+  f.properties['request:' + input.requestId] = JSON.stringify({ status: 'started' });
+  assert.equal(api.getSubmissionStatus(input).status, 'uncertain');
+  f.properties['request:' + input.requestId] = JSON.stringify({ status: 'success', result: { ok: true, row: 8 } });
+  const receipt = f.properties['request:' + input.requestId];
+  assert.equal(api.getSubmissionStatus(input).status, 'saved');
+  assert.equal(api.getSubmissionStatus(input).result.row, 8);
+  assert.equal(f.properties['request:' + input.requestId], receipt);
+  assert.equal(JSON.stringify(f.expense.cells), before);
+  assert.equal(f.getLockCount(), 0);
+});
+
+test('submission status rejects stale workspaces, invalid IDs and unauthorized callers', () => {
+  const f = fixture(), api = f.context;
+  const input = { requestId: 'background_auth_check', workspaceRevision: api.getData().workspaceRevision };
+  assert.throws(() => api.getSubmissionStatus({ ...input, workspaceRevision: -1 }), /Workspace settings changed/);
+  assert.throws(() => api.getSubmissionStatus({ ...input, requestId: '../invalid' }), /Invalid submission/);
+  f.setActiveEmail('other.person@example.test');
+  assert.throws(() => api.getSubmissionStatus(input), /private to the owner/);
+  assert.equal(f.getLockCount(), 0);
+});
+
 class Sheet {
   constructor() {
     this.cells = Array.from({ length: 30 }, () => Array(30).fill(""));
@@ -1682,6 +1710,7 @@ test("payment UI manages optional accounts/apps without losing transaction field
     "addPaymentType",
     "addTransaction",
     "updateTransaction",
+    "getSubmissionStatus",
   ])
     runner[name] = function (input) {
       try {
@@ -1857,6 +1886,7 @@ test("payment UI manages optional accounts/apps without losing transaction field
   assert.equal(element("#entryAmount").value, "135");
   assert.equal(element("#entryDate").value, "2026-10-14");
   await element("#entryForm").onsubmit({ preventDefault() {} });
+  await new Promise(resolve => setImmediate(resolve));
   let entry = f.context.getData().transactions.find((t) => t.amount === 135);
   assert.equal(entry.paymentMethod, "UPI");
   assert.equal(entry.paymentDetail, "Google Pay");
@@ -1930,6 +1960,7 @@ test("payment UI manages optional accounts/apps without losing transaction field
   element("#entryAmount").value = "200";
   element("#entryPaymentMethod").value = "Cash";
   await element("#entryForm").onsubmit({ preventDefault() {} });
+  await new Promise(resolve => setImmediate(resolve));
   assert.match(
     element("#celebrationContainer").innerHTML,
     /Future you says thanks/,
@@ -1955,8 +1986,9 @@ test("payment UI manages optional accounts/apps without losing transaction field
   element("#entryAmount").value = "100";
   element("#entryPaymentMethod").value = "Cash";
   await element("#entryForm").onsubmit({ preventDefault() {} });
+  await new Promise(resolve => setImmediate(resolve));
   assert.equal(element("#celebrationContainer").innerHTML, "");
-  assert.match(element("#formError").textContent, /Choose a date/);
+  assert.match(vm.runInContext('transactionSaves.find(job => job.status === "failed").error', browser), /Choose a date/);
 });
 
 test("payment storage expands trimmed journals without moving existing cells and works in every journal", () => {
@@ -5466,7 +5498,7 @@ test("calendar day taps remain pending until its checkmark, then both confirmed 
   ]);
 });
 
-test("calendar Cancel, Escape and pending Reset leave confirmed dates and results unchanged", async () => {
+test("calendar Cancel, native dismissal and pending Reset leave confirmed dates and results unchanged", async () => {
   const f = await calendarBrowser(),
     b = f.browser;
   vm.runInContext(
@@ -5487,11 +5519,9 @@ test("calendar Cancel, Escape and pending Reset leave confirmed dates and result
     vm.runInContext("state.transactionFilters.from", b),
     "2026-01-15",
   );
-  f.element("#transactionCalendar").onkeydown({
-    key: "Escape",
-    preventDefault() {},
-    stopPropagation() {},
-  });
+  // The real-browser suite exercises native Escape/cancel. This adapter has no
+  // HTMLDialogElement, so exercise its shared cleanup path here.
+  vm.runInContext("closeModal()", b);
   assert.equal(f.element("#modalContainer").innerHTML, "");
   assert.equal(f.element("#content").innerHTML, before);
   vm.runInContext('openTransactionCalendar("from")', b);

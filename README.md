@@ -32,6 +32,8 @@ No programming, code copying, or software installation is needed for first-time 
 
 Add, edit, and delete transactions from the app. Review shows matching duplicates in groups and explains missing or invalid details separately. The Amount calculator can add up costs and fill the calculated amount. Select several entries and use **Edit selected** to update chosen fields together, with a preview before saving. Payment tracking is optional for expenses and investments; income has no payment fields. Kashlo asks only for account, card, or app names, never card numbers or CVVs.
 
+New transactions save in the background, so you can add the next one immediately. The **Transaction saves** panel shows progress and keeps unconfirmed entries for review. Keep the app tab open until saves finish; queued details are kept only in that tab.
+
 On a phone, open the menu beside the logo to change pages. Tap **Details** on a transaction card for more information and available actions. Pull down from the top to refresh sheet data.
 
 **[Read the everyday-use guide →](SETUP.md#use-kashlo)** — includes custom-calendar checkmarks, payment choices, expense groups, bulk duplicate review, and month completeness.

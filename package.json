@@ -1,0 +1,11 @@
+{
+  "name": "kashlo",
+  "private": true,
+  "scripts": {
+    "test": "node --test tests/config.test.cjs",
+    "test:browser": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.65.1"
+  }
+}

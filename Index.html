@@ -23,6 +23,29 @@
       [hidden] {
         display: none !important;
       }
+      .visually-hidden {
+        position: absolute;
+        clip-path: inset(50%);
+        overflow: hidden;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        padding: 0;
+        border: 0;
+        white-space: nowrap;
+      }
+      .field-error {
+        display: block;
+        color: var(--red);
+        font-size: 12px;
+        margin-top: 6px;
+      }
+      .dialog-busy {
+        visibility: hidden;
+        font-size: 12px;
+        color: var(--muted);
+        margin: 12px 0 0;
+      }
       * {
         box-sizing: border-box;
       }
@@ -1354,6 +1377,21 @@
         pointer-events: none;
         z-index: 40;
       }
+      .save-queue {
+        width: min(380px, calc(100vw - 32px));
+        max-height: min(300px, 40dvh);
+        overflow: auto;
+        pointer-events: auto;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 14px;
+        background: var(--paper);
+        box-shadow: 0 8px 28px #0005;
+      }
+      .save-queue p { margin: 6px 0; font-size: 11px; color: var(--muted); }
+      .save-queue-row { padding-top: 10px; margin-top: 10px; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+      .save-queue-row strong { display: block; font-size: 12px; }
+      .save-queue-row .button { margin-top: 6px; }
       .activity,
       .toast {
         background: #d4f3ac;
@@ -1447,22 +1485,25 @@
           transform: none;
         }
       }
-      .modal-backdrop {
-        position: fixed;
-        inset: 0;
+      dialog.modal::backdrop {
         background: #030705b8;
         backdrop-filter: blur(9px);
-        z-index: 30;
-        display: grid;
-        place-items: center;
-        grid-template-columns: minmax(0, 1fr);
-        padding: 20px;
+        overflow: hidden;
+        overscroll-behavior: contain;
+      }
+      dialog.modal:modal {
+        overscroll-behavior: contain;
       }
       .modal {
         min-width: 0;
+        --modal-gutter: max(12px, env(safe-area-inset-left), env(safe-area-inset-right));
         width: 540px;
-        max-width: 100%;
-        max-height: 92vh;
+        max-width: calc(100% - 2 * var(--modal-gutter));
+        max-height: calc(var(--modal-viewport-height, 100dvh) - max(24px, env(safe-area-inset-top)) - max(24px, env(safe-area-inset-bottom)));
+        inset-block-start: var(--modal-viewport-top, 0px);
+        inset-block-end: var(--modal-viewport-bottom, 0px);
+        margin: auto;
+        color: var(--ink);
         overflow: auto;
         background: #1a201b;
         border: 1px solid #3f4939;
@@ -1484,8 +1525,9 @@
         margin: 0;
       }
       .close {
-        width: 30px;
-        height: 30px;
+        width: 44px;
+        height: 44px;
+        flex-shrink: 0;
         border-radius: 50%;
         border: 1px solid #414a3b;
         background: #293125;
@@ -1525,7 +1567,7 @@
       .payment-method-row .reviewactions { flex-direction: column; }
       .formgrid {
         display: grid;
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 18px;
       }
       .field {
@@ -1556,6 +1598,9 @@
       .field select:focus,
       .field textarea:focus {
         border-color: var(--green);
+      }
+      .field :is(input, select, textarea):user-invalid {
+        border-color: var(--red);
       }
       .field textarea {
         min-height: 75px;
@@ -1620,19 +1665,6 @@
         padding: 6px;
         border-radius: 7px;
         font-size: 11px;
-      }
-      .view {
-        animation: enter 0.3s ease;
-      }
-      @keyframes enter {
-        from {
-          opacity: 0.4;
-          transform: translateY(7px);
-        }
-        to {
-          opacity: 1;
-          transform: none;
-        }
       }
       @media (min-width: 1600px) {
         .main {
@@ -1759,6 +1791,9 @@
           inset: 0 auto 0 0;
           width: min(300px, 85vw);
           height: 100dvh;
+          max-height: 100dvh;
+          max-width: none;
+          margin: 0;
           padding: 24px 18px;
           padding-top: max(24px, env(safe-area-inset-top));
           padding-bottom: max(24px, env(safe-area-inset-bottom));
@@ -2213,6 +2248,42 @@
       /* Readable form text prevents iPhone focus zoom. Keep manual pinch zoom enabled.
          Override compact component fonts for every mobile/touch form, including dialogs. */
       @media (max-width: 760px), (hover: none) and (pointer: coarse) {
+        button,
+        .button,
+        .close,
+        .textlink {
+          min-height: 44px;
+          min-width: 44px;
+        }
+        .textlink {
+          padding-block: 8px;
+        }
+        input:not([type="checkbox"]):not([type="radio"]),
+        select {
+          min-height: 48px;
+          height: 48px;
+        }
+        /* iOS date buttons can impose intrinsic width and native padding even
+           with a declared height. Keep the native picker, but size its box
+           exactly like the adjacent control, including after choosing a date. */
+        .field input[type="date"] {
+          -webkit-appearance: none;
+          appearance: none;
+          display: block;
+          max-width: 100%;
+          height: 48px;
+          min-height: 48px;
+          padding-block: 0;
+          text-align: start;
+        }
+        .field input[type="date"]::-webkit-date-and-time-value {
+          min-width: 0;
+          min-height: 1em;
+          text-align: start;
+        }
+        .field input[type="date"]::-webkit-datetime-edit {
+          padding: 0;
+        }
         input,
         select,
         textarea {
@@ -2425,8 +2496,9 @@
             aria-label="Select month"
           ></select>
         </div>
-        <!-- Render target for all five views; aria-live announces changing content politely. -->
-        <section id="content" class="view" aria-live="polite"></section>
+        <!-- Announce a short result summary instead of reading the whole workspace. -->
+        <section id="content" class="view"></section>
+        <p id="viewStatus" class="visually-hidden" role="status" aria-atomic="true"></p>
         <footer class="footer">
           <span id="syncTime">Waiting for connection to Google Sheets</span
           ><span>Recorded cash flow, not your bank balance.</span>
@@ -2454,6 +2526,7 @@
       aria-atomic="true"
     ></div>
     <div class="notifications">
+      <section id="saveQueueContainer" class="save-queue" aria-label="Transaction saves" hidden></section>
       <div
         id="activityContainer"
         role="status"
@@ -2530,6 +2603,141 @@
       // Config.gs is the only source of workbook-specific browser settings.
       // A local preview has no configuration and displays placeholders until connected.
       const settings = () => state.data?.config;
+      // Safari does not focus buttons on pointer activation. Focus only dialog
+      // invokers before opening, letting the native dialog restore them on close.
+      document.addEventListener("click", event => {
+        const trigger = event.target.closest?.(
+          '#newButton, #setupHelp, #addGroupExpense, #editSelectedTransactions, #deleteSelectedTransactions, #okayAll, #deleteAllDuplicates, [data-save-review], [data-edit-row], [data-delete-row], [data-correct], [data-delete], [data-manage-choice], [data-transaction-calendar], [data-transaction-multi]');
+        if (trigger && !trigger.disabled) trigger.focus({ preventScroll: true });
+      }, true);
+      // Keep calendar redraws in the same native dialog so the browser retains
+      // the original invoker and owns focus containment/return throughout.
+      function showModalContent(html) {
+        const container = $("#modalContainer");
+        if (!globalThis.HTMLDialogElement) {
+          container.innerHTML = html;
+          return; // Allows the non-browser test adapters to inspect markup.
+        }
+        const template = document.createElement("template");
+        template.innerHTML = html;
+        const next = template.content.firstElementChild;
+        let dialog = container.querySelector("dialog");
+        if (dialog?.open && dialog.id === next.id &&
+            dialog.getAttribute("aria-labelledby") === next.getAttribute("aria-labelledby")) {
+          dialog.innerHTML = next.innerHTML;
+        } else {
+          closeModal();
+          dialog = next;
+          container.replaceChildren(dialog);
+          dialog.addEventListener("cancel", event => {
+            if (state.saveBusy) event.preventDefault();
+          });
+          dialog.addEventListener("close", () => {
+            dialog.returnValue = "";
+            if (!dialog.open && container.contains(dialog)) container.replaceChildren();
+          });
+        }
+        dialog.insertAdjacentHTML("beforeend",
+          '<p id="dialogBusy" class="dialog-busy" role="status" aria-hidden="true">Saving changes. Please wait before closing.</p>' +
+          '<p id="dialogStatus" class="visually-hidden" role="status" aria-atomic="true"></p>');
+        prepareFormAccessibility(dialog);
+        sizeModalViewport();
+        if (!dialog.open) dialog.showModal();
+        setSaveBusy(state.saveBusy);
+      }
+      function closeModal() {
+        const container = $("#modalContainer");
+        const dialog = container.querySelector?.("dialog");
+        if (dialog?.open) dialog.close();
+        container.innerHTML = "";
+      }
+      function sizeModalViewport() {
+        const viewport = globalThis.visualViewport;
+        if (!viewport || !$("#modalContainer").querySelector?.("dialog")) return;
+        const style = document.documentElement.style;
+        style.setProperty("--modal-viewport-height", viewport.height + "px");
+        style.setProperty("--modal-viewport-top", viewport.offsetTop + "px");
+        style.setProperty("--modal-viewport-bottom", Math.max(0,
+          globalThis.innerHeight - viewport.offsetTop - viewport.height) + "px");
+      }
+      globalThis.visualViewport?.addEventListener("resize", sizeModalViewport);
+      globalThis.visualViewport?.addEventListener("scroll", sizeModalViewport);
+      function setSaveBusy(busy) {
+        state.saveBusy = busy;
+        const dialog = $("#modalContainer").querySelector?.("dialog");
+        if (!dialog) return;
+        // closedby is progressive enhancement; cancel also protects Safari.
+        dialog.setAttribute("closedby", busy ? "none" : "closerequest");
+        const message = dialog.querySelector("#dialogBusy");
+        message.style.visibility = busy ? "visible" : "hidden";
+        message.setAttribute("aria-hidden", String(!busy));
+      }
+      let announcementTimer;
+      function announce(message, delay = 250) {
+        if (!globalThis.clearTimeout) return;
+        clearTimeout(announcementTimer);
+        const target = $("#modalContainer dialog #dialogStatus") || $("#viewStatus");
+        if (!target) return;
+        announcementTimer = setTimeout(() => {
+          if (target.isConnected) target.textContent = message;
+        }, delay);
+      }
+      function prepareFormAccessibility(root) {
+        if (!document.createElement || !root?.querySelectorAll) return;
+        root.querySelectorAll("input,select,textarea").forEach(field => {
+          if (!field.hasAttribute("aria-invalid")) field.setAttribute("aria-invalid", "false");
+          if (!field.id || field.dataset.validationError || !field.willValidate) return;
+          if (!field.required && !["min", "max", "maxlength", "pattern"].some(name => field.hasAttribute(name)) &&
+              !["email", "url"].includes(field.type)) return;
+          const error = document.createElement("span");
+          error.id = "validation-" + field.id;
+          error.className = "field-error";
+          error.hidden = true;
+          field.dataset.validationError = error.id;
+          field.insertAdjacentElement("afterend", error);
+        });
+      }
+      let announcedInvalidField;
+      function syncFieldError(field, submitted = false, speak = false) {
+        if (!field?.matches?.("input,select,textarea") || !field.dataset.validationError) return;
+        const error = document.getElementById(field.dataset.validationError);
+        if (!error) return;
+        const invalid = submitted || field.matches(":user-invalid");
+        field.setAttribute("aria-invalid", String(invalid));
+        error.hidden = !invalid;
+        error.textContent = invalid ? field.validationMessage : "";
+        const descriptions = (field.getAttribute("aria-describedby") || "").split(/\s+/)
+          .filter(id => id && id !== error.id);
+        if (invalid) descriptions.push(error.id);
+        if (descriptions.length) field.setAttribute("aria-describedby", descriptions.join(" "));
+        else field.removeAttribute("aria-describedby");
+        if (invalid && speak) {
+          announcedInvalidField = field;
+          announce((field.labels?.[0]?.textContent || "Field") + ": " + error.textContent, 500);
+        } else if (!invalid && announcedInvalidField === field) {
+          clearTimeout(announcementTimer);
+          announcedInvalidField = null;
+          const status = $("#modalContainer dialog #dialogStatus") || $("#viewStatus");
+          if (status) status.textContent = "";
+        }
+      }
+      document.addEventListener("invalid", event => syncFieldError(event.target, true), true);
+      document.addEventListener("blur", event => syncFieldError(event.target, false, true), true);
+      document.addEventListener("change", event => syncFieldError(event.target, false, true), true);
+      document.addEventListener("input", event => syncFieldError(event.target), true);
+      function animateView() {
+        const content = $("#content");
+        content.getAnimations?.().forEach(animation => animation.cancel());
+        if (!globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches)
+          content.animate?.([{ opacity: 0.4, transform: "translateY(7px)" },
+            { opacity: 1, transform: "none" }], { duration: 300, easing: "ease" });
+      }
+      function announceView() {
+        const count = $("#filteredTransactionCount")?.textContent;
+        announce(state.view === "transactions" && loaded()
+          ? count + " matching transactions. Total " + $("#filteredTransactionTotal")?.textContent + "."
+          : $("#breadcrumb").textContent + " loaded.");
+      }
       // Reuse Intl instances until regional settings change; keep caches browser-only.
       let formatterKey = "",
         formatterCache = {};
@@ -2629,6 +2837,104 @@
       let pendingActivities = 0,
         activityVersion = 0,
         activityFailed = false;
+      // Session-only drafts: never persist financial details in browser storage.
+      const transactionSaves = [];
+      let processingTransactionSaves = false;
+      const unsettledSaves = () => transactionSaves.filter(job => job.status !== "saved");
+      function renderSaveQueue() {
+        const panel = $("#saveQueueContainer");
+        panel.hidden = transactionSaves.length === 0;
+        const pending = transactionSaves.filter(job => ["queued", "saving"].includes(job.status)).length;
+        const failed = transactionSaves.filter(job => job.status === "failed").length;
+        panel.innerHTML = '<strong>Transaction saves</strong><p>' +
+          pending + ' pending · ' + failed + ' need attention</p>' +
+          (unsettledSaves().length ? '<p>Keep this tab open until all saves are confirmed.</p>' : '') +
+          transactionSaves.map(job => '<div class="save-queue-row"><strong>' + esc(job.payload.description) +
+            '</strong><p>' + esc(job.summary) + '</p><p>' + esc({ queued: 'Waiting to save', saving: 'Saving…', saved: 'Saved to Google Sheet',
+              failed: 'Save not confirmed — review this entry' }[job.status]) + '</p>' +
+            (job.status === 'failed' ? '<button type="button" class="button outline" data-save-review="' +
+              esc(job.payload.requestId) + '">Review save</button>' : '') + '</div>').join('');
+        document.querySelectorAll('[data-save-review]').forEach(button => {
+          button.onclick = () => reviewTransactionSave(transactionSaves.find(job => job.payload.requestId === button.dataset.saveReview));
+        });
+        if (transactionSaves.length) announce(pending + ' transaction saves pending. ' + failed + ' need attention. ' +
+          transactionSaves.filter(job => job.status === 'saved').length + ' saved.');
+      }
+      function reviewTransactionSave(job) {
+        if (!job || job.status !== "failed" || state.saveBusy) return;
+        if (job.retryState === "notStarted") { openEntry(null, job); return; }
+        showModalContent('<dialog class="modal" aria-labelledby="saveReviewTitle"><div class="modal-head"><h2 id="saveReviewTitle">Check this save</h2><button type="button" class="close" aria-label="Close dialog">×</button></div><p>' +
+          esc(job.payload.description) + ' · ' + esc(job.payload.date) + ' · ' + esc(job.payload.amount) +
+          '</p><div class="notice warning">' + esc(job.error) +
+          ' The result is uncertain. Check your sheet before entering this transaction again.</div><details><summary>Submitted details</summary><dl>' +
+          Object.entries(job.payload).filter(([key]) => !['requestId', 'workspaceRevision'].includes(key))
+            .map(([key, value]) => '<dt>' + esc({ type: 'Journal', description: 'Description', amount: 'Amount',
+              date: 'Date', category: 'Category', trip: 'Expense group', notes: 'Notes',
+              paymentMethod: 'Payment method', paymentDetail: 'Payment account / app' }[key]) + '</dt><dd>' + esc(value || '—') + '</dd>').join('') +
+          '</dl></details><p>Dismissing this notice does not cancel or delete anything in your sheet.</p><div class="modal-footer"><button type="button" class="button outline" id="closeSaveReview" autofocus>Close</button><button type="button" class="button outline" id="dismissSaveNotice">Dismiss notice</button>' +
+          (job.retryState === 'unknown' ? '<button type="button" class="button" id="retryUnconfirmedSave">Retry same save</button>' : '') + '</div></dialog>');
+        $(".close").onclick = $("#closeSaveReview").onclick = closeModal;
+        $("#dismissSaveNotice").onclick = () => {
+          transactionSaves.splice(transactionSaves.indexOf(job), 1);
+          closeModal(); renderSaveQueue();
+        };
+        if (job.retryState === 'unknown') $("#retryUnconfirmedSave").onclick = () => {
+          closeModal(); enqueueTransaction(job.payload, job);
+        };
+      }
+      function enqueueTransaction(payload, retryJob = null) {
+        const job = retryJob || { payload: null };
+        if (retryJob && retryJob.status !== "failed") return;
+        job.payload = Object.freeze({ ...payload,
+          workspaceRevision: retryJob?.payload.workspaceRevision ?? state.data?.workspaceRevision });
+        job.summary = payload.date + ' · ' + money(payload.amount);
+        job.status = "queued"; job.error = ""; job.retryState = "unknown";
+        if (!retryJob) transactionSaves.push(job);
+        renderSaveQueue();
+        void processTransactionSaves();
+      }
+      async function processTransactionSaves() {
+        if (processingTransactionSaves) return;
+        processingTransactionSaves = true;
+        try {
+          let job;
+          while ((job = transactionSaves.find(item => item.status === "queued"))) {
+            job.status = "saving"; renderSaveQueue();
+            try {
+              await rpc("addTransaction", job.payload);
+              job.status = "saved";
+            } catch (error) {
+              job.status = "failed"; job.error = error.message;
+              try {
+                const receipt = await rpc("getSubmissionStatus", {
+                  requestId: job.payload.requestId, workspaceRevision: job.payload.workspaceRevision });
+                if (receipt.status === "saved") job.status = "saved";
+                else job.retryState = receipt.status === "notStarted" ? "notStarted" : "uncertain";
+              } catch (_) { job.retryState = "unknown"; }
+            }
+            renderSaveQueue();
+            if (job.status === "saved") {
+              if (job.payload.type === "investment") celebrateInvestment(job.payload.amount);
+              const completed = job;
+              setTimeout(() => {
+                const index = transactionSaves.indexOf(completed);
+                if (index !== -1 && completed.status === "saved") transactionSaves.splice(index, 1);
+                renderSaveQueue();
+              }, 6000);
+            }
+            // Consolidate refreshes when more submissions are already waiting.
+            // Refresh never closes a newly opened form or changes its field values.
+            if (!transactionSaves.some(item => item.status === "queued")) {
+              await refresh({ incremental: true });
+              renderSaveQueue();
+            }
+          }
+        } finally { processingTransactionSaves = false; }
+      }
+      globalThis.addEventListener?.("beforeunload", event => {
+        if (!unsettledSaves().length) return;
+        event.preventDefault(); event.returnValue = "";
+      });
       function beginActivity() {
         if (!pendingActivities) activityFailed = false;
         pendingActivities++;
@@ -2655,14 +2961,24 @@
       // Wrap Apps Script callback calls in a Promise for async/await.
       // Only the listed server functions are dispatched. A local HTML preview has no
       //  google.script.run bridge, so it rejects live operations with a deployment message.
+      let mutationCompletion = null;
       async function rpc(name, args) {
         if (!window.google?.script?.run)
           throw new Error(
             "Live connection is available after deploying the Apps Script app.",
           );
         if (args && !["saveWorkspaceSettings"].includes(name))
-          args = { ...args, workspaceRevision: state.data?.workspaceRevision };
+          args = { ...args, workspaceRevision: args.workspaceRevision ?? state.data?.workspaceRevision };
         beginActivity();
+        let releaseMutation;
+        if (!["getData", "getWorkspaceSettings", "getSubmissionStatus"].includes(name)) {
+          const previous = mutationCompletion;
+          let finish;
+          const current = new Promise(resolve => { finish = resolve; });
+          mutationCompletion = current;
+          releaseMutation = () => { finish(); if (mutationCompletion === current) mutationCompletion = null; };
+          if (previous) await previous;
+        }
         let success = false;
         try {
           const result = await new Promise((resolve, reject) => {
@@ -2672,6 +2988,7 @@
                 reject(new Error(e.message || String(e))),
               );
             if (name === "getData") runner.getData();
+            else if (name === "getSubmissionStatus") runner.getSubmissionStatus(args);
             else if (name === "getWorkspaceSettings")
               runner.getWorkspaceSettings();
             else if (name === "saveWorkspaceSettings")
@@ -2699,6 +3016,7 @@
           return result;
         } finally {
           finishActivity(success);
+          releaseMutation?.();
         }
       }
       // Display an escaped success/error message for six seconds in the live announcement container.
@@ -3353,8 +3671,7 @@
           Number(initial.slice(5, 7)) - 1,
         );
         const close = () => {
-          $("#modalContainer").innerHTML = "";
-          $("#transactionFilter-" + key)?.focus({ preventScroll: true });
+          closeModal();
         };
         const draw = (focus = "#cancelCalendar") => {
           const count = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
@@ -3389,10 +3706,10 @@
               day +
               "</button>";
           }
-          $("#modalContainer").innerHTML =
-            '<div class="modal-backdrop"><section class="modal date-calendar" id="transactionCalendar" role="dialog" aria-modal="true" aria-labelledby="calendarTitle"><div class="modal-head"><h2 id="calendarTitle">' +
+          showModalContent(
+            '<dialog class="modal date-calendar" id="transactionCalendar" aria-labelledby="calendarTitle"><div class="modal-head"><h2 id="calendarTitle">' +
             (key === "from" ? "From date" : "To date") +
-            '</h2><button type="button" class="close" id="cancelCalendar" aria-label="Cancel date selection">×</button></div><div class="calendar-navigation"><button type="button" class="iconbtn" id="calendarPrevious" aria-label="Previous month"' +
+            '</h2><button type="button" class="close" id="cancelCalendar" autofocus aria-label="Cancel date selection">×</button></div><div class="calendar-navigation"><button type="button" class="iconbtn" id="calendarPrevious" aria-label="Previous month"' +
             (month <= Number(min.slice(5, 7)) - 1 ? " disabled" : "") +
             '>‹</button><select id="calendarMonth" aria-label="Calendar month">' +
             MONTHS.map(
@@ -3412,7 +3729,7 @@
             cells +
             '</div><p class="crumb" role="status">' +
             (pending ? esc(dateLabel(pending)) : "Choose a date") +
-            '</p><div class="calendar-footer"><button type="button" class="button outline" id="resetCalendar">Reset</button><button type="button" class="button" id="confirmCalendar" aria-label="Confirm date">✓</button></div></section></div>';
+            '</p><div class="calendar-footer"><button type="button" class="button outline" id="resetCalendar">Reset</button><button type="button" class="button" id="confirmCalendar" aria-label="Confirm date">✓</button></div></dialog>');
           $("#cancelCalendar").onclick = close;
           $("#calendarPrevious").onclick = () => {
             if (month > Number(min.slice(5, 7)) - 1) {
@@ -3450,31 +3767,7 @@
             if (f.to && f.from && f.to < f.from) f.to = "";
             state.transactionPage = 1;
             close();
-            render();
-            $("#transactionFilter-" + key)?.focus({ preventScroll: true });
-          };
-          $("#transactionCalendar").onkeydown = (event) => {
-            if (event.key === "Escape") {
-              event.preventDefault();
-              event.stopPropagation();
-              close();
-            }
-            if (event.key === "Tab") {
-              const controls = [
-                ...$("#transactionCalendar").querySelectorAll(
-                  "button:not(:disabled),select",
-                ),
-              ];
-              const first = controls[0],
-                last = controls[controls.length - 1];
-              if (event.shiftKey && document.activeElement === first) {
-                event.preventDefault();
-                last.focus();
-              } else if (!event.shiftKey && document.activeElement === last) {
-                event.preventDefault();
-                first.focus();
-              }
-            }
+            render(true);
           };
           $(focus)?.focus({ preventScroll: true });
         };
@@ -3525,7 +3818,7 @@
           if (key === "month" && selected.length === 1) state.month = Number(selected[0]);
         }
         state.transactionPage = 1;
-        render();
+        render(true);
       }
       function openTransactionMultiSelect(key) {
         if (state.saveBusy || !settings()) return;
@@ -3534,9 +3827,9 @@
         // Store the visible checkbox choices locally; an empty saved filter means All.
         const values = spec.options.map(([value]) => value);
         const selected = new Set(spec.selected.length ? spec.selected.filter(value => values.includes(value)) : values);
-        const triggerId = key === "type" ? "typeFilter" : "transactionFilter-" + key;
-        const close = () => { $("#modalContainer").innerHTML = ""; $("#" + triggerId)?.focus({preventScroll:true}); };
-        $("#modalContainer").innerHTML = '<div class="modal-backdrop"><section class="modal" id="transactionMultiDialog" role="dialog" aria-modal="true" aria-labelledby="transactionMultiTitle">' +
+        const close = () => closeModal();
+        showModalContent(
+          '<dialog class="modal" id="transactionMultiDialog" aria-labelledby="transactionMultiTitle">' +
           '<div class="modal-head"><h2 id="transactionMultiTitle">' + esc(spec.label) + '</h2><button type="button" class="close" aria-label="Close dialog">×</button></div>' +
           '<p class="multi-help">Choose one or more options. Choose All to remove this filter.</p>' +
           '<div class="field"><label for="transactionMultiSearch">Search options</label><input id="transactionMultiSearch" type="search" autocomplete="off"></div>' +
@@ -3545,7 +3838,7 @@
             '<label class="multi-option" data-multi-label="' + esc(label.toLowerCase()) + '"><input type="checkbox" id="transactionChoice-' + i + '" data-multi-choice="' +
             esc(value) + '"' + (selected.has(value) ? ' checked' : '') + '><span>' + esc(label) + '</span></label>').join('') +
           '</div><p id="transactionMultiEmpty" hidden>No matching options.</p><p id="transactionMultiCount" aria-live="polite"></p>' +
-          '<div class="modal-footer"><button type="button" class="button outline" id="cancelTransactionMulti">Cancel</button><button type="button" class="button" id="applyTransactionMulti">Apply selection</button></div></section></div>';
+          '<div class="modal-footer"><button type="button" class="button outline" id="cancelTransactionMulti" autofocus>Cancel</button><button type="button" class="button" id="applyTransactionMulti">Apply selection</button></div></dialog>');
         const boxes = [...document.querySelectorAll('[data-multi-choice]')];
         const sync = () => {
           boxes.forEach(box => { box.checked = selected.has(box.dataset.multiChoice); });
@@ -3575,16 +3868,8 @@
         $("#cancelTransactionMulti").onclick = close;
         $("#applyTransactionMulti").onclick = () => {
           if (values.length && !selected.size) return;
-          setTransactionFilterValues(key, selected.size === values.length ? [] : [...selected]); close();
-        };
-        $("#transactionMultiDialog").onkeydown = event => {
-          if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(); }
-          if (event.key === "Tab") {
-            const controls = [...$("#transactionMultiDialog").querySelectorAll('button,input')].filter(node => !node.disabled && node.getClientRects().length);
-            const first = controls[0], last = controls[controls.length - 1];
-            if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
-            else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
-          }
+          close();
+          setTransactionFilterValues(key, selected.size === values.length ? [] : [...selected]);
         };
         sync(); $("#cancelTransactionMulti").focus();
       }
@@ -4090,8 +4375,8 @@
           : choice.kind === "paymentType"
             ? 'This removes the payment method and its saved accounts/apps, and clears both fields from matching transactions in your sheet. Transactions, amounts, and other details are kept.'
             : 'This removes the account/app and clears its name from matching transactions in your sheet. The payment method, transactions, amounts, and other details are kept.';
-        $("#modalContainer").innerHTML =
-          '<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="manageChoiceTitle">' +
+        showModalContent(
+          '<dialog class="modal" aria-labelledby="manageChoiceTitle">' +
           '<div class="modal-head"><h2 id="manageChoiceTitle">' + (editing ? "Edit " : "Remove ") + label +
           '</h2><button class="close" aria-label="Close dialog">×</button></div><p>' + esc(choice.name) + '</p>' +
           '<div class="notice">' + (choice.kind === "group"
@@ -4117,10 +4402,10 @@
             selectOptions(categories, choice.previousCategory) +
             '</select></div>' : '') +
           '</div><p id="manageChoiceError" class="formerror" role="alert"></p><div class="modal-footer">' +
-          '<button type="button" class="button outline" id="cancelManageChoice">Cancel</button>' +
+          '<button type="button" class="button outline" id="cancelManageChoice" autofocus>Cancel</button>' +
           '<button class="button' + (editing ? '' : ' danger') + '" id="saveManageChoice">' +
-          (editing ? 'Save changes' : 'Confirm removal') + '</button></div></form></section></div>';
-        const close = () => { if (!state.saveBusy) $("#modalContainer").innerHTML = ""; };
+          (editing ? 'Save changes' : 'Confirm removal') + '</button></div></form></dialog>');
+        const close = () => { if (!state.saveBusy) closeModal(); };
         $(".close").onclick = close;
         $("#cancelManageChoice").onclick = close;
         (editing ? $("#manageChoiceName") : $("#cancelManageChoice")).focus();
@@ -4131,12 +4416,12 @@
           const payload = { ...choice, requestId, confirmed: !editing };
           if (editing) payload.newName = $("#manageChoiceName").value;
           if (needsCategory) payload.category = $("#manageChoiceCategory").value;
-          state.saveBusy = true;
+          setSaveBusy(true);
           $("#saveManageChoice").disabled = true;
           $("#manageChoiceError").textContent = "";
           try {
             await rpc("manageChoice", payload);
-            $("#modalContainer").innerHTML = "";
+            closeModal();
             await refresh();
             if (choice.kind === "group" && editing && state.trip === choice.name) state.trip = payload.newName.trim();
             toast(choice.kind === "group"
@@ -4146,7 +4431,7 @@
             $("#manageChoiceError").textContent = error.message +
               " If the result is uncertain, refresh and check before starting again.";
             $("#saveManageChoice").disabled = false;
-          } finally { state.saveBusy = false; }
+          } finally { setSaveBusy(false); }
         };
       }
       function manage() {
@@ -4210,7 +4495,7 @@
           form +
           '<div class="card" style="margin-top:23px"><div class="cardhead"><h2>' +
           (descriptions ? "Descriptions" : "Categories") +
-          '</h2><span class="pill" id="lookupSavedCount" aria-live="polite">' +
+          '</h2><span class="pill" id="lookupSavedCount">' +
           entries.length +
           ' saved</span></div>' +
           (descriptions ? '<div class="field" style="margin-bottom:16px"><label for="lookupSearch">Search saved descriptions</label><input id="lookupSearch" type="search" placeholder="Search description or category…" autocomplete="off" value="' + esc(state.lookupSearch) + '"></div>' : '') +
@@ -4394,6 +4679,10 @@
         form.onsubmit = async (event) => {
           event.preventDefault();
           if (state.saveBusy || state.loading) return;
+          if (unsettledSaves().length) {
+            $("#profileError").textContent = "Finish or review pending transaction saves before changing workspace settings.";
+            return;
+          }
           const firstSetup = state.profile.setupRequired;
           const payload = {
             requestId: id(),
@@ -4406,7 +4695,7 @@
             timeZone: $("#profileTimeZone").value,
             year: $("#profileYear").value,
           };
-          state.saveBusy = true;
+          setSaveBusy(true);
           $("#saveProfile").disabled = true;
           $("#profileError").textContent = "";
           try {
@@ -4437,7 +4726,7 @@
               $("#profileError").textContent = message;
             else toast(message, true);
           } finally {
-            state.saveBusy = false;
+            setSaveBusy(false);
             if (state.view === "profile" && $("#saveProfile"))
               $("#saveProfile").disabled = false;
           }
@@ -4477,7 +4766,7 @@
             error.textContent = "Enter a payment method name.";
             return;
           }
-          state.saveBusy = true;
+          setSaveBusy(true);
           button.disabled = true;
           input.disabled = true;
           error.textContent = "";
@@ -4492,7 +4781,7 @@
           } catch (failure) {
             error.textContent = failure.message;
           } finally {
-            state.saveBusy = false;
+            setSaveBusy(false);
             button.disabled = false;
             input.disabled = false;
           }
@@ -4514,7 +4803,7 @@
           selectOptions(namedPaymentMethods(), state.paymentOptionType) +
           '</select></div><div class="field"><label for="paymentOptionName">Payment account / app</label><input id="paymentOptionName" required maxlength="100" placeholder="For example, Example Bank savings"></div></div><div class="modal-footer"><button class="button" id="addPaymentOption" ' +
           (!loaded() || !namedPaymentMethods().length ? "disabled" : "") +
-          '>Add account / app</button></div><p class="formerror" id="paymentOptionError"></p></form></div><div class="tripgrid" style="margin-top:23px">' +
+          '>Add account / app</button></div><p class="formerror" id="paymentOptionError" role="alert"></p></form></div><div class="tripgrid" style="margin-top:23px">' +
           paymentMethods()
             .map(
               (method) =>
@@ -4892,14 +5181,14 @@
           .forEach((button) => (button.disabled = state.setupRequired));
         const flagged = state.view === "review" ? reviewRows() : [];
         $("#content").innerHTML = viewContent(flagged);
-        // Force a layout read between class changes to restart the view entrance animation.
-        $("#content").classList.remove("view");
-        void $("#content").offsetWidth;
-        $("#content").classList.add("view");
+        // The animation API restarts the entrance without forcing synchronous layout.
+        animateView();
         bindContent(flagged);
       }
       // Attach navigation, filtering, trip, review, and status handlers to the freshly rendered content.
       function bindContent(flagged = reviewRows(), preserveScroll = false) {
+        prepareFormAccessibility($("#content"));
+        announceView();
         bindTransactionSelection();
         if (state.view === "profile") bindProfile();
         document.querySelectorAll("[data-dashboard]").forEach((button) => {
@@ -4958,6 +5247,7 @@
               });
               $("#lookupSavedCount").textContent = query ? visible + " of " + items.length + " saved" : items.length + " saved";
               $("#lookupSearchEmpty").hidden = !query || visible > 0;
+              announce(visible + " matching saved descriptions.");
             };
             search.oninput = () => {
               filterDescriptions();
@@ -5005,7 +5295,7 @@
                 "Enter a name for each required field.";
               return;
             }
-            state.saveBusy = true;
+            setSaveBusy(true);
             $("#saveLookup").disabled = true;
             $("#lookupType").disabled = true;
             $("#lookupError").textContent = "";
@@ -5022,7 +5312,7 @@
                 $("#lookupError").textContent = error.message;
               else toast(error.message, true);
             } finally {
-              state.saveBusy = false;
+              setSaveBusy(false);
               if (
                 state.view === "payments" &&
                 state.manageSection !== "payments"
@@ -5043,7 +5333,7 @@
               $("#groupError").textContent = "Enter a group name.";
               return;
             }
-            state.saveBusy = true;
+            setSaveBusy(true);
             $("#saveGroup").disabled = true;
             $("#groupError").textContent = "";
             try {
@@ -5055,7 +5345,7 @@
               $("#groupError").textContent = error.message +
                 " If the result is uncertain, refresh and check the saved groups before starting again.";
             } finally {
-              state.saveBusy = false;
+              setSaveBusy(false);
               $("#saveGroup").disabled = false;
             }
           };
@@ -5078,7 +5368,7 @@
           paymentForm.onsubmit = async (event) => {
             event.preventDefault();
             if (state.saveBusy || !loaded()) return;
-            state.saveBusy = true;
+            setSaveBusy(true);
             $("#addPaymentOption").disabled = true;
             try {
               await savePaymentOption(
@@ -5093,7 +5383,7 @@
             } catch (error) {
               $("#paymentOptionError").textContent = error.message;
             } finally {
-              state.saveBusy = false;
+              setSaveBusy(false);
               $("#addPaymentOption").disabled = false;
             }
           };
@@ -5186,7 +5476,7 @@
               if (key === "month") state.month = Number(e.target.value);
               else state.transactionFilters[key] = e.target.value;
               state.transactionPage = 1;
-              render();
+              render(true);
             };
           });
         document
@@ -5202,7 +5492,7 @@
             state.search = "";
             state.type = "all";
             state.transactionPage = 1;
-            render();
+            render(true);
           };
         // Support both pointer activation and Enter/Space on the keyboard-accessible trip cards.
         document.querySelectorAll("[data-trip]").forEach((b) => {
@@ -5244,7 +5534,7 @@
                 decision = "Okay";
               if (!t || !pendingReviewDuplicate(t)) return;
               // Block another review/entry save while this review request is in flight.
-              state.saveBusy = true;
+              setSaveBusy(true);
               b.disabled = true;
               const payload = {
                 type: t.type,
@@ -5277,7 +5567,7 @@
                 toast(e.message, true);
                 b.disabled = false;
               } finally {
-                state.saveBusy = false;
+                setSaveBusy(false);
               }
             }),
         );
@@ -5573,12 +5863,12 @@
       // Build the add-transaction dialog using current lookup data.
       // New entries start with a blank required date; corrections retain their recorded date.
       // Saving is disabled before data has loaded. The server performs the final input validation.
-      function openEntry(transaction = null) {
+      function openEntry(transaction = null, queuedJob = null) {
         if (state.saveBusy) return;
         const isConnected = loaded(),
           entryContext = captureViewContext();
-        $("#modalContainer").innerHTML =
-          '<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="entryTitle"><div class="modal-head"><h2 id="entryTitle">A new entry.</h2><button class="close" aria-label="Close dialog">×</button></div>' +
+        showModalContent(
+          '<dialog class="modal" aria-labelledby="entryTitle"><div class="modal-head"><h2 id="entryTitle">A new entry.</h2><button class="close" aria-label="Close dialog">×</button></div>' +
           (!isConnected
             ? '<div class="notice warning">Preview only. Connect the deployed app before saving transactions.</div>'
             : "") +
@@ -5587,11 +5877,12 @@
             transaction ? (transaction.type === "income" ? ["income"] : ["expense", "investment"]) : ["expense", "income", "investment"],
             transaction?.type || (state.view === "investments" ? "investment" : "expense"),
           ) +
-          '</select></div><div class="field"><label for="entryDate">Date</label><input id="entryDate" type="date" required></div><div class="field full"><label for="entryDescription">Description</label><input id="entryDescription" placeholder="For example, groceries or salary" list="knownDescriptions" autocomplete="off" required><datalist id="knownDescriptions"></datalist><small>Known descriptions select the journal and category for new entries.</small></div><div class="field"><label for="entryAmount">Amount</label><input id="entryAmount" type="number" inputmode="decimal" min="0.01" step="0.01" placeholder="0.00" required><button type="button" class="textlink" id="openAmountCalculator" aria-expanded="false" aria-controls="amountCalculator" style="margin-top:10px">Calculator</button></div><div class="field"><label for="entryCategory">Category</label><select id="entryCategory" required></select></div>' + amountCalculatorMarkup() + '<div class="field full" id="tripField"><label for="entryTrip">Expense group (optional)</label><select id="entryTrip"></select><small>Add or remove groups in Manage → Expense groups.</small></div><div class="field" id="paymentMethodField"><label for="entryPaymentMethod">Payment method (optional)</label><select id="entryPaymentMethod"></select><button type="button" class="textlink" id="newEntryPaymentType" aria-expanded="false" aria-controls="entryPaymentTypeCreator" style="margin-top:10px">+ Add payment method</button></div><div class="field full" id="entryPaymentTypeCreator" hidden>' +
+          '</select></div><div class="field"><label for="entryDate">Date</label><input id="entryDate" type="date" required></div><div class="field full"><label for="entryDescription">Description</label><input id="entryDescription" autofocus placeholder="For example, groceries or salary" list="knownDescriptions" autocomplete="off" required><datalist id="knownDescriptions"></datalist><small>Known descriptions select the journal and category for new entries.</small></div><div class="field"><label for="entryAmount">Amount</label><input id="entryAmount" type="number" inputmode="decimal" min="0.01" step="0.01" placeholder="0.00" required><button type="button" class="textlink" id="openAmountCalculator" aria-expanded="false" aria-controls="amountCalculator" style="margin-top:10px">Calculator</button></div><div class="field"><label for="entryCategory">Category</label><select id="entryCategory" required></select></div>' + amountCalculatorMarkup() + '<div class="field full" id="tripField"><label for="entryTrip">Expense group (optional)</label><select id="entryTrip"></select><small>Add or remove groups in Manage → Expense groups.</small></div><div class="field" id="paymentMethodField"><label for="entryPaymentMethod">Payment method (optional)</label><select id="entryPaymentMethod"></select><button type="button" class="textlink" id="newEntryPaymentType" aria-expanded="false" aria-controls="entryPaymentTypeCreator" style="margin-top:10px">+ Add payment method</button></div><div class="field full" id="entryPaymentTypeCreator" hidden>' +
           paymentTypeFields("entry") +
-          '</div><div class="field" id="paymentDetailField" hidden><label for="entryPaymentDetail" id="paymentDetailLabel">Payment account / app</label><select id="entryPaymentDetail"></select></div><div class="field full" id="paymentNameControls" hidden><button type="button" class="textlink" id="newPaymentName">+ Add account / app</button><small>Manage accounts and apps in Manage → Payment methods.</small><div id="inlinePayment" hidden><label for="inlinePaymentType">Payment method</label><select id="inlinePaymentType"></select><label for="inlinePaymentName">Payment account / app</label><input id="inlinePaymentName" maxlength="100" placeholder="Enter an account, card, or app name"><button type="button" class="button light" id="saveInlinePayment">Add and select</button><button type="button" class="textlink" id="cancelInlinePayment">Cancel</button><div class="formerror" id="inlinePaymentError"></div></div></div><div class="field full"><label for="entryNotes">Notes (optional)</label><textarea id="entryNotes" placeholder="Anything you would like to remember"></textarea></div></div><div class="formerror" id="formError"></div><div class="modal-footer"><button type="button" class="button outline" id="cancelEntry">Cancel</button><button class="button" id="saveEntry" ' +
+          '</div><div class="field" id="paymentDetailField" hidden><label for="entryPaymentDetail" id="paymentDetailLabel">Payment account / app</label><select id="entryPaymentDetail"></select></div><div class="field full" id="paymentNameControls" hidden><button type="button" class="textlink" id="newPaymentName">+ Add account / app</button><small>Manage accounts and apps in Manage → Payment methods.</small><div id="inlinePayment" hidden><label for="inlinePaymentType">Payment method</label><select id="inlinePaymentType"></select><label for="inlinePaymentName">Payment account / app</label><input id="inlinePaymentName" maxlength="100" placeholder="Enter an account, card, or app name"><button type="button" class="button light" id="saveInlinePayment">Add and select</button><button type="button" class="textlink" id="cancelInlinePayment">Cancel</button><div class="formerror" id="inlinePaymentError" role="alert"></div></div></div><div class="field full"><label for="entryNotes">Notes (optional)</label><textarea id="entryNotes" placeholder="Anything you would like to remember"></textarea></div></div><div class="formerror" id="formError" role="alert"></div><div class="modal-footer"><button type="button" class="button outline" id="cancelEntry">Cancel</button><button class="button" id="saveEntry" ' +
           (!isConnected ? "disabled" : "") +
-          ">Save to Google Sheet</button></div></form></section></div>";
+          ">Save to Google Sheet</button></div>" +
+          (!transaction ? '<p class="crumb">New transactions save in the background. Keep this tab open until saving finishes.</p>' : '') + '</form></dialog>');
         if (transaction) {
           $("#entryTitle").textContent = "Edit transaction";
           $("#entryType").value = transaction.type;
@@ -5606,13 +5897,14 @@
           $("#entryDate").max = config.year + "-12-31";
           $("#entryDate").value = "";
           $("#entryDescription").maxLength = config.limits.descriptionLength;
+          $("#entryAmount").max = config.limits.maximumAmount;
           $("#entryNotes").maxLength = config.limits.noteLength;
           document.querySelector('label[for="entryAmount"]').textContent =
             "Amount (" + config.currency + ")";
         }
         // Allow closing the dialog only while an entry/review save is not in progress.
         const close = () => {
-          if (!state.saveBusy) $("#modalContainer").innerHTML = "";
+          if (!state.saveBusy) closeModal();
         };
         $(".close").onclick = close;
         $("#cancelEntry").onclick = close;
@@ -5775,7 +6067,7 @@
             $("#inlinePaymentError").textContent = "Enter a name.";
             return;
           }
-          state.saveBusy = true;
+          setSaveBusy(true);
           $("#entryPaymentMethod").disabled = true;
           $("#inlinePaymentType").disabled = true;
           $("#inlinePaymentName").disabled = true;
@@ -5794,7 +6086,7 @@
           } catch (error) {
             $("#inlinePaymentError").textContent = error.message;
           } finally {
-            state.saveBusy = false;
+            setSaveBusy(false);
             $("#entryPaymentMethod").disabled = false;
             $("#inlinePaymentType").disabled = false;
             $("#inlinePaymentName").disabled = false;
@@ -5827,15 +6119,13 @@
           populateDescriptions();
         };
         // Allocate one request ID per opened entry dialog and reuse it for retries.
-        // Prevent normal form navigation and disable Save while awaiting the server.
-        let requestId = id();
+        // New entries leave the form immediately; edits retain their blocking save.
+        let requestId = queuedJob?.payload.requestId || id();
+        let submitted = false;
         $("#entryForm").onsubmit = async (e) => {
           e.preventDefault();
-          if (state.saveBusy || !loaded()) return;
-          state.saveBusy = true;
-          $("#saveEntry").disabled = true;
-          $("#saveEntry").textContent = "Saving…";
-          $("#formError").textContent = "";
+          if (state.saveBusy || !loaded() || submitted) return;
+          if ($("#entryForm").reportValidity?.() === false) return;
           // Collect form values for the server; the amount remains input text until the server converts it to a number.
           const payload = {
             requestId,
@@ -5857,39 +6147,32 @@
                 ? ""
                 : $("#entryPaymentDetail").value,
           };
+          if (!transaction) {
+            submitted = true;
+            $("#saveEntry").disabled = true;
+            closeModal();
+            enqueueTransaction(payload, queuedJob);
+            return;
+          }
+          setSaveBusy(true);
+          $("#saveEntry").disabled = true;
+          $("#saveEntry").textContent = "Saving…";
+          $("#formError").textContent = "";
           // On success, close the dialog and refresh the live snapshot to include the saved transaction.
           try {
-            if (transaction) {
-              payload.sourceType = transaction.type;
-              payload.row = transaction.row;
-              payload.fingerprint = transaction.fingerprint;
-            }
-            await rpc(
-              transaction ? "updateTransaction" : "addTransaction",
-              payload,
-            );
-            if (
-              isGroupDashboard() &&
-              !transaction &&
-              payload.type === "expense"
-            )
-              state.trip = payload.trip;
-            $("#modalContainer").innerHTML = "";
+            payload.sourceType = transaction.type;
+            payload.row = transaction.row;
+            payload.fingerprint = transaction.fingerprint;
+            await rpc("updateTransaction", payload);
+            closeModal();
             toast(
-              transaction
-                ? (payload.type !== transaction.type
+              payload.type !== transaction.type
                     ? "Transaction moved to " + (payload.type === "investment" ? "Investments" : "Expenses") + ". Updating totals and review checks."
-                    : "Transaction updated. Updating totals and review checks.")
-                : "Saved to your Google Sheet.",
+                    : "Transaction updated. Updating totals and review checks.",
             );
-            if (!transaction && payload.type === "investment")
-              celebrateInvestment(payload.amount);
-            if (transaction) restoreViewContext(entryContext);
-            await refresh(
-              transaction
-                ? { incremental: true, editedTransaction: payload.type === transaction.type ? transaction : null }
-                : {},
-            );
+            restoreViewContext(entryContext);
+            await refresh({ incremental: true,
+              editedTransaction: payload.type === transaction.type ? transaction : null });
           } catch (e) {
             // Keep the dialog and request ID on failure. Read-only validation can be
             // corrected and retried; a request that started writing stays protected.
@@ -5900,9 +6183,26 @@
             $("#saveEntry").textContent = "Retry same submission";
           } finally {
             // Clear the busy flag even when the server rejects the submission.
-            state.saveBusy = false;
+            setSaveBusy(false);
           }
         };
+        if (queuedJob) {
+          const draft = queuedJob.payload;
+          $("#entryType").value = draft.type;
+          $("#entryType").onchange();
+          $("#entryDate").value = draft.date;
+          $("#entryDescription").value = draft.description;
+          $("#entryAmount").value = draft.amount;
+          $("#entryCategory").value = draft.category;
+          $("#entryTrip").value = draft.trip;
+          $("#entryNotes").value = draft.notes;
+          $("#entryPaymentMethod").value = draft.paymentMethod;
+          populatePayment();
+          $("#entryPaymentDetail").value = draft.paymentDetail;
+          $("#formError").textContent = queuedJob.error;
+          $("#saveEntry").textContent = "Retry corrected entry";
+          populateDescriptions();
+        }
         $("#entryDescription").focus();
       }
       function updateTransactionSelection() {
@@ -5958,7 +6258,8 @@
           '<div class="field full"><label><input type="checkbox" id="bulkUse-' + key + '" data-bulk-field="' + key + '"' + (disabled ? ' disabled' : '') + '> Update ' + esc(labels[key]) + '</label>' +
           (help ? '<small>' + esc(help) + '</small>' : '') + '<div id="bulkFields-' + key + '" hidden>' + controls + '</div></div>';
         const select = (id, label, values) => '<label for="' + id + '">' + esc(label) + '</label><select id="' + id + '">' + values + '</select>';
-        $("#modalContainer").innerHTML = '<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="bulkEditTitle"><div class="modal-head"><h2 id="bulkEditTitle">Edit ' + entries.length + ' transactions</h2><button type="button" class="close" aria-label="Close dialog">×</button></div>' +
+        showModalContent(
+          '<dialog class="modal" aria-labelledby="bulkEditTitle"><div class="modal-head"><h2 id="bulkEditTitle">Edit ' + entries.length + ' transactions</h2><button type="button" class="close" aria-label="Close dialog">×</button></div>' +
           '<p>Only checked fields will change. Your selection includes transactions on other pages.</p><form id="bulkEditForm"><div id="bulkEditFields" class="formgrid">' +
           field('description', '<label for="bulkDescription">Description for selected transactions</label><input id="bulkDescription" type="text" maxlength="' + config.limits.descriptionLength + '" list="bulkKnownDescriptions" autocomplete="off" placeholder="Choose or type a description"><datalist id="bulkKnownDescriptions"></datalist><small>Type to find a saved description, or clear the field to see all saved descriptions.</small>', !singleType, !singleType ? 'Select one journal to update descriptions.' : 'The same description will be applied to all selected transactions. Categories stay unchanged unless you also select Category.') +
           field('payment', select('bulkPaymentMethod', 'Payment method', '<option value="">Clear payment details</option>' + selectOptions(paymentMethods(), '')) + select('bulkPaymentDetail', 'Account / app (optional)', '<option value="">No account / app</option>'), types.has('income'), types.has('income') ? 'Select expenses or investments to update payment details.' : 'The chosen method and account / app replace both payment fields.') +
@@ -5967,7 +6268,7 @@
           field('notes', select('bulkNotesMode', 'Action', '<option value="replace">Replace notes</option><option value="clear">Clear notes</option>') + '<label for="bulkNotes">Notes</label><textarea id="bulkNotes" maxlength="' + config.limits.noteLength + '"></textarea>') +
           field('amount', '<label for="bulkAmount">New amount for each transaction</label><input id="bulkAmount" type="number" inputmode="decimal" min="0.01" step="0.01" max="' + config.limits.maximumAmount + '"><small>Every selected transaction will have this same amount.</small>') +
           field('date', '<label for="bulkDate">New date for each transaction</label><input id="bulkDate" type="date" min="' + config.year + '-01-01" max="' + config.year + '-12-31">') +
-          '</div><div id="bulkEditPreview" hidden></div><p id="bulkEditError" class="formerror" role="alert"></p><div class="modal-footer"><button type="button" class="button outline" id="cancelBulkEdit">Cancel</button><button type="button" class="button outline" id="backBulkEdit" hidden>Back</button><button class="button" id="saveBulkEdit">Review changes</button></div></form></section></div>';
+          '</div><div id="bulkEditPreview" hidden></div><p id="bulkEditError" class="formerror" role="alert"></p><div class="modal-footer"><button type="button" class="button outline" id="cancelBulkEdit" autofocus>Cancel</button><button type="button" class="button outline" id="backBulkEdit" hidden>Back</button><button class="button" id="saveBulkEdit">Review changes</button></div></form></dialog>');
         const description = $("#bulkDescription");
         const normalizedDescription = text => String(text || '').trim().toLowerCase();
         const existing = String(selected[0].description || '').trim();
@@ -6000,7 +6301,7 @@
         };
         $("#bulkNotesMode").onchange = () => { $("#bulkNotes").hidden = $("#bulkNotesMode").value === 'clear'; };
         let patch = null;
-        const close = () => { if (!state.saveBusy) $("#modalContainer").innerHTML = ''; };
+        const close = () => { if (!state.saveBusy) closeModal(); };
         $(".close").onclick = close; $("#cancelBulkEdit").onclick = close;
         $("#backBulkEdit").onclick = () => {
           if (state.saveBusy) return;
@@ -6054,14 +6355,14 @@
               '<details><summary>Selected transactions (' + entries.length + ')</summary><ul>' + selected.map(t => '<li>' + esc(t.description || 'Missing description') + ' · ' + esc(dateLabel(t.date)) + ' · ' + esc(t.type) + ' · ' + esc(money(t.amount)) + '</li>').join('') + '</ul></details>';
             $("#saveBulkEdit").textContent = 'Confirm changes'; return;
           }
-          state.saveBusy = true; $("#saveBulkEdit").disabled = true; $("#saveBulkEdit").textContent = 'Saving…';
+          setSaveBusy(true); $("#saveBulkEdit").disabled = true; $("#saveBulkEdit").textContent = 'Saving…';
           try {
             const result = await rpc('updateTransactions', { entries, changes: patch, requestId, confirmed: true });
-            selectedTransactions.clear(); $("#modalContainer").innerHTML = ''; toast(result.count + ' transactions updated.'); await refresh();
+            selectedTransactions.clear(); closeModal(); toast(result.count + ' transactions updated.'); await refresh();
           } catch (error) {
             $("#bulkEditError").textContent = error.message + ' If the result is uncertain, refresh and check the sheet before starting another edit.';
             $("#saveBulkEdit").disabled = false; $("#saveBulkEdit").textContent = 'Retry same changes';
-          } finally { state.saveBusy = false; updateTransactionSelection(); }
+          } finally { setSaveBusy(false); updateTransactionSelection(); }
         };
         $("#cancelBulkEdit").focus();
       }
@@ -6069,30 +6370,31 @@
         if (state.saveBusy || !loaded() || !selectedTransactions.size) return;
         const entries = [...selectedTransactions.values()].map(t => ({type:t.type, row:t.row, fingerprint:t.fingerprint}));
         const requestId = id();
-        $("#modalContainer").innerHTML = '<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="bulkDeleteTitle"><div class="modal-head"><h2 id="bulkDeleteTitle">Delete ' + entries.length +
+        showModalContent(
+          '<dialog class="modal" aria-labelledby="bulkDeleteTitle"><div class="modal-head"><h2 id="bulkDeleteTitle">Delete ' + entries.length +
           ' selected transactions?</h2><button class="close" aria-label="Close dialog">×</button></div><div class="notice warning">This permanently deletes all selected transactions from your Google Sheet and updates your totals. Transactions on other pages that you selected are included. Other entries are kept.</div><div class="tablewrap"><ul>' +
           [...selectedTransactions.values()].map(t => '<li>' + esc(t.description || 'Missing description') + ' · ' + esc(dateLabel(t.date)) + ' · ' + esc(t.type) + ' · ' + esc(money(t.amount)) + '</li>').join('') +
-          '</ul></div><p id="bulkDeleteError" class="formerror" role="alert"></p><div class="modal-footer"><button class="button outline" id="cancelSelectedDeletion">Cancel</button><button class="button danger" id="confirmSelectedDeletion">Delete selected transactions</button></div></section></div>';
-        const close = () => { if (!state.saveBusy) $("#modalContainer").innerHTML = ""; };
+          '</ul></div><p id="bulkDeleteError" class="formerror" role="alert"></p><div class="modal-footer"><button class="button outline" id="cancelSelectedDeletion" autofocus>Cancel</button><button class="button danger" id="confirmSelectedDeletion">Delete selected transactions</button></div></dialog>');
+        const close = () => { if (!state.saveBusy) closeModal(); };
         $(".close").onclick = close;
         $("#cancelSelectedDeletion").onclick = close;
         $("#cancelSelectedDeletion").focus();
         $("#confirmSelectedDeletion").onclick = async () => {
           if (state.saveBusy) return;
-          state.saveBusy = true;
+          setSaveBusy(true);
           $("#confirmSelectedDeletion").disabled = true;
           $("#bulkDeleteError").textContent = "";
           try {
             const result = await rpc("deleteTransactions", {entries, requestId, confirmed:true});
             selectedTransactions.clear();
-            $("#modalContainer").innerHTML = "";
+            closeModal();
             toast(result.count + " transactions deleted.");
             await refresh();
           } catch (error) {
             $("#bulkDeleteError").textContent = error.message + " If the result is uncertain, refresh and check the sheet before starting another deletion.";
             $("#confirmSelectedDeletion").disabled = false;
             $("#confirmSelectedDeletion").textContent = "Retry same deletion";
-          } finally { state.saveBusy = false; updateTransactionSelection(); }
+          } finally { setSaveBusy(false); updateTransactionSelection(); }
         };
       }
       // Confirm one specific entry before removing it. Keep the same request ID on retry,
@@ -6100,8 +6402,8 @@
       function openDelete(transaction) {
         if (state.saveBusy || !loaded()) return;
         const requestId = id();
-        $("#modalContainer").innerHTML =
-          '<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="deleteTitle"><div class="modal-head"><h2 id="deleteTitle">Delete this transaction?</h2><button class="close" aria-label="Close dialog">×</button></div><p><strong>' +
+        showModalContent(
+          '<dialog class="modal" aria-labelledby="deleteTitle"><div class="modal-head"><h2 id="deleteTitle">Delete this transaction?</h2><button class="close" aria-label="Close dialog">×</button></div><p><strong>' +
           esc(transaction.description || "Missing description") +
           "</strong></p><p>" +
           esc(dateLabel(transaction.date)) +
@@ -6111,16 +6413,16 @@
           esc(transaction.type) +
           " · row " +
           transaction.row +
-          '</p><div class="notice warning">This permanently removes the selected transaction from your journal and totals. Other entries are kept.</div><div class="formerror" id="deleteError"></div><div class="modal-footer"><button class="button outline" id="cancelDelete">Cancel</button><button class="button danger" id="confirmDelete">Delete transaction</button></div></section></div>';
+          '</p><div class="notice warning">This permanently removes the selected transaction from your journal and totals. Other entries are kept.</div><div class="formerror" id="deleteError" role="alert"></div><div class="modal-footer"><button class="button outline" id="cancelDelete" autofocus>Cancel</button><button class="button danger" id="confirmDelete">Delete transaction</button></div></dialog>');
         const close = () => {
-          if (!state.saveBusy) $("#modalContainer").innerHTML = "";
+          if (!state.saveBusy) closeModal();
         };
         $(".close").onclick = close;
         $("#cancelDelete").onclick = close;
         $("#cancelDelete").focus();
         $("#confirmDelete").onclick = async () => {
           if (state.saveBusy) return;
-          state.saveBusy = true;
+          setSaveBusy(true);
           $("#confirmDelete").disabled = true;
           $("#deleteError").textContent = "";
           try {
@@ -6131,7 +6433,7 @@
               requestId,
               confirmed: true,
             });
-            $("#modalContainer").innerHTML = "";
+            closeModal();
             toast("Transaction deleted. Other entries are unchanged.");
             await refresh();
           } catch (error) {
@@ -6141,7 +6443,7 @@
             $("#confirmDelete").disabled = false;
             $("#confirmDelete").textContent = "Retry same deletion";
           } finally {
-            state.saveBusy = false;
+            setSaveBusy(false);
           }
         };
       }
@@ -6186,8 +6488,8 @@
         if (action === "delete" && !count) return;
         const requestId = id(),
           deleting = action === "delete";
-        $("#modalContainer").innerHTML =
-          '<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-labelledby="bulkTitle"><div class="modal-head"><h2 id="bulkTitle">' +
+        showModalContent(
+          '<dialog class="modal" aria-labelledby="bulkTitle"><div class="modal-head"><h2 id="bulkTitle">' +
           (deleting ? "Delete all duplicates?" : "Accept all duplicate groups?") +
           '</h2><button class="close" aria-label="Close dialog">×</button></div><div class="notice warning">' +
           (deleting
@@ -6197,20 +6499,20 @@
               groups.size +
               " matching duplicate group(s). Other entries are kept."
             : "Accept all pending duplicate groups, keeping every transaction and amount unchanged. Duplicate warnings will clear. Missing or invalid details still need correction.") +
-          '</div><div class="formerror" id="bulkError"></div><div class="modal-footer"><button class="button outline" id="cancelBulk">Cancel</button><button class="button ' +
+          '</div><div class="formerror" id="bulkError" role="alert"></div><div class="modal-footer"><button class="button outline" id="cancelBulk" autofocus>Cancel</button><button class="button ' +
           (deleting ? "danger" : "") +
           '" id="confirmBulk">' +
           (deleting ? "Delete " + count + " duplicate(s)" : "Okay all duplicate groups") +
-          "</button></div></section></div>";
+          "</button></div></dialog>");
         const close = () => {
-          if (!state.saveBusy) $("#modalContainer").innerHTML = "";
+          if (!state.saveBusy) closeModal();
         };
         $(".close").onclick = close;
         $("#cancelBulk").onclick = close;
         $("#cancelBulk").focus();
         $("#confirmBulk").onclick = async () => {
           if (state.saveBusy) return;
-          state.saveBusy = true;
+          setSaveBusy(true);
           $("#confirmBulk").disabled = true;
           $("#bulkError").textContent = "";
           try {
@@ -6220,7 +6522,7 @@
               requestId,
               confirmed: true,
             });
-            $("#modalContainer").innerHTML = "";
+            closeModal();
             toast(
               deleting
                 ? result.count +
@@ -6235,7 +6537,7 @@
             $("#confirmBulk").disabled = false;
             $("#confirmBulk").textContent = "Retry same action";
           } finally {
-            state.saveBusy = false;
+            setSaveBusy(false);
           }
         };
       }
@@ -6284,9 +6586,14 @@
         panel.inert = mobile && !mobileMenuOpen;
         panel.setAttribute("aria-hidden", String(panel.inert));
         if (mobile) {
+          panel.setAttribute("popover", "manual");
+          if (mobileMenuOpen) panel.showPopover?.();
+          else panel.hidePopover?.();
           panel.setAttribute("role", "dialog");
           panel.setAttribute("aria-modal", String(mobileMenuOpen));
         } else {
+          if (panel.hasAttribute?.("popover")) panel.hidePopover?.();
+          panel.removeAttribute?.("popover");
           panel.removeAttribute?.("role");
           panel.removeAttribute?.("aria-modal");
         }
@@ -6338,7 +6645,7 @@
         )
           return false;
         const controls =
-          'input, select, textarea, button, a, label, form, [contenteditable]:not([contenteditable="false"]), [role="button"], [role="dialog"], .tablewrap, .navigation-panel, .modal-backdrop';
+          'input, select, textarea, button, a, label, form, [contenteditable]:not([contenteditable="false"]), [role="button"], dialog, [role="dialog"], .tablewrap, .navigation-panel';
         if (
           target?.closest?.(controls) ||
           document.activeElement?.closest?.(
@@ -6458,11 +6765,12 @@
       $("#newButton").onclick = () => openEntry();
       // Show local deployment guidance in a dismissible dialog; opening this help does not connect the sheet.
       $("#setupHelp").onclick = () => {
-        $("#modalContainer").innerHTML =
-          '<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-label="Setup instructions"><div class="modal-head"><h2>Connect your sheet.</h2><button class="close" aria-label="Close">×</button></div><p style="line-height:1.9;color:var(--muted)">Open your tracker → Extensions → Apps Script.<br>Add the included <strong>Config.gs</strong> and <strong>Code.gs</strong> and an HTML file named <strong>Index</strong>.<br>Set the manifest using <strong>appsscript.json</strong>.<br>Deploy → New deployment → Web app.<br>Execute as <strong>Me</strong>, access <strong>Only myself</strong>.<br>Authorize it and open the deployment URL.</p><div class="notice">The deployed app reads and writes your existing sheet. This preview does not have access to it.</div></section></div>';
-        $(".close").onclick = () => ($("#modalContainer").innerHTML = "");
+        showModalContent(
+          '<dialog class="modal" aria-label="Setup instructions"><div class="modal-head"><h2>Connect your sheet.</h2><button class="close" aria-label="Close">×</button></div><p style="line-height:1.9;color:var(--muted)">Open your tracker → Extensions → Apps Script.<br>Add the included <strong>Config.gs</strong> and <strong>Code.gs</strong> and an HTML file named <strong>Index</strong>.<br>Set the manifest using <strong>appsscript.json</strong>.<br>Deploy → New deployment → Web app.<br>Execute as <strong>Me</strong>, access <strong>Only myself</strong>.<br>Authorize it and open the deployment URL.</p><div class="notice">The deployed app reads and writes your existing sheet. This preview does not have access to it.</div></dialog>');
+        $(".close").onclick = () => (closeModal());
       };
-      // Allow Escape to dismiss a dialog unless a save is in progress.
+      // A manual navigation popover needs its own keyboard handling; native
+      // modal dialogs use their platform cancel/close events instead.
       document.addEventListener("keydown", (e) => {
         if (mobileMenuOpen && e.key === "Tab") {
           const controls = Array.from(
@@ -6484,8 +6792,6 @@
           setMobileMenu(false);
           return;
         }
-        if (e.key === "Escape" && !state.saveBusy)
-          $("#modalContainer").innerHTML = "";
       });
       // Render the initial empty interface immediately, then attempt the first live sheet read.
       render();

@@ -2,6 +2,34 @@
 
 For ordinary installation and daily use, follow [SETUP.md](SETUP.md). This reference is for people changing the code or adapting the workbook layout.
 
+## Modern web guidance and browser checks
+
+UI changes follow [Google's Modern Web Guidance](https://github.com/GoogleChrome/modern-web-guidance-src), using its [published skill](https://github.com/GoogleChrome/modern-web-guidance/tree/main/skills/modern-web-guidance). The skill is a development aid, not a dependency downloaded by Kashlo users. Repository instructions require consulting relevant guides for future browser UI work.
+
+In Codex, ask: **“Use Modern Web Guidance to improve this screen, keeping Kashlo's existing behaviour and Apps Script compatibility.”** When the skill is installed locally, it is available starting with the next turn. On another computer, install it using the repository's skill installer, or run `npx modern-web-guidance@latest install` and select your coding agent. The guidance CLI requires Node.js 22 or newer; the app itself still runs in the browser and Apps Script.
+
+To look up a pattern yourself:
+
+```sh
+npx -y modern-web-guidance@latest search "modal dialog focus"
+npx -y modern-web-guidance@latest retrieve "dialog"
+```
+
+For local verification, use Node.js 20 or newer and run:
+
+```sh
+npm ci
+npx playwright install chromium webkit
+npm test
+npm run test:browser
+```
+
+The browser suite runs Chromium on desktop and an Android-sized viewport, plus WebKit with an iPhone viewport. It tests native dialog focus and dismissal, save guards, positive-amount validation, calendar confirmation, filters and pagination, deletion confirmation, navigation resizing, reduced motion, and small viewports. It also exercises Manage and bulk actions and runs the UI inside a sandboxed test iframe. RPCs use fictional records; the suite does not access Google or a real workbook. Screenshots, traces, and reports stay ignored by Git.
+
+Dialogs use `showModal()` and the native backdrop; calendar redraws retain the same dialog element so native focus return survives. Saves use `closedby="none"` plus a `cancel` guard for browsers without `closedby`. Dialog scroll containment is progressive enhancement: Safari may still scroll the background over a non-scrolling backdrop. Root overflow is not changed for dialogs. The mobile navigation uses a manual popover with the existing focus and inert handling because it becomes a normal sidebar on desktop. Unsupported Popover APIs retain the fixed-position menu behaviour. Viewport sizing responds to the visual viewport as mobile browser chrome or the keyboard changes.
+
+Before release, also check a real iPhone and Android phone inside the deployed Apps Script app: open the keyboard, scroll to Save/Cancel, use the calendar checkmark, exercise pull-to-refresh, and verify pinch zoom. Check VoiceOver/Safari and TalkBack/Chrome announcements and keyboard navigation. Browser emulation cannot establish physical keyboard, assistive-technology, or Google iframe behaviour.
+
 ## Shared schema in Config.gs
 
 Keep journal keys `expense`, `income`, and `investment`. Customize worksheet names and coordinates only when adapting the workbook layout:
@@ -129,6 +157,14 @@ Google Sheets does not provide an atomic operation across journals. If destinati
 ## Bulk transaction corrections
 
 `updateTransactions` accepts up to 500 fingerprinted entries and an explicit field patch. It validates workspace revision, every selected row, journal restrictions, and all changed values before recording the started write receipt. Unchecked fields, mappings, and review notes are preserved. Description patches require one journal and enforce cross-journal naming checks. When Category is unchecked, a formula-derived category is frozen to its recorded value before the description changes; explicitly selected categories replace it. Other formulas remain intact. Compatible consecutive cells are written together; changed transactions return to Pending review. Text uses rich-text writes to prevent formula execution. Completed requests replay their saved result. If a write fails partway through, earlier writes may remain and the started receipt blocks replay; users must refresh and inspect the results before starting a new edit.
+
+## Background transaction saves
+
+New-entry submission captures an immutable payload and workspace revision, closes only that form, and enqueues the save without setting the modal-wide busy flag. Browser mutations are serialized; reads remain independent. Each submission has its own request ID and status. Successful saves refresh the snapshot incrementally, consolidating reads when more entries are waiting. Background completion never closes or clears a newer entry form. Confirmed records alone appear in journal totals; the queue is not optimistic transaction data.
+
+On failure, `getSubmissionStatus` authorizes the owner and checks the workspace and receipt under the script lock without writing. A completed receipt confirms a lost response. An absent receipt permits field correction using the same request ID. A started receipt remains uncertain and cannot replay. If status cannot be checked, the UI permits only an explicit retry of the identical payload, keeping its request ID; it never retries automatically. Workspace settings cannot be changed through the UI until unconfirmed queue entries are resolved or dismissed. Existing server authorization, validation, locks, and receipts still enforce every write.
+
+Queue details live in memory only, not local/session storage. A `beforeunload` warning covers pending or failed entries where supported, but mobile termination and browser crashes cannot be intercepted reliably. The visible panel asks users to keep the tab open. Saved notices expire; unconfirmed entries stay for review until corrected, confirmed, or explicitly dismissed. Dismissing a notice has no effect on the workbook.
 
 
 ## Unique saved descriptions

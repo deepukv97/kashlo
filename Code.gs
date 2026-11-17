@@ -1436,6 +1436,28 @@ function addTransaction(input) {
   );
 }
 
+// Read only: distinguish rejected validation from an uncertain or completed
+// write before offering corrections to a background submission. Never replay it.
+function getSubmissionStatus(input) {
+  authorize_();
+  if (!input || typeof input !== "object") throw new Error("Missing submission.");
+  const key = requestId_(input.requestId), lock = LockService.getScriptLock();
+  lock.waitLock(workspaceConfig_().limits.writeLockTimeoutMs);
+  try {
+    const workspace = workspaceRecord_();
+    if (!workspace || workspace.revision !== input.workspaceRevision)
+      throw new Error("Workspace settings changed. Refresh before checking this save.");
+    const stored = PropertiesService.getScriptProperties().getProperty(key);
+    if (!stored) return { status: "notStarted" };
+    const receipt = JSON.parse(stored);
+    return receipt.status === "success"
+      ? { status: "saved", result: receipt.result }
+      : { status: "uncertain" };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 // Save a decision and optional note; Okay accepts the whole matching duplicate group.
 // Compare the current source/payment fingerprint with the version the client loaded before writing T:U.
 // A Needs correction decision records a flag; the underlying transaction is edited in the sheet.
