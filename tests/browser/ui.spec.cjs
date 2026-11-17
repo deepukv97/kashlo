@@ -33,6 +33,8 @@ async function openApp(page) {
     window.__snapshot = snapshot;
     window.__calls = [];
     window.__saveMode = 'success';
+    window.__receipts = {};
+    window.__receiptState = 'notStarted';
     const runner = (success, failure) => new Proxy({}, {
       get(_, method) {
         if (method === 'withSuccessHandler') return handler => runner(handler, failure);
@@ -40,12 +42,24 @@ async function openApp(page) {
         return args => {
           window.__calls.push({ method, args });
           if (method === 'getData') return queueMicrotask(() => success(structuredClone(window.__snapshot)));
+          if (method === 'getSubmissionStatus') return queueMicrotask(() => window.__receiptState === 'offline'
+            ? failure({ message: 'Sample connection unavailable' })
+            : success(window.__receipts[args.requestId] || { status: window.__receiptState }));
+          const confirmed = result => {
+            if (method === 'addTransaction') {
+              window.__snapshot.transactions.push({ ...args, row: window.__snapshot.transactions.length + 2,
+                amount: Number(args.amount), fingerprint: 'sample-new-' + args.requestId,
+                issues: [], decision: 'Pending', reviewNote: '', duplicateGroup: '' });
+              window.__receipts[args.requestId] = { status: 'saved', result: { ok: true } };
+            }
+            success(result);
+          };
           if (window.__saveMode === 'pending') {
-            window.__pendingSave = { success, failure };
+            window.__pendingSave = { success: confirmed, failure };
             return;
           }
           queueMicrotask(() => window.__saveMode === 'error'
-            ? failure({ message: 'Sample server validation failed.' }) : success({ count: 1 }));
+            ? failure({ message: 'Sample server validation failed.' }) : confirmed({ count: 1 }));
         };
       },
     });
@@ -58,6 +72,17 @@ async function openApp(page) {
 async function navigate(page, view) {
   if (await page.locator('#mobileMenuButton').isVisible()) await page.locator('#mobileMenuButton').click();
   await page.locator(`[data-view="${view}"]`).click();
+}
+async function fillEntry(page, description, amount) {
+  await page.locator('#newButton').click();
+  await page.locator('#entryDate').fill(date(15));
+  await page.locator('#entryDescription').fill(description);
+  await page.locator('#entryCategory').selectOption('Food');
+  await page.locator('#entryAmount').fill(String(amount));
+  await page.locator('#entryTrip').selectOption('Sample project');
+  await page.locator('#entryPaymentMethod').selectOption('Card');
+  await page.locator('#entryPaymentDetail').selectOption('Sample card');
+  await page.locator('#entryNotes').fill('Sample notes for ' + description);
 }
 
 test.beforeEach(async ({ page }) => {
@@ -104,16 +129,17 @@ test('positive amounts are required and accessible errors clear after correction
   await expect(page.locator('#validation-entryAmount')).toBeHidden();
   await page.evaluate(() => { __saveMode = 'error'; });
   await page.locator('#saveEntry').click();
+  await page.getByRole('button', { name: 'Review save', exact: true }).click();
   await expect(page.locator('#formError')).toHaveText(/Sample server validation failed/);
   await expect(page.locator('#formError')).toHaveAttribute('role', 'alert');
   await expect(page.locator('dialog:modal')).toHaveCount(1);
 });
 
-test('saving blocks dismissal until the pending request finishes', async ({ page }) => {
-  await page.locator('#newButton').click();
-  await page.locator('#entryDate').fill(date(15));
-  await page.locator('#entryDescription').fill('Sample meal');
-  await page.locator('#entryCategory').selectOption('Food');
+test('editing still blocks dismissal until the pending request finishes', async ({ page }) => {
+  await navigate(page, 'transactions');
+  const details = page.locator('[data-details-row="29"]');
+  if (await details.isVisible()) await details.click();
+  await page.locator('[data-edit-row="29"]').click();
   await page.locator('#entryAmount').fill('10');
   await page.evaluate(() => { __saveMode = 'pending'; });
   await page.locator('#saveEntry').click();
@@ -313,4 +339,130 @@ test('entrance animations restart without stacking and respect reduced motion', 
   expect(await page.evaluate(() => {
     animateView(); return document.querySelector('#content').getAnimations().length;
   })).toBe(0);
+});
+
+test('multiple new transactions save in order while the next draft stays editable', async ({ page }) => {
+  await page.evaluate(() => { __saveMode = 'pending'; });
+  await fillEntry(page, 'First sample purchase', 10);
+  await page.locator('#saveEntry').click();
+  await expect(page.locator('dialog:modal')).toHaveCount(0);
+  await expect(page.locator('#saveQueueContainer')).toContainText('Saving');
+  await fillEntry(page, 'Second sample purchase', 20);
+  await page.evaluate(() => __pendingSave.success({ ok: true }));
+  await expect.poll(() => page.evaluate(() => __calls.filter(c => c.method === 'getData').length)).toBe(2);
+  await expect(page.locator('#entryDescription')).toHaveValue('Second sample purchase');
+  await expect(page.locator('#entryAmount')).toHaveValue('20');
+  await expect(page.locator('#entryTrip')).toHaveValue('Sample project');
+  await expect(page.locator('#entryPaymentDetail')).toHaveValue('Sample card');
+  await expect(page.locator('#entryNotes')).toHaveValue('Sample notes for Second sample purchase');
+  await page.locator('#saveEntry').click();
+  await fillEntry(page, 'Third sample purchase', 30);
+  await page.locator('#saveEntry').click();
+  expect(await page.evaluate(() => __calls.filter(c => c.method === 'addTransaction').length)).toBe(2);
+  await expect(page.locator('#saveQueueContainer')).toContainText('Waiting to save');
+  await page.evaluate(() => __pendingSave.success({ ok: true }));
+  await expect.poll(() => page.evaluate(() => __calls.filter(c => c.method === 'addTransaction').length)).toBe(3);
+  await page.evaluate(() => __pendingSave.success({ ok: true }));
+  await expect(page.locator('#saveQueueContainer')).toContainText('0 pending');
+  const calls = await page.evaluate(() => __calls.filter(c => c.method === 'addTransaction').map(c => c.args));
+  expect(calls.map(c => c.amount)).toEqual(['10', '20', '30']);
+  expect(new Set(calls.map(c => c.requestId)).size).toBe(3);
+  expect(calls.every(c => c.workspaceRevision === 'browser-test-workspace')).toBe(true);
+});
+
+test('rejected background entries restore every field and retry with the same submission ID', async ({ page }) => {
+  await page.evaluate(() => { __saveMode = 'error'; });
+  await fillEntry(page, 'Correctable sample', 10);
+  await page.locator('#saveEntry').click();
+  await page.getByRole('button', { name: 'Review save', exact: true }).click();
+  await expect(page.locator('#entryDescription')).toHaveValue('Correctable sample');
+  await expect(page.locator('#entryDate')).toHaveValue(date(15));
+  await expect(page.locator('#entryAmount')).toHaveValue('10');
+  await expect(page.locator('#entryCategory')).toHaveValue('Food');
+  await expect(page.locator('#entryTrip')).toHaveValue('Sample project');
+  await expect(page.locator('#entryPaymentMethod')).toHaveValue('Card');
+  await expect(page.locator('#entryPaymentDetail')).toHaveValue('Sample card');
+  await expect(page.locator('#entryNotes')).toHaveValue('Sample notes for Correctable sample');
+  await page.locator('#entryAmount').fill('11');
+  await page.evaluate(() => { __saveMode = 'success'; });
+  await page.locator('#saveEntry').click();
+  await expect(page.locator('#saveQueueContainer')).toContainText('0 pending · 0 need attention');
+  const calls = await page.evaluate(() => __calls.filter(c => c.method === 'addTransaction').map(c => c.args));
+  expect(calls).toHaveLength(2);
+  expect(calls[0].requestId).toBe(calls[1].requestId);
+  expect(calls[1].amount).toBe('11');
+});
+
+test('uncertain writes are retained without automatic replay and do not block unrelated entries', async ({ page }) => {
+  await page.evaluate(() => { __saveMode = 'pending'; __receiptState = 'uncertain'; });
+  await fillEntry(page, 'Uncertain sample', 10);
+  await page.locator('#saveEntry').click();
+  await page.evaluate(() => __pendingSave.failure({ message: 'Sample write may have started' }));
+  await page.getByRole('button', { name: 'Review save', exact: true }).click();
+  await expect(page.locator('dialog')).toContainText('The result is uncertain');
+  await expect(page.locator('#entryForm')).toHaveCount(0);
+  await expect(page.locator('#retryUnconfirmedSave')).toHaveCount(0);
+  await page.locator('#closeSaveReview').click();
+  expect(await page.evaluate(() => {
+    const event = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(event); return event.defaultPrevented;
+  })).toBe(true);
+  await page.evaluate(() => { __saveMode = 'success'; });
+  await fillEntry(page, 'Independent sample', 20);
+  await page.locator('#saveEntry').click();
+  await expect(page.locator('#saveQueueContainer')).toContainText('1 need attention');
+  await expect.poll(() => page.evaluate(() => __calls.filter(c => c.method === 'addTransaction').length)).toBe(2);
+  expect(await page.evaluate(() => __calls.filter(c => c.method === 'addTransaction' && c.args.description === 'Uncertain sample').length)).toBe(1);
+});
+
+test('a lost response is resolved from its receipt without appending again', async ({ page }) => {
+  await page.evaluate(() => { __saveMode = 'pending'; });
+  await fillEntry(page, 'Confirmed sample', 10);
+  await page.locator('#saveEntry').click();
+  await page.evaluate(() => {
+    const submitted = __calls.find(c => c.method === 'addTransaction').args;
+    __receipts[submitted.requestId] = { status: 'saved', result: { ok: true, row: 32 } };
+    __pendingSave.failure({ message: 'Sample lost response' });
+  });
+  await expect(page.locator('#saveQueueContainer')).toContainText('Saved to Google Sheet');
+  expect(await page.evaluate(() => __calls.filter(c => c.method === 'addTransaction').length)).toBe(1);
+  await expect(page.getByRole('button', { name: 'Review save', exact: true })).toHaveCount(0);
+});
+
+test('when receipt lookup is unavailable only an identical explicit retry is offered', async ({ page }) => {
+  await page.evaluate(() => { __saveMode = 'pending'; __receiptState = 'offline'; });
+  await fillEntry(page, 'Offline sample', 10);
+  await page.locator('#saveEntry').click();
+  await page.evaluate(() => __pendingSave.failure({ message: 'Sample connection lost' }));
+  await page.getByRole('button', { name: 'Review save', exact: true }).click();
+  await expect(page.locator('#entryForm')).toHaveCount(0);
+  await expect(page.locator('#retryUnconfirmedSave')).toBeVisible();
+  await page.locator('#retryUnconfirmedSave').click();
+  await expect.poll(() => page.evaluate(() => __calls.filter(c => c.method === 'addTransaction').length)).toBe(2);
+  const calls = await page.evaluate(() => __calls.filter(c => c.method === 'addTransaction').map(c => c.args));
+  expect(calls[0]).toEqual(calls[1]);
+  await page.evaluate(() => __pendingSave.success({ ok: true }));
+  await expect(page.locator('#saveQueueContainer')).toContainText('0 pending · 0 need attention');
+});
+
+test('double submission is ignored and workspace settings wait for pending entries', async ({ page }) => {
+  await page.evaluate(() => { __saveMode = 'pending'; });
+  await fillEntry(page, 'Single sample', 10);
+  await page.locator('#entryForm').evaluate(form => {
+    form.dispatchEvent(new Event('submit', { cancelable: true }));
+    form.dispatchEvent(new Event('submit', { cancelable: true }));
+  });
+  await expect(page.locator('dialog:modal')).toHaveCount(0);
+  expect(await page.evaluate(() => __calls.filter(c => c.method === 'addTransaction').length)).toBe(1);
+  await page.evaluate(() => {
+    state.profile = { setupRequired: false };
+    const form = document.createElement('form'); form.id = 'profileForm';
+    const error = document.createElement('p'); error.id = 'profileError';
+    document.querySelector('#content').append(form, error);
+    bindProfile();
+    form.dispatchEvent(new Event('submit', { cancelable: true }));
+  });
+  await expect(page.locator('#profileError')).toContainText('Finish or review pending transaction saves');
+  expect(await page.evaluate(() => __calls.some(c => c.method === 'saveWorkspaceSettings'))).toBe(false);
+  await page.evaluate(() => __pendingSave.success({ ok: true }));
 });

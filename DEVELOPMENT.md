@@ -158,6 +158,14 @@ Google Sheets does not provide an atomic operation across journals. If destinati
 
 `updateTransactions` accepts up to 500 fingerprinted entries and an explicit field patch. It validates workspace revision, every selected row, journal restrictions, and all changed values before recording the started write receipt. Unchecked fields, mappings, and review notes are preserved. Description patches require one journal and enforce cross-journal naming checks. When Category is unchecked, a formula-derived category is frozen to its recorded value before the description changes; explicitly selected categories replace it. Other formulas remain intact. Compatible consecutive cells are written together; changed transactions return to Pending review. Text uses rich-text writes to prevent formula execution. Completed requests replay their saved result. If a write fails partway through, earlier writes may remain and the started receipt blocks replay; users must refresh and inspect the results before starting a new edit.
 
+## Background transaction saves
+
+New-entry submission captures an immutable payload and workspace revision, closes only that form, and enqueues the save without setting the modal-wide busy flag. Browser mutations are serialized; reads remain independent. Each submission has its own request ID and status. Successful saves refresh the snapshot incrementally, consolidating reads when more entries are waiting. Background completion never closes or clears a newer entry form. Confirmed records alone appear in journal totals; the queue is not optimistic transaction data.
+
+On failure, `getSubmissionStatus` authorizes the owner and checks the workspace and receipt under the script lock without writing. A completed receipt confirms a lost response. An absent receipt permits field correction using the same request ID. A started receipt remains uncertain and cannot replay. If status cannot be checked, the UI permits only an explicit retry of the identical payload, keeping its request ID; it never retries automatically. Workspace settings cannot be changed through the UI until unconfirmed queue entries are resolved or dismissed. Existing server authorization, validation, locks, and receipts still enforce every write.
+
+Queue details live in memory only, not local/session storage. A `beforeunload` warning covers pending or failed entries where supported, but mobile termination and browser crashes cannot be intercepted reliably. The visible panel asks users to keep the tab open. Saved notices expire; unconfirmed entries stay for review until corrected, confirmed, or explicitly dismissed. Dismissing a notice has no effect on the workbook.
+
 
 ## Unique saved descriptions
 

@@ -40,9 +40,6 @@
         font-size: 12px;
         margin-top: 6px;
       }
-      .field :is(input, select, textarea):user-invalid {
-        border-color: var(--red);
-      }
       .dialog-busy {
         visibility: hidden;
         font-size: 12px;
@@ -1380,6 +1377,21 @@
         pointer-events: none;
         z-index: 40;
       }
+      .save-queue {
+        width: min(380px, calc(100vw - 32px));
+        max-height: min(300px, 40dvh);
+        overflow: auto;
+        pointer-events: auto;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 14px;
+        background: var(--paper);
+        box-shadow: 0 8px 28px #0005;
+      }
+      .save-queue p { margin: 6px 0; font-size: 11px; color: var(--muted); }
+      .save-queue-row { padding-top: 10px; margin-top: 10px; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+      .save-queue-row strong { display: block; font-size: 12px; }
+      .save-queue-row .button { margin-top: 6px; }
       .activity,
       .toast {
         background: #d4f3ac;
@@ -1586,6 +1598,9 @@
       .field select:focus,
       .field textarea:focus {
         border-color: var(--green);
+      }
+      .field :is(input, select, textarea):user-invalid {
+        border-color: var(--red);
       }
       .field textarea {
         min-height: 75px;
@@ -2511,6 +2526,7 @@
       aria-atomic="true"
     ></div>
     <div class="notifications">
+      <section id="saveQueueContainer" class="save-queue" aria-label="Transaction saves" hidden></section>
       <div
         id="activityContainer"
         role="status"
@@ -2591,7 +2607,7 @@
       // invokers before opening, letting the native dialog restore them on close.
       document.addEventListener("click", event => {
         const trigger = event.target.closest?.(
-          '#newButton, #setupHelp, #addGroupExpense, #editSelectedTransactions, #deleteSelectedTransactions, #okayAll, #deleteAllDuplicates, [data-edit-row], [data-delete-row], [data-correct], [data-delete], [data-manage-choice], [data-transaction-calendar], [data-transaction-multi]');
+          '#newButton, #setupHelp, #addGroupExpense, #editSelectedTransactions, #deleteSelectedTransactions, #okayAll, #deleteAllDuplicates, [data-save-review], [data-edit-row], [data-delete-row], [data-correct], [data-delete], [data-manage-choice], [data-transaction-calendar], [data-transaction-multi]');
         if (trigger && !trigger.disabled) trigger.focus({ preventScroll: true });
       }, true);
       // Keep calendar redraws in the same native dialog so the browser retains
@@ -2821,6 +2837,104 @@
       let pendingActivities = 0,
         activityVersion = 0,
         activityFailed = false;
+      // Session-only drafts: never persist financial details in browser storage.
+      const transactionSaves = [];
+      let processingTransactionSaves = false;
+      const unsettledSaves = () => transactionSaves.filter(job => job.status !== "saved");
+      function renderSaveQueue() {
+        const panel = $("#saveQueueContainer");
+        panel.hidden = transactionSaves.length === 0;
+        const pending = transactionSaves.filter(job => ["queued", "saving"].includes(job.status)).length;
+        const failed = transactionSaves.filter(job => job.status === "failed").length;
+        panel.innerHTML = '<strong>Transaction saves</strong><p>' +
+          pending + ' pending · ' + failed + ' need attention</p>' +
+          (unsettledSaves().length ? '<p>Keep this tab open until all saves are confirmed.</p>' : '') +
+          transactionSaves.map(job => '<div class="save-queue-row"><strong>' + esc(job.payload.description) +
+            '</strong><p>' + esc(job.summary) + '</p><p>' + esc({ queued: 'Waiting to save', saving: 'Saving…', saved: 'Saved to Google Sheet',
+              failed: 'Save not confirmed — review this entry' }[job.status]) + '</p>' +
+            (job.status === 'failed' ? '<button type="button" class="button outline" data-save-review="' +
+              esc(job.payload.requestId) + '">Review save</button>' : '') + '</div>').join('');
+        document.querySelectorAll('[data-save-review]').forEach(button => {
+          button.onclick = () => reviewTransactionSave(transactionSaves.find(job => job.payload.requestId === button.dataset.saveReview));
+        });
+        if (transactionSaves.length) announce(pending + ' transaction saves pending. ' + failed + ' need attention. ' +
+          transactionSaves.filter(job => job.status === 'saved').length + ' saved.');
+      }
+      function reviewTransactionSave(job) {
+        if (!job || job.status !== "failed" || state.saveBusy) return;
+        if (job.retryState === "notStarted") { openEntry(null, job); return; }
+        showModalContent('<dialog class="modal" aria-labelledby="saveReviewTitle"><div class="modal-head"><h2 id="saveReviewTitle">Check this save</h2><button type="button" class="close" aria-label="Close dialog">×</button></div><p>' +
+          esc(job.payload.description) + ' · ' + esc(job.payload.date) + ' · ' + esc(job.payload.amount) +
+          '</p><div class="notice warning">' + esc(job.error) +
+          ' The result is uncertain. Check your sheet before entering this transaction again.</div><details><summary>Submitted details</summary><dl>' +
+          Object.entries(job.payload).filter(([key]) => !['requestId', 'workspaceRevision'].includes(key))
+            .map(([key, value]) => '<dt>' + esc({ type: 'Journal', description: 'Description', amount: 'Amount',
+              date: 'Date', category: 'Category', trip: 'Expense group', notes: 'Notes',
+              paymentMethod: 'Payment method', paymentDetail: 'Payment account / app' }[key]) + '</dt><dd>' + esc(value || '—') + '</dd>').join('') +
+          '</dl></details><p>Dismissing this notice does not cancel or delete anything in your sheet.</p><div class="modal-footer"><button type="button" class="button outline" id="closeSaveReview" autofocus>Close</button><button type="button" class="button outline" id="dismissSaveNotice">Dismiss notice</button>' +
+          (job.retryState === 'unknown' ? '<button type="button" class="button" id="retryUnconfirmedSave">Retry same save</button>' : '') + '</div></dialog>');
+        $(".close").onclick = $("#closeSaveReview").onclick = closeModal;
+        $("#dismissSaveNotice").onclick = () => {
+          transactionSaves.splice(transactionSaves.indexOf(job), 1);
+          closeModal(); renderSaveQueue();
+        };
+        if (job.retryState === 'unknown') $("#retryUnconfirmedSave").onclick = () => {
+          closeModal(); enqueueTransaction(job.payload, job);
+        };
+      }
+      function enqueueTransaction(payload, retryJob = null) {
+        const job = retryJob || { payload: null };
+        if (retryJob && retryJob.status !== "failed") return;
+        job.payload = Object.freeze({ ...payload,
+          workspaceRevision: retryJob?.payload.workspaceRevision ?? state.data?.workspaceRevision });
+        job.summary = payload.date + ' · ' + money(payload.amount);
+        job.status = "queued"; job.error = ""; job.retryState = "unknown";
+        if (!retryJob) transactionSaves.push(job);
+        renderSaveQueue();
+        void processTransactionSaves();
+      }
+      async function processTransactionSaves() {
+        if (processingTransactionSaves) return;
+        processingTransactionSaves = true;
+        try {
+          let job;
+          while ((job = transactionSaves.find(item => item.status === "queued"))) {
+            job.status = "saving"; renderSaveQueue();
+            try {
+              await rpc("addTransaction", job.payload);
+              job.status = "saved";
+            } catch (error) {
+              job.status = "failed"; job.error = error.message;
+              try {
+                const receipt = await rpc("getSubmissionStatus", {
+                  requestId: job.payload.requestId, workspaceRevision: job.payload.workspaceRevision });
+                if (receipt.status === "saved") job.status = "saved";
+                else job.retryState = receipt.status === "notStarted" ? "notStarted" : "uncertain";
+              } catch (_) { job.retryState = "unknown"; }
+            }
+            renderSaveQueue();
+            if (job.status === "saved") {
+              if (job.payload.type === "investment") celebrateInvestment(job.payload.amount);
+              const completed = job;
+              setTimeout(() => {
+                const index = transactionSaves.indexOf(completed);
+                if (index !== -1 && completed.status === "saved") transactionSaves.splice(index, 1);
+                renderSaveQueue();
+              }, 6000);
+            }
+            // Consolidate refreshes when more submissions are already waiting.
+            // Refresh never closes a newly opened form or changes its field values.
+            if (!transactionSaves.some(item => item.status === "queued")) {
+              await refresh({ incremental: true });
+              renderSaveQueue();
+            }
+          }
+        } finally { processingTransactionSaves = false; }
+      }
+      globalThis.addEventListener?.("beforeunload", event => {
+        if (!unsettledSaves().length) return;
+        event.preventDefault(); event.returnValue = "";
+      });
       function beginActivity() {
         if (!pendingActivities) activityFailed = false;
         pendingActivities++;
@@ -2847,14 +2961,24 @@
       // Wrap Apps Script callback calls in a Promise for async/await.
       // Only the listed server functions are dispatched. A local HTML preview has no
       //  google.script.run bridge, so it rejects live operations with a deployment message.
+      let mutationCompletion = null;
       async function rpc(name, args) {
         if (!window.google?.script?.run)
           throw new Error(
             "Live connection is available after deploying the Apps Script app.",
           );
         if (args && !["saveWorkspaceSettings"].includes(name))
-          args = { ...args, workspaceRevision: state.data?.workspaceRevision };
+          args = { ...args, workspaceRevision: args.workspaceRevision ?? state.data?.workspaceRevision };
         beginActivity();
+        let releaseMutation;
+        if (!["getData", "getWorkspaceSettings", "getSubmissionStatus"].includes(name)) {
+          const previous = mutationCompletion;
+          let finish;
+          const current = new Promise(resolve => { finish = resolve; });
+          mutationCompletion = current;
+          releaseMutation = () => { finish(); if (mutationCompletion === current) mutationCompletion = null; };
+          if (previous) await previous;
+        }
         let success = false;
         try {
           const result = await new Promise((resolve, reject) => {
@@ -2864,6 +2988,7 @@
                 reject(new Error(e.message || String(e))),
               );
             if (name === "getData") runner.getData();
+            else if (name === "getSubmissionStatus") runner.getSubmissionStatus(args);
             else if (name === "getWorkspaceSettings")
               runner.getWorkspaceSettings();
             else if (name === "saveWorkspaceSettings")
@@ -2891,6 +3016,7 @@
           return result;
         } finally {
           finishActivity(success);
+          releaseMutation?.();
         }
       }
       // Display an escaped success/error message for six seconds in the live announcement container.
@@ -4553,6 +4679,10 @@
         form.onsubmit = async (event) => {
           event.preventDefault();
           if (state.saveBusy || state.loading) return;
+          if (unsettledSaves().length) {
+            $("#profileError").textContent = "Finish or review pending transaction saves before changing workspace settings.";
+            return;
+          }
           const firstSetup = state.profile.setupRequired;
           const payload = {
             requestId: id(),
@@ -5733,7 +5863,7 @@
       // Build the add-transaction dialog using current lookup data.
       // New entries start with a blank required date; corrections retain their recorded date.
       // Saving is disabled before data has loaded. The server performs the final input validation.
-      function openEntry(transaction = null) {
+      function openEntry(transaction = null, queuedJob = null) {
         if (state.saveBusy) return;
         const isConnected = loaded(),
           entryContext = captureViewContext();
@@ -5751,7 +5881,8 @@
           paymentTypeFields("entry") +
           '</div><div class="field" id="paymentDetailField" hidden><label for="entryPaymentDetail" id="paymentDetailLabel">Payment account / app</label><select id="entryPaymentDetail"></select></div><div class="field full" id="paymentNameControls" hidden><button type="button" class="textlink" id="newPaymentName">+ Add account / app</button><small>Manage accounts and apps in Manage → Payment methods.</small><div id="inlinePayment" hidden><label for="inlinePaymentType">Payment method</label><select id="inlinePaymentType"></select><label for="inlinePaymentName">Payment account / app</label><input id="inlinePaymentName" maxlength="100" placeholder="Enter an account, card, or app name"><button type="button" class="button light" id="saveInlinePayment">Add and select</button><button type="button" class="textlink" id="cancelInlinePayment">Cancel</button><div class="formerror" id="inlinePaymentError" role="alert"></div></div></div><div class="field full"><label for="entryNotes">Notes (optional)</label><textarea id="entryNotes" placeholder="Anything you would like to remember"></textarea></div></div><div class="formerror" id="formError" role="alert"></div><div class="modal-footer"><button type="button" class="button outline" id="cancelEntry">Cancel</button><button class="button" id="saveEntry" ' +
           (!isConnected ? "disabled" : "") +
-          ">Save to Google Sheet</button></div></form></dialog>");
+          ">Save to Google Sheet</button></div>" +
+          (!transaction ? '<p class="crumb">New transactions save in the background. Keep this tab open until saving finishes.</p>' : '') + '</form></dialog>');
         if (transaction) {
           $("#entryTitle").textContent = "Edit transaction";
           $("#entryType").value = transaction.type;
@@ -5766,6 +5897,7 @@
           $("#entryDate").max = config.year + "-12-31";
           $("#entryDate").value = "";
           $("#entryDescription").maxLength = config.limits.descriptionLength;
+          $("#entryAmount").max = config.limits.maximumAmount;
           $("#entryNotes").maxLength = config.limits.noteLength;
           document.querySelector('label[for="entryAmount"]').textContent =
             "Amount (" + config.currency + ")";
@@ -5987,15 +6119,13 @@
           populateDescriptions();
         };
         // Allocate one request ID per opened entry dialog and reuse it for retries.
-        // Prevent normal form navigation and disable Save while awaiting the server.
-        let requestId = id();
+        // New entries leave the form immediately; edits retain their blocking save.
+        let requestId = queuedJob?.payload.requestId || id();
+        let submitted = false;
         $("#entryForm").onsubmit = async (e) => {
           e.preventDefault();
-          if (state.saveBusy || !loaded()) return;
-          setSaveBusy(true);
-          $("#saveEntry").disabled = true;
-          $("#saveEntry").textContent = "Saving…";
-          $("#formError").textContent = "";
+          if (state.saveBusy || !loaded() || submitted) return;
+          if ($("#entryForm").reportValidity?.() === false) return;
           // Collect form values for the server; the amount remains input text until the server converts it to a number.
           const payload = {
             requestId,
@@ -6017,39 +6147,32 @@
                 ? ""
                 : $("#entryPaymentDetail").value,
           };
+          if (!transaction) {
+            submitted = true;
+            $("#saveEntry").disabled = true;
+            closeModal();
+            enqueueTransaction(payload, queuedJob);
+            return;
+          }
+          setSaveBusy(true);
+          $("#saveEntry").disabled = true;
+          $("#saveEntry").textContent = "Saving…";
+          $("#formError").textContent = "";
           // On success, close the dialog and refresh the live snapshot to include the saved transaction.
           try {
-            if (transaction) {
-              payload.sourceType = transaction.type;
-              payload.row = transaction.row;
-              payload.fingerprint = transaction.fingerprint;
-            }
-            await rpc(
-              transaction ? "updateTransaction" : "addTransaction",
-              payload,
-            );
-            if (
-              isGroupDashboard() &&
-              !transaction &&
-              payload.type === "expense"
-            )
-              state.trip = payload.trip;
+            payload.sourceType = transaction.type;
+            payload.row = transaction.row;
+            payload.fingerprint = transaction.fingerprint;
+            await rpc("updateTransaction", payload);
             closeModal();
             toast(
-              transaction
-                ? (payload.type !== transaction.type
+              payload.type !== transaction.type
                     ? "Transaction moved to " + (payload.type === "investment" ? "Investments" : "Expenses") + ". Updating totals and review checks."
-                    : "Transaction updated. Updating totals and review checks.")
-                : "Saved to your Google Sheet.",
+                    : "Transaction updated. Updating totals and review checks.",
             );
-            if (!transaction && payload.type === "investment")
-              celebrateInvestment(payload.amount);
-            if (transaction) restoreViewContext(entryContext);
-            await refresh(
-              transaction
-                ? { incremental: true, editedTransaction: payload.type === transaction.type ? transaction : null }
-                : {},
-            );
+            restoreViewContext(entryContext);
+            await refresh({ incremental: true,
+              editedTransaction: payload.type === transaction.type ? transaction : null });
           } catch (e) {
             // Keep the dialog and request ID on failure. Read-only validation can be
             // corrected and retried; a request that started writing stays protected.
@@ -6063,6 +6186,23 @@
             setSaveBusy(false);
           }
         };
+        if (queuedJob) {
+          const draft = queuedJob.payload;
+          $("#entryType").value = draft.type;
+          $("#entryType").onchange();
+          $("#entryDate").value = draft.date;
+          $("#entryDescription").value = draft.description;
+          $("#entryAmount").value = draft.amount;
+          $("#entryCategory").value = draft.category;
+          $("#entryTrip").value = draft.trip;
+          $("#entryNotes").value = draft.notes;
+          $("#entryPaymentMethod").value = draft.paymentMethod;
+          populatePayment();
+          $("#entryPaymentDetail").value = draft.paymentDetail;
+          $("#formError").textContent = queuedJob.error;
+          $("#saveEntry").textContent = "Retry corrected entry";
+          populateDescriptions();
+        }
         $("#entryDescription").focus();
       }
       function updateTransactionSelection() {
